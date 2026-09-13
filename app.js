@@ -1020,15 +1020,15 @@ function applyType() {
   }
 
   let _lastTimerSec = -1, _sessionT0 = 0, _sessionT = 0, _sessionO = 0, _sessionC = 0, _sessionDur = 0;
-  function updateTimerDisplay() {
-    if (!_sessionT) return;
-    const now = serverNow();
-    const remaining = _sessionT - now;
-    const elapsed = now - _sessionT0;
-    const total = _sessionT - _sessionT0;
-    const sec = Math.max(0, Math.floor(remaining / 1000));
-    if (sec === _lastTimerSec) { requestAnimationFrame(updateTimerDisplay); return; }
-    _lastTimerSec = sec;
+   function updateTimerDisplay() {
+     const now = serverNow();
+     const remaining = _sessionT - now;
+     const elapsed = now - _sessionT0;
+     const total = _sessionT - _sessionT0;
+     if (!_sessionT || !total) { requestAnimationFrame(updateTimerDisplay); return; }
+     const sec = Math.max(0, Math.floor(remaining / 1000));
+     if (sec === _lastTimerSec) { requestAnimationFrame(updateTimerDisplay); return; }
+     _lastTimerSec = sec;
     const mm = String(Math.floor(sec / 60)).padStart(2, "0");
     const ss = String(sec % 60).padStart(2, "0");
     const liveStatus = _sessionC > _sessionO ? "up" : _sessionC < _sessionO ? "down" : "flat";

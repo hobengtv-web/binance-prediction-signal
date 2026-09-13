@@ -237,9 +237,9 @@ function mergeOlder(sym, ones) {
   const have1 = new Set(s1.candles.map((c) => c.time));
   const fresh1 = ones.filter((c) => !have1.has(c.time));
   added += fresh1.length;
-  s1.candles = fresh1.concat(s1.candles);
-  if (s1.candles.length > HISTORY_CAP_1S) s1.candles = s1.candles.slice(-HISTORY_CAP_1S);
-  return added;
+   s1.candles = fresh1.concat(s1.candles);
+   // DON'T trim 1s cache here — lazy loaded data would be dropped. Trim only on live feed (feedCandle).
+   return added;
 }
 
 async function fetchOlder(sym, beforeSec, limit) {
@@ -293,7 +293,8 @@ async function loadOlderCandles(sym, limit) {
     rebuild5s(sym);  // <-- rebuild 5s candles from updated 1s cache
     if (sym === state.asset) renderActive();
     hideStatus();
-  } catch (_) {
+  } catch (e) {
+    console.warn("[HISTORY] loadOlderCandles error:", e);
     hideStatus();
   } finally {
     historyLoading[sym] = false;

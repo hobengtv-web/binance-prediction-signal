@@ -230,43 +230,39 @@
       ctx.fillText("LOCK " + fmtAxis(this.decision), plotL + 4, y - 2);
       ctx.textBaseline = "middle";
 
-      // price zone overlay (Entry Zone / Sell Zone — smooth alert blink)
+      // price zone overlay (Entry Zone / Sell Zone — smooth blink ONLY on active zone)
       const now = Date.now();
-      const phase = (now % 1000) / 1000;            // 0…1 over 1s cycle
-      const blink = 0.15 + 0.7 * Math.abs(0.5 - phase) * 2;  // smooth triangle 0.15…0.85…0.15
-      const entryCol = `rgba(59,130,246,${blink * 0.16})`;
-      const entryBlinkCol = `rgba(59,130,246,${blink * 0.40})`;
-      const sellCol = `rgba(16,185,129,${blink * 0.16})`;
-      const sellBlinkCol = `rgba(16,185,129,${blink * 0.40})`;
+      const phase = (now % 1000) / 1000;
+      const pulse = 0.16 + 0.24 * (0.5 - Math.abs(0.5 - phase)) * 2;  // triangle 0.16…0.40…0.16
+      const entryCol = `rgba(59,130,246,${pulse})`;
+      const sellCol = `rgba(16,185,129,${pulse})`;
       const inEntry = this.currentPrice != null &&
         (this.prediction === "down" ? this.currentPrice > this.decision : this.prediction === "up" ? this.currentPrice < this.decision : false);
       const inSell = this.currentPrice != null &&
         (this.prediction === "down" ? this.currentPrice < this.decision : this.prediction === "up" ? this.currentPrice > this.decision : false);
       if (this.prediction) {
-        // entry zone (blue)
+        // entry zone (blue) — blink only when price is inside
+        const entryFill = inEntry ? entryCol : "rgba(59,130,246,.10)";
         if (this.prediction === "down") {
-          // above lock price
-          ctx.fillStyle = inEntry && blink > 0.2 ? entryBlinkCol : entryCol;
+          ctx.fillStyle = entryFill;
           ctx.fillRect(plotL, plotT, plotR - plotL, y - plotT);
           ctx.fillStyle = "#3b82f6"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
           ctx.fillText("Entry Zone", (plotL + plotR) / 2, (plotT + y) / 2);
         } else {
-          // below lock price
-          ctx.fillStyle = inEntry && blink > 0.2 ? entryBlinkCol : entryCol;
+          ctx.fillStyle = entryFill;
           ctx.fillRect(plotL, y, plotR - plotL, plotB - y);
           ctx.fillStyle = "#3b82f6"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
           ctx.fillText("Entry Zone", (plotL + plotR) / 2, (y + plotB) / 2);
         }
-        // sell zone (green)
+        // sell zone (green) — blink only when price is inside
+        const sellFill = inSell ? sellCol : "rgba(16,185,129,.10)";
         if (this.prediction === "down") {
-          // below lock price
-          ctx.fillStyle = inSell && blink > 0.2 ? sellBlinkCol : sellCol;
+          ctx.fillStyle = sellFill;
           ctx.fillRect(plotL, y, plotR - plotL, plotB - y);
           ctx.fillStyle = "#10b981"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
           ctx.fillText("Sell Zone (Take Profit)", (plotL + plotR) / 2, (y + plotB) / 2);
         } else {
-          // above lock price
-          ctx.fillStyle = inSell && blink > 0.2 ? sellBlinkCol : sellCol;
+          ctx.fillStyle = sellFill;
           ctx.fillRect(plotL, plotT, plotR - plotL, y - plotT);
           ctx.fillStyle = "#10b981"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
           ctx.fillText("Sell Zone (Take Profit)", (plotL + plotR) / 2, (plotT + y) / 2);

@@ -68,6 +68,9 @@ const state = {
   viaProxy: false,
 };
 
+let serverTimeOffset = 0;  // client now → server now correction (ms)
+function serverNow() { return Date.now() + serverTimeOffset; }
+
 // cache[symbol][series] = { candles, meta }; series: 1s (raw), 5s (chart), 5m/15m/1h (trend)
 const CANDLE_SERIES = ["1s", "5s", "30s", "1m", "5m", "15m", "1h"];
 
@@ -639,7 +642,7 @@ function applyType() {
 
   function updateProjection() {
     const dur = INTERVAL_MS[state.interval];
-    const now = Date.now();
+    const now = serverNow();
     const bounds = sessionBounds(dur, now);
     const t0 = bounds.start, T = bounds.end;
     const O = sessionLock(state.asset, dur, now);
@@ -1193,6 +1196,12 @@ async function pollProxy() {
     const r = await fetch("/api/snapshot", { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const j = await r.json();
+    // sync server time from latest 1s candle timestamp
+    const ones = j.candles && j.candles.BTC && j.candles.BTC["1s"];
+    if (ones && ones.length) {
+      const lastSec = ones[ones.length - 1].time;
+      serverTimeOffset = lastSec * 1000 - Date.now() + 1000; // +1000 = start of next second = current server second
+    }
     applySnapshot(j, false);
     proxyFail = 0;
   } catch (e) {
@@ -1205,7 +1214,9 @@ let trendTimer = 0;
 // ----- realtime SSE path (local Node server): trade pushed on every fill -----
 function updateLiveTrade(d) {
   const sym = d.sym, price = +d.price, ts = +d.ts, qty = +d.qty || 0;
-  
+  // sync client ↔ Binance server time using trade timestamp
+  serverTimeOffset = ts - Date.now();
+
   // Aggregate into 1s candles (real-time) — needed by mobile prediction
   const t1s = Math.floor(ts / 1000);
   const ones = state.cache[sym]["1s"].candles;
@@ -1273,7 +1284,11 @@ function trySSE() {
   const to = setTimeout(() => { if (!got) { try { es.close(); } catch (_) {} startPolling(); } }, 6000);
   es.addEventListener("snapshot", (e) => {
     got = true; clearTimeout(to); state.viaProxy = true; setConn(true);
-    setSrc("stream ↻ live"); applySnapshot(JSON.parse(e.data), true); hideStatus();
+    setSrc("stream ↻ live");
+    const snap = JSON.parse(e.data);
+    const ones = snap.candles && snap.candles.BTC && snap.candles.BTC["1s"];
+    if (ones && ones.length) { const lastSec = ones[ones.length - 1].time; serverTimeOffset = lastSec * 1000 - Date.now() + 1000; }
+    applySnapshot(snap, true); hideStatus();
     if (!trendTimer) trendTimer = setInterval(refreshTrends, 10000);
   });
   es.addEventListener("trade", (e) => updateLiveTrade(JSON.parse(e.data)));
@@ -1350,11 +1365,11 @@ function captureMobilePrediction() {
   }
   
   const dur = INTERVAL_MS[state.interval];
-  const now = Date.now();
-  const t0 = Math.floor(now / dur) * dur;
-  const O = sessionLock(state.asset, dur, now);
-  const five = state.cache[state.asset]["5s"].candles;
-  const last = five[five.length - 1];
+   const now = serverNow();
+   const t0 = Math.floor(now / dur) * dur;
+    const O = sessionLock(state.asset, dur, now);
+    const five = state.cache[state.asset]["5s"].candles;
+    const last = five[five.length - 1];
   const C = last ? last.close : null;
   
   console.log("[MOBILE-PRED] capture check:", { _mob_t0, t0, _mob_pending: !!_mob_pending, predDir: pred.prediction });
@@ -1506,7 +1521,7 @@ function restoreMobilePredSession() {
     const saved = JSON.parse(raw);
     if (saved && saved.roundStart && saved.prediction) {
       const dur = INTERVAL_MS[state.interval];
-      const now = Date.now();
+      const now = serverNow();
       const curStart = Math.floor(now / dur) * dur;
       // Hanya restore jika session masih sama DAN asset/interval cocok
       const assetMatch = saved.asset === state.asset;
@@ -1566,7 +1581,7 @@ function restoreMobilePredSession() {
 
 function predictSessionStart(sym, tf) {
   const dur = INTERVAL_MS[tf];
-  const now = Date.now();
+  const now = serverNow();
   const curStart = Math.floor(now / dur) * dur;
   const curStartSec = Math.floor(curStart / 1000);
   const ticker = state.ticker[sym];
@@ -1705,7 +1720,7 @@ function updateMobilePrediction() {
   }
 
     const dur = INTERVAL_MS[state.interval];
-  const now = Date.now();
+  const now = serverNow();
   const roundStart = Math.floor(now / dur) * dur;
 
   const cacheKey = state.interval + "_" + roundStart;

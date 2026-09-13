@@ -1704,14 +1704,15 @@ function updateMobilePrediction() {
     return;
   }
 
-  const dur = INTERVAL_MS[state.interval];
+    const dur = INTERVAL_MS[state.interval];
   const now = Date.now();
   const roundStart = Math.floor(now / dur) * dur;
 
-  // Hitung ulang prediksi HANYA saat sesi baru, atau masih LOADING (data belum siap)
   const cacheKey = state.interval + "_" + roundStart;
   const cached = predCache[state.asset][cacheKey];
   const sameSession = _mobilePredSession && _mobilePredSession.roundStart === roundStart && _mobilePredSession.asset === state.asset && _mobilePredSession.interval === state.interval;
+
+  // Hitung ulang prediksi HANYA saat sesi baru, atau masih LOADING (data belum siap)
   const needPredict = !_mobilePredSession
     || _mobilePredSession.roundStart !== roundStart
     || _mobilePredSession.mode === "LOADING"
@@ -1721,30 +1722,30 @@ function updateMobilePrediction() {
     || _mobilePredSession.interval !== state.interval;
 
   if (needPredict) {
-    if (cached && !sameSession) {
-      // Restore from cache — same session, just switched back to this interval
-      _mobilePredSession = cached;
-      console.log("[MOBILE-PRED] restored from cache:", cacheKey);
-    } else if (!sameSession) {
-      const pred = predictSessionStart(state.asset, state.interval);
-      if (pred) {
-        _mobilePredSession = pred;
-        predCache[state.asset][cacheKey] = pred;
-      } else if (!_mobilePredSession || _mobilePredSession.roundStart !== roundStart) {
-        _mobilePredSession = {
-          roundStart,
-          asset: state.asset,
-          interval: state.interval,
-          lockPrice: sessionLock(state.asset, dur, now),
-          prediction: "flat",
-          confidence: 50,
-          mode: "LOADING",
-        };
-        predCache[state.asset][cacheKey] = _mobilePredSession;
-      }
-    }
-    // Simpan ke sessionStorage agar tetap konsisten saat refresh
-    try { sessionStorage.setItem(MOBILE_PRED_SESSION_KEY, JSON.stringify(_mobilePredSession)); } catch (_) {}
+     if (cached && !sameSession && cached.prediction !== "flat") {
+       // Switch back to previously computed interval — restore cached prediction to prevent flip
+       _mobilePredSession = cached;
+       console.log("[MOBILE-PRED] restored from cache:", cacheKey);
+     } else {
+       // Always (re)compute for new session, MENUNGGU, LOADING, or flat-within-30s
+       const pred = predictSessionStart(state.asset, state.interval);
+       if (pred) {
+         _mobilePredSession = pred;
+         if (pred.prediction !== "flat") predCache[state.asset][cacheKey] = pred;
+       } else if (!_mobilePredSession || _mobilePredSession.roundStart !== roundStart) {
+         _mobilePredSession = {
+           roundStart,
+           asset: state.asset,
+           interval: state.interval,
+           lockPrice: sessionLock(state.asset, dur, now),
+           prediction: "flat",
+           confidence: 50,
+           mode: "LOADING",
+         };
+       }
+     }
+     // Simpan ke sessionStorage agar tetap konsisten saat refresh
+     try { sessionStorage.setItem(MOBILE_PRED_SESSION_KEY, JSON.stringify(_mobilePredSession)); } catch (_) {}
   }
 
   const pred = _mobilePredSession;

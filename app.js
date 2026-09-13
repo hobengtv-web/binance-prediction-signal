@@ -15,7 +15,7 @@ const CANDLE_SEC = 5; // each candle = 5 seconds
 const HISTORY = 160;
 const HISTORY_LOAD = 600;       // 1s candles per lazy fetch (~10 minutes)
 const HISTORY_CAP_1S = 1200;   // ~10 menit 1s candles (scrollable window for lazy load)
-const HISTORY_CAP_5S = 4000;    // cap on stored 5s candles
+const HISTORY_CAP_5S = 250;     // cap on stored 5s candles (~20 min, scrollable)
 
 // GOAL — "penguat" sinyal yang diinginkan (counter-trend / momentum reversal).
 // Kita HANYA mau sinyal yang BERLAWANAN arah dengan gerakan harga (fade peak):
@@ -237,9 +237,9 @@ function mergeOlder(sym, ones) {
   const have1 = new Set(s1.candles.map((c) => c.time));
   const fresh1 = ones.filter((c) => !have1.has(c.time));
   added += fresh1.length;
-   s1.candles = fresh1.concat(s1.candles);
-   // DON'T trim 1s cache here — lazy loaded data would be dropped. Trim only on live feed (feedCandle).
-   return added;
+    s1.candles = fresh1.concat(s1.candles);
+    if (s1.candles.length > HISTORY_CAP_1S * 12) s1.candles = s1.candles.slice(-HISTORY_CAP_1S * 12);  // keep ~240 min 1s for rebuild5s
+    return added;
 }
 
 async function fetchOlder(sym, beforeSec, limit) {

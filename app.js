@@ -1209,19 +1209,16 @@ function applySnapshot(snap, isHistory) {
 
 async function pollProxy() {
   try {
+    // Fetch Binance server time DIRECTLY (bypass Vercel snapshot staleness)
+    // This must happen before the snapshot fetch so serverTimeOffset is fresh.
+    const timeResp = await fetch("https://data-api.binance.vision/api/v3/time", { cache: "no-store" });
+    if (timeResp.ok) {
+      const timeJ = await timeResp.json();
+      serverTimeOffset = timeJ.serverTime - Date.now();
+    }
     const r = await fetch("/api/snapshot", { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const j = await r.json();
-    // sync: prefer authoritative Binance server time; fall back to candle inference
-    if (j.serverTime) {
-      serverTimeOffset = j.serverTime - Date.now();
-    } else {
-      const ones = j.candles && j.candles.BTC && j.candles.BTC["1s"];
-      if (ones && ones.length) {
-        const lastSec = ones[ones.length - 1].time;
-        serverTimeOffset = lastSec * 1000 - Date.now() + 1000;
-      }
-    }
     applySnapshot(j, false);
     proxyFail = 0;
   } catch (e) {
@@ -1306,8 +1303,10 @@ function trySSE() {
     got = true; clearTimeout(to); state.viaProxy = true; setConn(true);
     setSrc("stream ↻ live");
     const snap = JSON.parse(e.data);
+    // sync from first 1s candle: lastSec = most recent completed second
+    // serverNow = start of next second (lastSec+1) — accurate for SSE stream
     const ones = snap.candles && snap.candles.BTC && snap.candles.BTC["1s"];
-    if (ones && ones.length) { const lastSec = ones[ones.length - 1].time; serverTimeOffset = lastSec * 1000 - Date.now() + 1000; }
+    if (ones && ones.length) { serverTimeOffset = (ones[ones.length - 1].time + 1) * 1000 - Date.now(); }
     applySnapshot(snap, true); hideStatus();
     if (!trendTimer) trendTimer = setInterval(refreshTrends, 10000);
   });

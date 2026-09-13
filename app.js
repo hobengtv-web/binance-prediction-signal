@@ -14,7 +14,7 @@ const INTERVAL_MS = { "5m": 300_000, "15m": 900_000, "1h": 3_600_000 };
 const CANDLE_SEC = 5; // each candle = 5 seconds
 const HISTORY = 160;
 const HISTORY_LOAD = 600;       // 1s candles per lazy fetch (~10 minutes)
-const HISTORY_CAP_1S = 2400;   // ~20 menit 1s candles (scrollable window for lazy load)
+const HISTORY_CAP_1S = 1200;   // ~10 menit 1s candles (scrollable window for lazy load)
 const HISTORY_CAP_5S = 4000;    // cap on stored 5s candles
 
 // GOAL — "penguat" sinyal yang diinginkan (counter-trend / momentum reversal).

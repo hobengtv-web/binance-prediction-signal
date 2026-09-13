@@ -654,7 +654,6 @@ function applyType() {
     // Lock (open) line + session dividers
     chart.setDecision(O);
     chart.setSessionDuration(dur);
-
     const liveStatus = C > O ? "up" : C < O ? "down" : "flat";
 
     // ----- window analisis = candle 5s terakhir (tanpa gating "entry window") -----
@@ -1007,6 +1006,12 @@ function applyType() {
     updateMobilePrediction();
     captureMobilePrediction();
 
+    // price zone overlay (entry zone / sell TP)
+    const pred = _mobilePredSession;
+    const predDir = pred && pred.prediction !== "flat" && pred.lockPrice === O ? pred.prediction : liveStatus;
+    chart.setPrediction(predDir !== "flat" ? predDir : null, O);
+    chart.setCurrentPrice(C);
+
     // ----- round timer / status -----
     const sec = Math.max(0, Math.floor(remaining / 1000));
     const mm = String(Math.floor(sec / 60)).padStart(2, "0");
@@ -1236,6 +1241,7 @@ function updateLiveTrade(d) {
 function updateLiveTicker(d) {
   const t = state.ticker[d.sym] || (state.ticker[d.sym] = {});
   state.prevPrice[d.sym] = t.last; t.last = +d.last; t.chg = +d.chg;
+  if (d.sym === state.asset) chart.setCurrentPrice(t.last);
   updateHeader(); updateGap();
 }
 async function refreshTrends() {

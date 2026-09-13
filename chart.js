@@ -41,6 +41,8 @@
     this.projection = [];
     this.trendFit = [];   // auto trend line (regression) drawn across the recent window
     this.markers = [];    // marker.below => drawn under the point (swing lows)
+    this.prediction = null;  // "up" | "down" | null
+    this.currentPrice = null;  // live price for blink detection
 
     this._bindEvents();
     this._ro = new ResizeObserver(() => this.resize());
@@ -75,6 +77,8 @@
   CanvasChart.prototype.setTrendFit = function (pts) { this.trendFit = pts || []; this.render(); };
   CanvasChart.prototype.setMarkers = function (m) { this.markers = m || []; this.render(); };
   CanvasChart.prototype.setSessionDuration = function (ms) { this.sessionDuration = ms || 0; this.render(); };
+  CanvasChart.prototype.setPrediction = function (dir, price) { this.prediction = dir; this.decision = price; this.render(); };
+  CanvasChart.prototype.setCurrentPrice = function (p) { this.currentPrice = p; this.render(); };
   CanvasChart.prototype.fit = function () { this.offset = 0; this.follow = true; this.anchorTime = null; this.visible = 90; this.render(); };
 
   CanvasChart.prototype._range = function () {
@@ -225,6 +229,47 @@
       ctx.fillStyle = ACCENT; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
       ctx.fillText("LOCK " + fmtAxis(this.decision), plotL + 4, y - 2);
       ctx.textBaseline = "middle";
+
+      // price zone overlay (Entry Zone / Sell TP)
+      const blink = (Date.now() / 400) % 1 < 0.5;
+      const entryCol = "rgba(59,130,246,.16)";
+      const entryBlink = "rgba(59,130,246,.40)";
+      const sellCol = "rgba(16,185,129,.16)";
+      const sellBlink = "rgba(16,185,129,.40)";
+      const inEntry = this.currentPrice != null &&
+        (this.prediction === "down" ? this.currentPrice > this.decision : this.prediction === "up" ? this.currentPrice < this.decision : false);
+      const inSell = this.currentPrice != null &&
+        (this.prediction === "down" ? this.currentPrice < this.decision : this.prediction === "up" ? this.currentPrice > this.decision : false);
+      if (this.prediction) {
+        // entry zone (blue)
+        if (this.prediction === "down") {
+          ctx.fillStyle = inEntry && blink ? entryBlink : entryCol;
+          ctx.fillRect(plotL, plotT, plotR - plotL, y - plotT);
+          ctx.fillStyle = "#3b82f6"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+          ctx.fillText("Entry Zone", plotL + 4, plotT + 4);
+          ctx.textBaseline = "middle";
+        } else {
+          ctx.fillStyle = inEntry && blink ? entryBlink : entryCol;
+          ctx.fillRect(plotL, y, plotR - plotL, plotB - y);
+          ctx.fillStyle = "#3b82f6"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+          ctx.fillText("Entry Zone", plotL + 4, y + 4);
+          ctx.textBaseline = "middle";
+        }
+        // sell zone (green)
+        if (this.prediction === "down") {
+          ctx.fillStyle = inSell && blink ? sellBlink : sellCol;
+          ctx.fillRect(plotL, y, plotR - plotL, plotB - y);
+          ctx.fillStyle = "#10b981"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+          ctx.fillText("Sell (Take Profit)", plotL + 4, plotB - 4);
+          ctx.textBaseline = "middle";
+        } else {
+          ctx.fillStyle = inSell && blink ? sellBlink : sellCol;
+          ctx.fillRect(plotL, plotT, plotR - plotL, y - plotT);
+          ctx.fillStyle = "#10b981"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+          ctx.fillText("Sell (Take Profit)", plotL + 4, plotB - 4);
+          ctx.textBaseline = "middle";
+        }
+      }
     }
 
     // auto trend line (regression across recent window) — shows momentum direction

@@ -334,9 +334,9 @@
           const liveLeft = self.candles[clamp(n + self.rightOffset - self.visible, 0, n - 1)].time;
           // allow panning FORWARD into the (empty) future; cap so the last candle can reach the left edge
           const maxAnchor = lastT + self.visible * barSec;
-          // drag LEFT = older data, drag RIGHT = newer (live edge)
-          self.anchorTime = clamp(self._panAnchor0 - dxBars * barSec, firstT, maxAnchor);
-          // dragging toward the LIVE (newer) edge → resume following
+          // drag LEFT = newer data, drag RIGHT = older data (scroll back to previous sessions)
+          self.anchorTime = clamp(self._panAnchor0 + dxBars * barSec, firstT, maxAnchor);
+          // resume follow only when dragging toward LIVE (newer) edge
           if (self.anchorTime >= liveLeft) { self.anchorTime = null; self.follow = true; }
           // lazy-load: reached the start of loaded data → request older candles
           if (self.anchorTime != null && self.onReachStart && !self._loadingStart && !self.follow) {

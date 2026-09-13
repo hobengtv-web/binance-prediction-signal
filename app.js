@@ -1012,20 +1012,35 @@ function applyType() {
     // price zone overlay (entry zone / sell TP)
     const pred = _mobilePredSession;
     const predDir = pred && pred.prediction !== "flat" && pred.lockPrice === O ? pred.prediction : liveStatus;
-    chart.setPrediction(predDir !== "flat" ? predDir : null, O);
+     chart.setPrediction(predDir !== "flat" ? predDir : null, O);
     chart.setCurrentPrice(C);
 
-    // ----- round timer / status -----
+    // Store session bounds for smooth rAF timer
+    _sessionT0 = t0; _sessionT = T; _sessionO = O; _sessionC = C; _sessionDur = dur;
+  }
+
+  let _lastTimerSec = -1, _sessionT0 = 0, _sessionT = 0, _sessionO = 0, _sessionC = 0, _sessionDur = 0;
+  function updateTimerDisplay() {
+    if (!_sessionT) return;
+    const now = serverNow();
+    const remaining = _sessionT - now;
+    const elapsed = now - _sessionT0;
+    const total = _sessionT - _sessionT0;
     const sec = Math.max(0, Math.floor(remaining / 1000));
+    if (sec === _lastTimerSec) { requestAnimationFrame(updateTimerDisplay); return; }
+    _lastTimerSec = sec;
     const mm = String(Math.floor(sec / 60)).padStart(2, "0");
     const ss = String(sec % 60).padStart(2, "0");
-    document.getElementById("round-tf").textContent = state.interval;
-    document.getElementById("round-timer").textContent = `${mm}:${ss}`;
-    const st = document.getElementById("round-status");
-    st.className = "round-status " + liveStatus;
-    st.textContent = liveStatus === "up" ? "LIVE ▲ UP" : liveStatus === "down" ? "LIVE ▼ DOWN" : "LIVE —";
+    const liveStatus = _sessionC > _sessionO ? "up" : _sessionC < _sessionO ? "down" : "flat";
+    const tfEl = document.getElementById("round-tf");
+    const tmrEl = document.getElementById("round-timer");
+    const stEl = document.getElementById("round-status");
+    if (tfEl) tfEl.textContent = state.interval;
+    if (tmrEl) tmrEl.textContent = `${mm}:${ss}`;
+    if (stEl) { stEl.className = "round-status " + liveStatus; stEl.textContent = liveStatus === "up" ? "LIVE ▲ UP" : liveStatus === "down" ? "LIVE ▼ DOWN" : "LIVE —"; }
     const rbf = document.getElementById("round-bar-fill");
     if (rbf) rbf.style.width = Math.min(100, (elapsed / total) * 100) + "%";
+    requestAnimationFrame(updateTimerDisplay);
   }
 
 /* ----------------------- Trend (akumulasi N sesi interval aktif) ----------------------- */
@@ -1884,8 +1899,9 @@ function start() {
   restoreMobilePredSession();
   startData();
   renderConfidenceReport();
-  // timers
-  setInterval(updateProjection, 1000);
+  // timers — use rAF for smooth timer, updateProjection only on data events
+  requestAnimationFrame(updateTimerDisplay);
+  setInterval(updateProjection, 5000);  // heavy projection update every 5s only
 
    // Active visitor tracking
   let visitorId = localStorage.getItem("bps_vid") || null;

@@ -52,7 +52,11 @@ function mapKline(r) {
 }
 
 async function getSnapshot(history) {
-  const out = { candles: {}, ticker: {}, mark: {} };
+  const out = { candles: {}, ticker: {}, mark: {}, serverTime: 0 };
+  try {
+    const t = await getJSON("/api/v3/time");
+    out.serverTime = t.serverTime;
+  } catch (_) {}
   await Promise.all(Object.keys(SYMS).map(async (k) => {
     out.candles[k] = {};
     await Promise.all(Object.keys(KLINES).map(async (tf) => {

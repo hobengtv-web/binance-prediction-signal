@@ -69,7 +69,16 @@ const state = {
 };
 
 let serverTimeOffset = 0;  // client now → server now correction (ms)
+let lastTimeSync = 0;      // Date.now() of last successful time sync
 function serverNow() { return Date.now() + serverTimeOffset; }
+// Re-sync Binance time if it's been stale for >3s (catches missed syncs)
+function ensureTimeSync() { const now = Date.now(); if (!lastTimeSync || now - lastTimeSync > 3000) { lastTimeSync = now; fetchBinanceTime(); } }
+async function fetchBinanceTime() {
+  try {
+    const r = await fetch("https://data-api.binance.vision/api/v3/time", { cache: "no-store" });
+    if (r.ok) { const j = await r.json(); if (j.serverTime) { serverTimeOffset = j.serverTime - Date.now(); lastTimeSync = Date.now(); } }
+  } catch (_) {}
+}
 
 // cache[symbol][series] = { candles, meta }; series: 1s (raw), 5s (chart), 5m/15m/1h (trend)
 const CANDLE_SERIES = ["1s", "5s", "30s", "1m", "5m", "15m", "1h"];
@@ -1023,6 +1032,7 @@ function applyType() {
   let _lastTimerSec = -1, _sessionT0 = 0, _sessionT = 0, _sessionO = 0, _sessionC = 0, _sessionDur = 0, _sessionT_client = 0;
   function updateTimerDisplay() {
     const now = Date.now();  // pure client time — no serverTimeOffset jitter
+    ensureTimeSync();  // re-sync if stale (>3s since last sync)
     const remaining = _sessionT_client - now;
     const elapsed = now - (_sessionT_client - _sessionDur);
     const total = _sessionDur;
@@ -1167,10 +1177,25 @@ async function probeProxy() {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 6000);
   try {
+    // Sync Binance server time BEFORE snapshot (so updateProjection uses correct offset)
+    let timeSynced = false;
+    try {
+      const timeResp = await fetch("https://data-api.binance.vision/api/v3/time", { signal: ctrl.signal });
+      if (timeResp.ok) {
+        const t = await timeResp.json();
+        serverTimeOffset = t.serverTime - Date.now();
+        lastTimeSync = Date.now();
+        timeSynced = true;
+      }
+    } catch (_) {}
     const r = await fetch("/api/snapshot?history=1", { signal: ctrl.signal });
     clearTimeout(to);
     if (!r.ok) return null;
     const j = await r.json();
+    // Fallback: snapshot serverTime if direct fetch failed
+    if (!timeSynced && j.serverTime) {
+      serverTimeOffset = j.serverTime - Date.now();
+    }
     if (j && j.candles && j.candles.BTC && j.candles.BTC["5m"] && j.candles.BTC["5m"].length) return j;
     return null;
   } catch (_) { clearTimeout(to); return null; }
@@ -1209,16 +1234,26 @@ function applySnapshot(snap, isHistory) {
 
 async function pollProxy() {
   try {
-    // Fetch Binance server time DIRECTLY (bypass Vercel snapshot staleness)
-    // This must happen before the snapshot fetch so serverTimeOffset is fresh.
-    const timeResp = await fetch("https://data-api.binance.vision/api/v3/time", { cache: "no-store" });
-    if (timeResp.ok) {
-      const timeJ = await timeResp.json();
-      serverTimeOffset = timeJ.serverTime - Date.now();
-    }
+    // Fetch Binance server time DIRECTLY from browser (accurate to ~50ms network latency)
+    // This is more accurate than j.serverTime from Vercel snapshot (which is stale by ~1s
+    // while Vercel fetches all candles).
+    let timeSynced = false;
+    try {
+      const timeResp = await fetch("https://data-api.binance.vision/api/v3/time", { cache: "no-store" });
+      if (timeResp.ok) {
+        const timeJ = await timeResp.json();
+        serverTimeOffset = timeJ.serverTime - Date.now();
+        lastTimeSync = Date.now();
+        timeSynced = true;
+      }
+    } catch (_) { /* may be blocked by CORS/ad-block — fall back below */ }
     const r = await fetch("/api/snapshot", { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const j = await r.json();
+    // Fallback: use snapshot serverTime if direct fetch failed (stale by ~1s but better than nothing)
+    if (!timeSynced && j.serverTime) {
+      serverTimeOffset = j.serverTime - Date.now();
+    }
     applySnapshot(j, false);
     proxyFail = 0;
   } catch (e) {
@@ -1233,6 +1268,7 @@ function updateLiveTrade(d) {
   const sym = d.sym, price = +d.price, ts = +d.ts, qty = +d.qty || 0;
   // sync client ↔ Binance server time using trade timestamp
   serverTimeOffset = ts - Date.now();
+  lastTimeSync = Date.now();
 
   // Aggregate into 1s candles (real-time) — needed by mobile prediction
   const t1s = Math.floor(ts / 1000);
@@ -1299,15 +1335,18 @@ function trySSE() {
   try { es = new EventSource("/api/stream"); } catch (e) { startPolling(); return; }
   let got = false;
   const to = setTimeout(() => { if (!got) { try { es.close(); } catch (_) {} startPolling(); } }, 6000);
-  es.addEventListener("snapshot", (e) => {
-    got = true; clearTimeout(to); state.viaProxy = true; setConn(true);
-    setSrc("stream ↻ live");
-    const snap = JSON.parse(e.data);
-    // sync from first 1s candle: lastSec = most recent completed second
-    // serverNow = start of next second (lastSec+1) — accurate for SSE stream
-    const ones = snap.candles && snap.candles.BTC && snap.candles.BTC["1s"];
-    if (ones && ones.length) { serverTimeOffset = (ones[ones.length - 1].time + 1) * 1000 - Date.now(); }
-    applySnapshot(snap, true); hideStatus();
+   es.addEventListener("snapshot", (e) => {
+     got = true; clearTimeout(to); state.viaProxy = true; setConn(true);
+     setSrc("stream ↻ live");
+     const snap = JSON.parse(e.data);
+     // Fast candle-based sync (immediate, ~500ms accuracy)
+     const ones = snap.candles && snap.candles.BTC && snap.candles.BTC["1s"];
+     if (ones && ones.length) { serverTimeOffset = (ones[ones.length - 1].time + 1) * 1000 - Date.now(); }
+     // Refine with authoritative Binance time (more accurate, may fail if blocked)
+     fetch("https://data-api.binance.vision/api/v3/time", { cache: "no-store" })
+       .then(r => r.ok && r.json()).then(t => { if (t && t.serverTime) { serverTimeOffset = t.serverTime - Date.now(); lastTimeSync = Date.now(); } })
+       .catch(() => {});
+     applySnapshot(snap, true); hideStatus();
     if (!trendTimer) trendTimer = setInterval(refreshTrends, 10000);
   });
   es.addEventListener("trade", (e) => updateLiveTrade(JSON.parse(e.data)));

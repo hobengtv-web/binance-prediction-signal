@@ -1015,20 +1015,21 @@ function applyType() {
      chart.setPrediction(predDir !== "flat" ? predDir : null, O);
     chart.setCurrentPrice(C);
 
-    // Store session bounds for smooth rAF timer
+    // Store session bounds for smooth rAF timer (client-time reference to avoid serverTimeOffset jitter)
     _sessionT0 = t0; _sessionT = T; _sessionO = O; _sessionC = C; _sessionDur = dur;
+    _sessionT_client = T - serverTimeOffset;  // session end in client time — stable for rAF
   }
 
-  let _lastTimerSec = -1, _sessionT0 = 0, _sessionT = 0, _sessionO = 0, _sessionC = 0, _sessionDur = 0;
-   function updateTimerDisplay() {
-     const now = serverNow();
-     const remaining = _sessionT - now;
-     const elapsed = now - _sessionT0;
-     const total = _sessionT - _sessionT0;
-     if (!_sessionT || !total) { requestAnimationFrame(updateTimerDisplay); return; }
-     const sec = Math.max(0, Math.floor(remaining / 1000));
-     if (sec === _lastTimerSec) { requestAnimationFrame(updateTimerDisplay); return; }
-     _lastTimerSec = sec;
+  let _lastTimerSec = -1, _sessionT0 = 0, _sessionT = 0, _sessionO = 0, _sessionC = 0, _sessionDur = 0, _sessionT_client = 0;
+  function updateTimerDisplay() {
+    const now = Date.now();  // pure client time — no serverTimeOffset jitter
+    const remaining = _sessionT_client - now;
+    const elapsed = now - (_sessionT_client - _sessionDur);
+    const total = _sessionDur;
+    if (!_sessionT_client || !total) { requestAnimationFrame(updateTimerDisplay); return; }
+    const sec = Math.max(0, Math.floor(remaining / 1000));
+    if (sec === _lastTimerSec) { requestAnimationFrame(updateTimerDisplay); return; }
+    _lastTimerSec = sec;
     const mm = String(Math.floor(sec / 60)).padStart(2, "0");
     const ss = String(sec % 60).padStart(2, "0");
     const liveStatus = _sessionC > _sessionO ? "up" : _sessionC < _sessionO ? "down" : "flat";
@@ -1211,11 +1212,15 @@ async function pollProxy() {
     const r = await fetch("/api/snapshot", { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const j = await r.json();
-    // sync server time from latest 1s candle timestamp
-    const ones = j.candles && j.candles.BTC && j.candles.BTC["1s"];
-    if (ones && ones.length) {
-      const lastSec = ones[ones.length - 1].time;
-      serverTimeOffset = lastSec * 1000 - Date.now() + 1000; // +1000 = start of next second = current server second
+    // sync: prefer authoritative Binance server time; fall back to candle inference
+    if (j.serverTime) {
+      serverTimeOffset = j.serverTime - Date.now();
+    } else {
+      const ones = j.candles && j.candles.BTC && j.candles.BTC["1s"];
+      if (ones && ones.length) {
+        const lastSec = ones[ones.length - 1].time;
+        serverTimeOffset = lastSec * 1000 - Date.now() + 1000;
+      }
     }
     applySnapshot(j, false);
     proxyFail = 0;

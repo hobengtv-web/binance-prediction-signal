@@ -52,7 +52,12 @@ function mapKline(r) {
 }
 
 async function getSnapshot(history) {
-  const out = { candles: {}, ticker: {}, mark: {} };
+  const out = { candles: {}, ticker: {}, mark: {}, serverTime: 0 };
+  // Fetch Binance server time FIRST (authoritative for lock price & timer)
+  try {
+    const t = await getJSON("/api/v3/time");
+    out.serverTime = t.serverTime;
+  } catch (_) { /* fall back to candle-based inference in client */ }
   await Promise.all(Object.keys(SYMS).map(async (k) => {
     out.candles[k] = {};
     await Promise.all(Object.keys(KLINES).map(async (tf) => {

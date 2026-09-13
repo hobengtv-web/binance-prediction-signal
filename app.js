@@ -1497,6 +1497,7 @@ function renderConfidenceReport() {
 
 /* ----------------------- Mobile Prediction ----------------------- */
 let _mobilePredSession = null;   // { roundStart, lockPrice, prediction, confidence, mode }
+const predCache = { BTC: {}, ETH: {} };  // per-session cache: predCache[sym][interval + roundStart] = pred
 
 function restoreMobilePredSession() {
   try {
@@ -1708,6 +1709,9 @@ function updateMobilePrediction() {
   const roundStart = Math.floor(now / dur) * dur;
 
   // Hitung ulang prediksi HANYA saat sesi baru, atau masih LOADING (data belum siap)
+  const cacheKey = state.interval + "_" + roundStart;
+  const cached = predCache[state.asset][cacheKey];
+  const sameSession = _mobilePredSession && _mobilePredSession.roundStart === roundStart && _mobilePredSession.asset === state.asset && _mobilePredSession.interval === state.interval;
   const needPredict = !_mobilePredSession
     || _mobilePredSession.roundStart !== roundStart
     || _mobilePredSession.mode === "LOADING"
@@ -1717,19 +1721,27 @@ function updateMobilePrediction() {
     || _mobilePredSession.interval !== state.interval;
 
   if (needPredict) {
-    const pred = predictSessionStart(state.asset, state.interval);
-    if (pred) {
-      _mobilePredSession = pred;
-    } else if (!_mobilePredSession || _mobilePredSession.roundStart !== roundStart) {
-      _mobilePredSession = {
-        roundStart,
-        asset: state.asset,
-        interval: state.interval,
-        lockPrice: sessionLock(state.asset, dur, now),
-        prediction: "flat",
-        confidence: 50,
-        mode: "LOADING",
-      };
+    if (cached && !sameSession) {
+      // Restore from cache — same session, just switched back to this interval
+      _mobilePredSession = cached;
+      console.log("[MOBILE-PRED] restored from cache:", cacheKey);
+    } else if (!sameSession) {
+      const pred = predictSessionStart(state.asset, state.interval);
+      if (pred) {
+        _mobilePredSession = pred;
+        predCache[state.asset][cacheKey] = pred;
+      } else if (!_mobilePredSession || _mobilePredSession.roundStart !== roundStart) {
+        _mobilePredSession = {
+          roundStart,
+          asset: state.asset,
+          interval: state.interval,
+          lockPrice: sessionLock(state.asset, dur, now),
+          prediction: "flat",
+          confidence: 50,
+          mode: "LOADING",
+        };
+        predCache[state.asset][cacheKey] = _mobilePredSession;
+      }
     }
     // Simpan ke sessionStorage agar tetap konsisten saat refresh
     try { sessionStorage.setItem(MOBILE_PRED_SESSION_KEY, JSON.stringify(_mobilePredSession)); } catch (_) {}

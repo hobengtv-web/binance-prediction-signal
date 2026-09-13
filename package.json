@@ -1,0 +1,9 @@
+{
+  "name": "binance-prediction-signal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Binance prediction signal (BTC/ETH) with candle projection + TradingView-style chart",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

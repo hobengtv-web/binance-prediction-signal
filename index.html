@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0e11" />
+  <title>Prediction Signal · BTC / ETH</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◈</span>
+      <span class="title">PREDICTION&nbsp;SIGNAL</span>
+      <span id="src" class="src">SRC —</span>
+      <span id="conn" class="conn conn--off" title="Connection status">●</span>
+    </div>
+
+    <div id="err" class="err" hidden></div>
+  </header>
+
+  <section class="controls">
+    <div class="seg" id="asset-seg">
+      <button class="seg-btn active" data-asset="BTC">BTC</button>
+      <button class="seg-btn" data-asset="ETH">ETH</button>
+    </div>
+    <div class="seg" id="tf-seg">
+      <button class="seg-btn active" data-tf="5m">5m</button>
+      <button class="seg-btn" data-tf="15m">15m</button>
+      <button class="seg-btn" data-tf="1h">1h</button>
+    </div>
+    <div class="seg" id="type-seg">
+      <button class="seg-btn active" data-type="candle">Candle</button>
+      <button class="seg-btn" data-type="line">Line</button>
+    </div>
+  </section>
+
+  <main class="chart-wrap">
+    <div id="chart"></div>
+    <div id="status" class="status">Connecting…</div>
+    <div class="chart-legend">
+      <span id="legend-price">—</span>
+      <span id="legend-ohlc"></span>
+    </div>
+  </main>
+
+  <section class="round" id="round">
+    <div class="round-head">
+      <div class="round-tf" id="round-tf">5m</div>
+      <div class="round-timer" id="round-timer">--:--</div>
+      <div class="round-status" id="round-status">—</div>
+      <span class="donate-label">Profit? </span>
+      <button id="donate-cta" class="donate-btn">☕ Buy me a coffee</button>
+    </div>
+  </section>
+
+  <section class="confidence" id="confidence">
+    <div class="seg conf-cta" id="conf-cta">
+      <button class="seg-btn active" data-mode="SIGNAL">SIGNAL</button>
+      <button class="seg-btn" data-mode="UP">UP</button>
+      <button class="seg-btn" data-mode="DOWN">DOWN</button>
+    </div>
+    <div class="conf-trend">TREND <b id="conf-trend">—</b> · <span id="conf-src">—</span></div>
+    <div class="conf-head">
+      <span class="conf-label">CONFIDENCE <b id="conf-dir">—</b></span>
+      <span class="conf-val" id="conf-val">—</span>
+    </div>
+    <div class="conf-track" id="conf-track"></div>
+  </section>
+
+  <section class="mobile-pred" id="mobile-pred">
+    <div class="mobile-pred-title">MOBILE PREDICTION · LOCK PRICE</div>
+    <div class="mobile-pred-row">
+      <div class="mstat"><span>LOCK PRICE</span><b id="m-lock">—</b></div>
+      <div class="mstat"><span>PREDICTION</span><b id="m-dir">—</b></div>
+      <div class="mstat"><span>CONFIDENCE</span><b id="m-conf">—</b></div>
+      <button id="m-refresh" class="m-refresh" title="Manual refresh">↻</button>
+    </div>
+    <div class="mobile-pred-row">
+      <div class="mstat"><span>PRICE</span><b id="m-price">—</b></div>
+      <div class="mstat"><span>DELTA</span><b id="m-delta">—</b></div>
+      <div class="mstat"><span>MODE</span><b id="m-mode">—</b></div>
+    </div>
+  </section>
+
+  <section class="signal" id="signal">
+    <div class="signal-title">SIGNAL · FIND PEAK TO FADE (UP / DOWN)</div>
+    <div class="signal-row">
+      <div class="sstat"><span>ZONE</span><b id="s-zone">—</b></div>
+      <div class="sstat"><span>MOMENTUM</span><b id="s-momentum">—</b></div>
+      <div class="sstat"><span>RSI</span><b id="s-rsi">—</b></div>
+    </div>
+    <div class="signal-row">
+      <div class="sstat"><span>PEAK</span><b id="s-peak">—</b></div>
+      <div class="sstat"><span>REVERSAL</span><b id="s-reversal">—</b></div>
+      <div class="sstat"><span>REWARD</span><b id="s-reward">—</b></div>
+    </div>
+    <div class="signal-row">
+      <div class="sstat"><span>VOLUME</span><b id="s-vol">—</b></div>
+      <div class="sstat"><span>LIQUIDITY</span><b id="s-liq">—</b></div>
+    </div>
+    <div class="signal-rec" id="s-rec">—</div>
+  </section>
+
+  <section class="conf-debug" id="conf-debug">
+     <div class="cd-head">
+       <b id="conf-debug-head">MOBILE PREDICTION ACCURACY · <span id="conf-debug-count">0</span> rounds</b>
+       <button id="conf-debug-reset" class="cd-reset" title="Reset accuracy data">reset</button>
+     </div>
+     <div id="conf-debug-body" class="cd-body"></div>
+   </section>
+
+  <details class="help">
+    <summary>HOW TO READ &amp; ACT ▾</summary>
+    <div class="help-body">
+      <p><b>Binance Prediction:</b> win <b>UP</b> if price at end of round ≥ open (<b>LOCK</b>); win <b>DOWN</b> if &lt; LOCK. Ties (exact same) are usually <b>refund</b>.</p>
+      <p><b>MOBILE PREDICTION:</b> panel above (LOCK PRICE, PREDICTION, CONFIDENCE, PRICE, DELTA, MODE) gives early signal based on <b>first 1s candle</b> + pattern analysis of 30 previous sessions. Prediction is computed <b>once per session</b> and <b>locked</b> until the session ends — it does not change every tick.</p>
+      <p><b>SIGNAL sync:</b> on <b>SIGNAL</b> tab (confMode = SIGNAL), the <b>signal direction (UP/DOWN)</b> and <b>confidence LED bar direction</b> are locked to the mobile prediction. On <b>UP/DOWN</b> tabs, signal uses realtime price action (counter-trend). <b>Confidence values</b> (%) remain realtime on all tabs — only <b>direction</b> is locked on SIGNAL tab.</p>
+      <p><b>Entry focus:</b> 5m → last <b>2 minutes</b>, 15m → last <b>5 minutes</b>, 1h → last 10 minutes. Outside the window, confidence is lower.</p>
+      <p><b>PEAK / inflection:</b> find price extremum (▲P top / ▼P bottom) within window. This is the core strategy — we <b>FADE</b> (counter) the peak so that at close we get <b>larger reward</b>: top peak → predict <b>DOWN</b>, bottom peak → predict <b>UP</b>.</p>
+      <p><b>REWARD</b> = estimated % movement from PEAK price to projected close (larger = more worth fading).</p>
+      <p><b>ZONE</b> TOP/BOTTOM = price at extremum (reversal candidate). <b>MOMENTUM</b> = slope direction. <b>RSI 5m</b> &gt;70 overbought, &lt;30 oversold.</p>
+      <p><b>TREND</b> = direction of 3 most recent completed sessions (BULLISH / BEARISH / FLAT) used as trend bias — affects CONFIDENCE &amp; signal filter. % = <b>trend strength/age</b>: longer consecutive candles in same direction → higher %; detected <b>reversal</b> (peak against trend direction) → % drops.</p>
+      <p><b>MODE:</b> REVERSAL↑/↓ = we fade the peak (top→DOWN, bottom→UP); CONT = follow trend; CLOSE = last 20 seconds, use current price vs LOCK (most decisive).</p>
+      <p><b>CONFIDENCE</b> = confidence level for chosen direction. Computed from: candle pattern (2-3 candle confirmation post-peak) + indicators (RSI, z-score, momentum, 3-session TREND, liquidity) — then multiplied by <b>feasibility factor</b>: chance price reaches target (LOCK/OPEN) within remaining time. Closer to deadline &amp; further price drifts from LOCK (against chosen direction) → confidence decreases.</b> Always active &amp; realtime.</p>
+      <p><b>CONFIDENCE MODE:</b> <b>SIGNAL</b> = auto counter-trend (UP when price down, etc). Pick <b>UP</b>/<b>DOWN</b> to force confidence display in that direction — e.g. TREND 3 sessions BEARISH → pick DOWN, wait for price to rise forming a peak, then DOWN confidence rises as entry confirmation. <b>Source indicator adjusts:</b> WITH trend → calculated from <b>3 PREVIOUS SESSIONS</b> (proof trend continues); AGAINST trend → calculated from <b>ACTIVE SESSION</b> (old fade-peak logic). Indicator "3 SESSIONS PRIOR / ACTIVE SESSION" above shows the source.</p>
+      <p><b>MOBILE PREDICTION ACCURACY:</b> panel below shows history of mobile prediction accuracy — each dot is green (correct) / red (wrong). Reset only clears accuracy data, not active prediction.</p>
+      <p class="help-cta"><b>How to use:</b> (1) monitor <b>MOBILE PREDICTION</b> for early signal; (2) on SIGNAL tab, signal direction &amp; confidence LED follow mobile prediction — confidence values remain realtime; (3) wait for <b>ENTRY WINDOW: ACTIVE</b>; (4) check <b>PEAK</b> + <b>REVERSAL</b> + <b>REWARD</b>; (5) if MODE REVERSAL &amp; high CONFIDENCE → take UP/DOWN (fade peak); (6) if <b>NEUTRAL</b> (no peak / wrong direction) → don't select or wait; (7) check LIVE alignment for confirmation.</p>
+    </div>
+  </details>
+
+  <div id="donate-popup" class="donate-popup" hidden>
+    <div class="donate-sheet">
+      <div class="donate-header">
+        <b>Buy me a coffee</b>
+        <button id="donate-close" class="donate-close">✕</button>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">USDT address:</p>
+      <div class="donate-addr">
+        <code id="donate-addr-text">0x3bc04EC5b40315ea77eCDe734f310660D52B25E5</code>
+        <button id="donate-copy" class="donate-copy">COPY</button>
+      </div>
+      <img id="donate-qr" class="donate-qr" src="donate-qr.jpeg" alt="USDT QR" onerror="this.style.display='none'" />
+      <p style="font-size:11px;color:var(--muted);margin:8px 0 0;text-align:center;">Terima kasih dukungannya! 🙏</p>
+    </div>
+  </div>
+
+  <script src="chart.js"></script>
+  <script src="tv.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

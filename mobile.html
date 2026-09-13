@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Binance Prediction Signal · Mobile</title>
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --card: #ffffff;
+      --text: #1a1d2b;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --primary: #2563eb;
+      --success: #16a34a;
+      --danger: #dc2626;
+      --warning: #d97706;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding-bottom: 2rem;
+    }
+
+    .container { max-width: 100%; padding: 1rem; }
+
+    .header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .header h1 {
+      font-size: 1.125rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .header p {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+
+    .tf-row {
+      display: flex;
+      gap: 0.5rem;
+      margin: 1rem 0;
+      justify-content: center;
+    }
+
+    .tf-btn {
+      flex: 1;
+      max-width: 120px;
+      padding: 0.875rem;
+      border: 2px solid var(--border);
+      border-radius: 14px;
+      background: var(--card);
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .tf-btn.active {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: white;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 20px;
+      padding: 1.25rem;
+      margin: 0.75rem 0;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      border: 1px solid var(--border);
+    }
+
+    .signal-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.375rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .signal-badge.up { background: #dcfce7; color: #166534; }
+    .signal-badge.down { background: #fee2e2; color: #991b1b; }
+    .signal-badge.flat { background: #f3f4f6; color: #4b5563; }
+
+    .signal-title {
+      font-size: 2rem;
+      font-weight: 800;
+      margin: 0.5rem 0 0.25rem;
+      letter-spacing: -0.02em;
+    }
+
+    .signal-title.up { color: var(--success); }
+    .signal-title.down { color: var(--danger); }
+    .signal-title.flat { color: var(--muted); }
+
+    .signal-sub {
+      font-size: 0.875rem;
+      color: var(--muted);
+    }
+
+    .conf-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 0.75rem;
+    }
+
+    .conf-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .conf-value {
+      font-size: 0.875rem;
+      font-weight: 700;
+    }
+
+    .progress {
+      width: 100%;
+      height: 10px;
+      background: #f3f4f6;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 0.5rem;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--primary), #60a5fa);
+      transition: width 0.4s ease;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+    }
+
+    .info-item {
+      background: #f9fafb;
+      border-radius: 14px;
+      padding: 0.875rem;
+    }
+
+    .info-item .label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .info-item input {
+      margin-top: 0.5rem;
+      width: 100%;
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-family: inherit;
+    }
+
+    .info-item input:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    .asset-row {
+      display: flex;
+      gap: 0.5rem;
+      margin: 1rem 0;
+    }
+
+    .asset-btn {
+      flex: 1;
+      padding: 0.75rem;
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      background: var(--card);
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .asset-btn.active {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: white;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.5rem 0.875rem;
+      border-radius: 999px;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      margin: 0.75rem 0;
+    }
+
+    .status.ok { background: #dcfce7; color: #166534; }
+    .status.warn { background: #fef3c7; color: #92400e; }
+    .status.err { background: #fee2e2; color: #991b1b; }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 1rem;
+      border: none;
+      border-radius: 14px;
+      background: var(--primary);
+      color: white;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 0.75rem;
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .footer {
+      margin-top: 1.5rem;
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+        Prediction Signal
+      </h1>
+      <p>Mobile First · Real-time Binance · 5m · 15m · 1h</p>
+    </header>
+
+    <div class="asset-row">
+      <button class="asset-btn active" data-asset="BTC">BTC</button>
+      <button class="asset-btn" data-asset="ETH">ETH</button>
+    </div>
+
+    <div class="tf-row">
+      <button class="tf-btn active" data-tf="5m">5 Menit</button>
+      <button class="tf-btn" data-tf="15m">15 Menit</button>
+      <button class="tf-btn" data-tf="1h">1 Jam</button>
+    </div>
+
+    <div class="card">
+      <div class="signal-badge" id="signalBadge">MENUNGGU</div>
+      <div class="signal-title" id="signalTitle">—</div>
+      <div class="signal-sub" id="signalSub">Sinyal akan muncul saat sesi prediction aktif</div>
+
+      <div class="conf-row">
+        <span class="conf-label">Confidence</span>
+        <span class="conf-value" id="confValue">0%</span>
+      </div>
+      <div class="progress">
+        <div class="progress-fill" id="confBar"></div>
+      </div>
+    </div>
+
+    <div class="card" id="countdownCard">
+      <div class="signal-badge flat" style="margin-bottom:0.5rem;">COUNTDOWN</div>
+      <div style="text-align:center; padding: 0.5rem 0;">
+        <div style="font-size: 0.75rem; color: var(--muted); margin-bottom: 0.25rem;">Sisa Waktu Sesi</div>
+        <div style="font-size: 2.5rem; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;" id="countdownTimer">--:--</div>
+        <div style="font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem;" id="countdownLabel">Menunggu sesi...</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="info-grid">
+        <div class="info-item">
+          <div class="label">Z-Score</div>
+          <div class="value" id="zScore">—</div>
+        </div>
+        <div class="info-item">
+          <div class="label">Trend</div>
+          <div class="value" id="trend">—</div>
+        </div>
+        <div class="info-item">
+          <div class="label">Volume Rel</div>
+          <div class="value" id="volRel">—</div>
+        </div>
+        <div class="info-item">
+          <div class="label">Likuiditas</div>
+          <div class="value" id="liquidity">—</div>
+        </div>
+        <div class="info-item">
+          <div class="label">Harga</div>
+          <div class="value" id="price">—</div>
+        </div>
+        <div class="info-item">
+          <div class="label">Lock Price</div>
+          <div class="value" id="lockPrice">—</div>
+          <input type="number" id="lockPriceManual" step="any" placeholder="Lock price dari Binance Prediction" style="margin-top:0.5rem;width:100%;padding:0.5rem;border:1px solid var(--border);border-radius:8px;font-size:0.875rem;">
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="winrateCard" style="display:none;">
+      <div class="signal-badge flat" style="margin-bottom:0.5rem;">WINRATE</div>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-size:0.75rem; color:var(--muted);">Akurasi Prediksi</div>
+          <div style="font-size:1.75rem; font-weight:800;" id="winrateValue">0%</div>
+          <div style="font-size:0.75rem; color:var(--muted);" id="winrateDetail">0/0 prediksi benar</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:0.75rem; color:var(--muted);">Total Prediksi</div>
+          <div style="font-size:1.25rem; font-weight:700;" id="totalPred">0</div>
+        </div>
+      </div>
+      <button class="btn" style="margin-top:0.75rem; background:var(--danger); padding:0.75rem; font-size:0.875rem;" onclick="clearHistory()">Reset History</button>
+    </div>
+
+    <div class="status warn" id="status">
+      <span class="dot"></span>
+      <span id="statusText">Menghubungkan ke server lokal...</span>
+    </div>
+
+    <button class="btn" id="refreshBtn">Refresh Sinyal</button>
+    <button class="btn" style="background:var(--danger); margin-top:0.5rem;" onclick="forceNewSession()">Force New Session</button>
+
+    <div class="footer">
+      Data: Binance Public API via localhost:8000<br>
+      Logika: window analysis + peak detection + confidence scoring
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = "http://localhost:8000";
+
+    const INTERVAL_MS = { "5m": 300000, "15m": 900000, "1h": 3600000 };
+
+    let state = {
+      asset: "BTC",
+      interval: "5m",
+      candles: { BTC: {}, ETH: {} },
+      ticker: { BTC: null, ETH: null },
+      connected: false
+    };
+
+    let currentRoundStart = null;
+    let lockedPredictions = {};
+    let predictionHistory = [];
+    const HISTORY_KEY = "bps_pred_history_v1";
+    const STATE_KEY = "bps_state_v1";
+
+    function slotKey(asset, tf) {
+      return `${asset}_${tf}`;
+    }
+
+    function currentSlot() {
+      return slotKey(state.asset, state.interval);
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STATE_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw);
+          if (saved.asset) state.asset = saved.asset;
+          if (saved.interval) state.interval = saved.interval;
+        }
+      } catch (_) {}
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem(STATE_KEY, JSON.stringify({
+          asset: state.asset,
+          interval: state.interval
+        }));
+      } catch (_) {}
+    }
+
+    function loadHistory() {
+      try {
+        const raw = localStorage.getItem(HISTORY_KEY);
+        if (raw) predictionHistory = JSON.parse(raw);
+      } catch (_) { predictionHistory = []; }
+    }
+
+    function saveHistory() {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(predictionHistory.slice(-500)));
+      } catch (_) {}
+    }
+
+    function loadManualLockPrice() {
+      try {
+        const raw = localStorage.getItem(`bps_manual_lock_${currentSlot()}`);
+        if (raw) {
+          const val = parseFloat(raw);
+          if (!isNaN(val)) {
+            els.lockPriceManual.value = val;
+          }
+        }
+      } catch (_) {}
+    }
+
+    function saveManualLockPrice() {
+      try {
+        const val = parseFloat(els.lockPriceManual.value);
+        if (!isNaN(val) && val > 0) {
+          localStorage.setItem(`bps_manual_lock_${currentSlot()}`, val.toString());
+        } else {
+          localStorage.removeItem(`bps_manual_lock_${currentSlot()}`);
+        }
+      } catch (_) {}
+    }
+
+    function getRoundStart(tf, now) {
+      const dur = INTERVAL_MS[tf] || 300000;
+      return Math.floor(now / dur) * dur;
+    }
+
+    function isSameSession(locked, now) {
+      if (!locked || !locked.roundStart) return false;
+      const dur = INTERVAL_MS[locked.tf] || 300000;
+      const currentRoundStart = getRoundStart(locked.tf, now);
+      const tolerance = 5000; // 5 detik grace period untuk clock drift
+      
+      // Strict session matching
+      const assetMatch = locked.asset === state.asset;
+      const tfMatch = locked.tf === state.interval;
+      const timeMatch = Math.abs(locked.roundStart - currentRoundStart) < tolerance;
+      const ageMatch = now - locked.capturedAt < dur; // Harus lebih muda dari 1 sesi
+      
+      return assetMatch && tfMatch && timeMatch && ageMatch;
+    }
+
+    function loadLocked() {
+      const candidates = [];
+      const slot = currentSlot();
+      
+      // Try per-slot localStorage
+      try {
+        const raw = localStorage.getItem(`bps_lock_${slot}`);
+        if (raw) candidates.push({ data: JSON.parse(raw), source: 'localStorage' });
+      } catch (e) {
+        console.log('[LOCK] localStorage error:', e);
+      }
+      
+      // Try per-slot sessionStorage
+      try {
+        const raw = sessionStorage.getItem(`bps_lock_${slot}`);
+        if (raw) candidates.push({ data: JSON.parse(raw), source: 'sessionStorage' });
+      } catch (e) {
+        console.log('[LOCK] sessionStorage error:', e);
+      }
+      
+      // Try window.name
+      try {
+        if (window.name && window.name.startsWith('LOCKED:')) {
+          const locked = JSON.parse(window.name.substring(7));
+          candidates.push({ data: locked, source: 'window.name' });
+        }
+      } catch (e) {
+        console.log('[LOCK] window.name error:', e);
+      }
+
+      const now = Date.now();
+      console.log('[LOCK] trying to restore for', slot, 'candidates:', candidates.length, 'now:', now);
+      
+      for (const candidate of candidates) {
+        const locked = candidate.data;
+        if (isSameSession(locked, now)) {
+          lockedPredictions[slot] = locked;
+          currentRoundStart = locked.roundStart;
+          console.log('[LOCK] RESTORED from', candidate.source, ':', locked);
+          return true;
+        } else {
+          console.log('[LOCK] stale prediction from', candidate.source, ':', locked);
+        }
+      }
+
+      console.log('[LOCK] no valid locked prediction found for', slot);
+      return false;
+    }
+
+    function saveLocked() {
+      const slot = currentSlot();
+      if (!lockedPredictions[slot]) return;
+      const payload = JSON.stringify(lockedPredictions[slot]);
+      
+      try { localStorage.setItem(`bps_lock_${slot}`, payload); } catch (_) {}
+      try { sessionStorage.setItem(`bps_lock_${slot}`, payload); } catch (_) {}
+      try { window.name = 'LOCKED:' + payload; } catch (_) {}
+      
+      console.log('[LOCK] saved for', slot, ':', lockedPredictions[slot]);
+    }
+
+    function clearLocked() {
+      const slot = currentSlot();
+      delete lockedPredictions[slot];
+      try { localStorage.removeItem(`bps_lock_${slot}`); } catch (_) {}
+      try { sessionStorage.removeItem(`bps_lock_${slot}`); } catch (_) {}
+      try { window.name = ''; } catch (_) {}
+    }
+
+    function getCurrentLocked() {
+      return lockedPredictions[currentSlot()] || null;
+    }
+
+    function setCurrentLocked(pred) {
+      lockedPredictions[currentSlot()] = pred;
+    }
+
+    function evaluatePastRound(asset, tf, roundStartSec) {
+      const tfMap = tf === "5m" ? "5m" : tf === "15m" ? "15m" : "1h";
+      const candles = state.candles[asset][tfMap] || [];
+      const roundCandle = candles.find(c => c.time === roundStartSec);
+      if (!roundCandle) return null;
+      const actual = roundCandle.close >= roundCandle.open ? "up" : "down";
+      return { lock: roundCandle.open, close: roundCandle.close, actual };
+    }
+
+    async function fetchKlines(symbol, tf, limit = 100, beforeSec = 0) {
+      const url = new URL(`${API_BASE}/api/klines`);
+      url.searchParams.set('symbol', symbol);
+      url.searchParams.set('tf', tf);
+      url.searchParams.set('limit', limit.toString());
+      if (beforeSec > 0) url.searchParams.set('before', beforeSec.toString());
+      const r = await fetch(url.toString());
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return await r.json();
+    }
+
+    async function analyzeHistoricalPatterns(asset, tf) {
+      try {
+        const sym = asset === 'BTC' ? 'BTCUSDT' : 'ETHUSDT';
+        const cacheKey = `patterns_${asset}_${tf}`;
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Date.now() - parsed.ts < 300000) return parsed.data;
+        }
+
+        const data = await fetchKlines(sym, '5m', 30);
+        const candles5m = data.candles || [];
+        if (candles5m.length < 5) return null;
+
+        const patterns = [];
+        for (let i = 0; i < candles5m.length - 1; i++) {
+          const session = candles5m[i];
+          patterns.push({
+            outcome: session.close >= session.open ? 'up' : 'down',
+            firstCandleDir: session.close > session.open ? 'bullish' :
+                            session.close < session.open ? 'bearish' : 'doji'
+          });
+        }
+
+        const bullishFirst = patterns.filter(p => p.firstCandleDir === 'bullish');
+        const bearishFirst = patterns.filter(p => p.firstCandleDir === 'bearish');
+
+        const bullishWinRate = bullishFirst.length > 0
+          ? bullishFirst.filter(p => p.outcome === 'up').length / bullishFirst.length
+          : 0.5;
+        const bearishWinRate = bearishFirst.length > 0
+          ? bearishFirst.filter(p => p.outcome === 'down').length / bearishFirst.length
+          : 0.5;
+
+        const result = {
+          bullishWinRate,
+          bearishWinRate,
+          totalSessions: patterns.length,
+          recentTrend: patterns.slice(-5).filter(p => p.outcome === 'up').length / 5
+        };
+
+        try { sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: result })); } catch (_) {}
+        return result;
+      } catch (e) {
+        console.error('Pattern analysis error:', e);
+        return null;
+      }
+    }
+
+    async function predictWithPatterns(asset, tf, data) {
+      const ones = (data.candles[asset]["1s"] || []);
+      const ticker = data.ticker[asset];
+      if (!ticker) return null;
+
+      const C = ticker.last;
+      const durMs = INTERVAL_MS[tf] || 300000;
+      const now = Date.now();
+      const roundStart = Math.floor(now / durMs) * durMs;
+      const roundStartSec = Math.floor(roundStart / 1000);
+
+      const sortedOnes = ones.slice().sort((a, b) => a.time - b.time);
+      let lockPrice = null;
+
+      // Lock price = harga di boundary sesi (menit 00)
+      // Jika sudah di dalam sesi atau sangat dekat dengan boundary, gunakan harga ticker
+      // Ini akan cocok dengan Binance Prediction karena sama-sama menggunakan harga live di boundary
+      const timeSinceRoundStart = now - roundStart;
+      
+      if (timeSinceRoundStart >= -5000) {
+        // Di dalam sesi atau maksimal 5 detik sebelum sesi dimulai
+        // Gunakan harga ticker sebagai lock price
+        lockPrice = C;
+        console.log('[LOCK] using ticker price as lock price:', lockPrice, 'timeSinceRoundStart:', timeSinceRoundStart, 'ms');
+      } else {
+        // Belum dekat dengan session boundary, gunakan close candle terakhir sebelum boundary
+        const beforeLock = sortedOnes.filter(c => c.time < roundStartSec);
+        if (beforeLock.length > 0) {
+          const lastBefore = beforeLock[beforeLock.length - 1];
+          lockPrice = lastBefore.close;
+        } else {
+          lockPrice = C;
+        }
+        console.log('[LOCK] using prior candle close (before session):', lockPrice);
+      }
+
+      const patterns = await analyzeHistoricalPatterns(asset, tf);
+      const sessionOnes = sortedOnes.filter(c => c.time >= roundStartSec);
+      const firstOne = sessionOnes[0];
+      let currentFirstDir = null;
+
+      if (firstOne) {
+        const candleAge = now - (firstOne.time * 1000);
+        if (candleAge >= 1000) {
+          currentFirstDir = firstOne.close > firstOne.open ? 'bullish' :
+                            firstOne.close < firstOne.open ? 'bearish' : 'doji';
+        }
+      }
+
+      let prediction = 'flat';
+      let confidence = 50;
+      let mode = "PATTERN";
+
+      if (patterns && currentFirstDir && currentFirstDir !== 'doji') {
+        if (currentFirstDir === 'bullish') {
+          const winRate = patterns.bullishWinRate;
+          prediction = winRate > 0.5 ? 'up' : 'down';
+          confidence = Math.round(winRate * 100);
+          mode = winRate > 0.6 ? "REVERSAL↑" : "CONT↑";
+        } else if (currentFirstDir === 'bearish') {
+          const winRate = patterns.bearishWinRate;
+          prediction = winRate > 0.5 ? 'down' : 'up';
+          confidence = Math.round(winRate * 100);
+          mode = winRate > 0.6 ? "REVERSAL↓" : "CONT↓";
+        }
+      } else if (patterns && currentFirstDir === 'doji') {
+        if (patterns.recentTrend > 0.5) {
+          prediction = 'up';
+          confidence = 55;
+          mode = 'CONT↑';
+        } else if (patterns.recentTrend < 0.5) {
+          prediction = 'down';
+          confidence = 55;
+          mode = 'CONT↓';
+        }
+      }
+
+      const priceDelta = (C - lockPrice) / lockPrice;
+      const zScore = priceDelta / 0.01;
+
+      return {
+        asset,
+        tf,
+        price: C,
+        lockPrice,
+        prediction,
+        mode,
+        conf: confidence,
+        z: zScore,
+        slope: priceDelta * 100,
+        trendBias: patterns ? (patterns.recentTrend > 0.5 ? 'bullish' : 'bearish') : 'flat',
+        liquidity: 'NORMAL',
+        volRel: '1.0',
+        isTopPeak: false,
+        isBotPeak: false,
+        overbought: false,
+        oversold: false
+      };
+    }
+
+    function predictImmediately(asset, tf, data) {
+      const ticker = data.ticker[asset];
+      if (!ticker) return null;
+
+      const C = ticker.last;
+      const durMs = INTERVAL_MS[tf] || 300000;
+      const now = Date.now();
+      const roundStart = Math.floor(now / durMs) * durMs;
+      const roundStartSec = Math.floor(roundStart / 1000);
+
+      const ones = (data.candles[asset]["1s"] || []);
+      const sortedOnes = ones.slice().sort((a, b) => a.time - b.time);
+      let lockPrice = null;
+
+      // Lock price dari close candle 1s terakhir SEBELUM boundary sesi
+      const beforeLock = sortedOnes.filter(c => c.time < roundStartSec);
+      if (beforeLock.length > 0) {
+        const lastBefore = beforeLock[beforeLock.length - 1];
+        lockPrice = lastBefore.close;
+      } else {
+        lockPrice = C;
+      }
+
+      // Prediksi awal: arah harga saat ini relatif terhadap lock price
+      const priceDelta = (C - lockPrice) / lockPrice;
+      let prediction = 'flat';
+      let confidence = 50;
+      let mode = "IMMEDIATE";
+
+      if (priceDelta > 0.0005) {
+        prediction = 'up';
+        confidence = Math.min(100, Math.round(50 + priceDelta * 5000));
+        mode = 'CONT↑';
+      } else if (priceDelta < -0.0005) {
+        prediction = 'down';
+        confidence = Math.min(100, Math.round(50 + Math.abs(priceDelta) * 5000));
+        mode = 'CONT↓';
+      }
+
+      return {
+        asset,
+        tf,
+        price: C,
+        lockPrice,
+        prediction,
+        mode,
+        conf: confidence,
+        z: priceDelta / 0.01,
+        slope: priceDelta * 100,
+        trendBias: 'flat',
+        liquidity: 'NORMAL',
+        volRel: '1.0',
+        isTopPeak: false,
+        isBotPeak: false,
+        overbought: false,
+        oversold: false
+      };
+    }
+
+    function aggregate5s(ones) {
+      const sorted = ones.slice().sort((a, b) => a.time - b.time);
+      const out = [];
+      for (const b of sorted) {
+        const t5 = Math.floor(b.time / 5) * 5;
+        const last = out[out.length - 1];
+        if (last && last.time === t5) {
+          last.high = Math.max(last.high, b.high);
+          last.low = Math.min(last.low, b.low);
+          last.close = b.close;
+          last.vol = (last.vol || 0) + (b.vol || 0);
+        } else {
+          out.push({ time: t5, open: b.open, high: b.high, low: b.low, close: b.close, vol: b.vol || 0, openTime: t5 * 1000, closeTime: (t5 + 5) * 1000 });
+        }
+      }
+      return out;
+    }
+
+    const els = {
+      assetBtns: document.querySelectorAll('.asset-btn'),
+      tfBtns: document.querySelectorAll('.tf-btn'),
+      signalBadge: document.getElementById('signalBadge'),
+      signalTitle: document.getElementById('signalTitle'),
+      signalSub: document.getElementById('signalSub'),
+      confValue: document.getElementById('confValue'),
+      confBar: document.getElementById('confBar'),
+      zScore: document.getElementById('zScore'),
+      trend: document.getElementById('trend'),
+      volRel: document.getElementById('volRel'),
+      liquidity: document.getElementById('liquidity'),
+      price: document.getElementById('price'),
+      lockPrice: document.getElementById('lockPrice'),
+      lockPriceManual: document.getElementById('lockPriceManual'),
+      status: document.getElementById('status'),
+      statusText: document.getElementById('statusText'),
+      refreshBtn: document.getElementById('refreshBtn')
+    };
+
+    function fmt(n, d = 2) {
+      if (n == null || isNaN(n)) return "—";
+      return Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+    }
+
+    function fmtPrice(n) {
+      if (n == null || isNaN(n)) return "—";
+      const d = n >= 1000 ? 2 : n >= 1 ? 3 : 5;
+      return Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+    }
+
+    function setStatus(msg, type = "warn") {
+      els.status.className = `status ${type}`;
+      els.statusText.textContent = msg;
+    }
+
+    async function fetchSnapshot() {
+      const r = await fetch(`${API_BASE}/api/snapshot`);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return await r.json();
+    }
+
+    function displaySignal(result) {
+      if (!result) {
+        els.signalBadge.className = "signal-badge flat";
+        els.signalBadge.textContent = "TIDAK ADA DATA";
+        els.signalTitle.className = "signal-title flat";
+        els.signalTitle.textContent = "—";
+        els.signalSub.textContent = "Menunggu data...";
+        return;
+      }
+
+      els.signalBadge.className = `signal-badge ${result.prediction}`;
+      els.signalBadge.textContent = result.prediction === "up" ? "UP ▲" : result.prediction === "down" ? "DOWN ▼" : "FLAT";
+
+      els.signalTitle.className = `signal-title ${result.prediction}`;
+      els.signalTitle.textContent = result.prediction === "up" ? "UP" : result.prediction === "down" ? "DOWN" : "—";
+
+      const modeText = {
+        "REVERSAL↓": "Fade peak atas → prediksi DOWN",
+        "REVERSAL↑": "Fade peak bawah → prediksi UP",
+        "CONT": "Ikuti tren saat ini",
+        "CLOSE": "Dekat akhir sesi"
+      };
+      els.signalSub.textContent = modeText[result.mode] || result.mode;
+
+      els.confValue.textContent = `${result.conf}%`;
+      els.confBar.style.width = `${result.conf}%`;
+
+      els.zScore.textContent = result.z.toFixed(2);
+      els.trend.textContent = result.trendBias.toUpperCase();
+      els.volRel.textContent = `${result.volRel}×`;
+      els.liquidity.textContent = result.liquidity;
+      els.price.textContent = fmtPrice(result.price);
+      els.lockPrice.textContent = fmtPrice(result.lockPrice);
+      
+      // Show manual indicator
+      const manualLock = parseFloat(els.lockPriceManual.value);
+      if (!isNaN(manualLock) && manualLock > 0) {
+        els.lockPrice.textContent += ' (manual)';
+      }
+    }
+
+    function displayLockedPrediction(pred) {
+      els.signalBadge.className = `signal-badge ${pred.dir}`;
+      els.signalBadge.textContent = pred.dir === "up" ? "UP ▲ (LOCKED)" : "DOWN ▼ (LOCKED)";
+      
+      els.signalTitle.className = `signal-title ${pred.dir}`;
+      els.signalTitle.textContent = pred.dir === "up" ? "UP" : "DOWN";
+      
+      els.signalSub.textContent = `Sinyal dikunci · ${pred.mode} · Conf ${pred.conf}%`;
+      
+      els.confValue.textContent = `${pred.conf}%`;
+      els.confBar.style.width = `${pred.conf}%`;
+      
+      els.zScore.textContent = (pred.z || 0).toFixed(2);
+      els.trend.textContent = (pred.trendBias || '—').toUpperCase();
+      els.volRel.textContent = `${pred.volRel || '—'}×`;
+      els.liquidity.textContent = pred.liquidity || '—';
+      els.lockPrice.textContent = fmtPrice(pred.lockPrice);
+      
+      // Show manual indicator
+      const manualLock = parseFloat(els.lockPriceManual.value);
+      if (!isNaN(manualLock) && manualLock > 0) {
+        els.lockPrice.textContent += ' (manual)';
+      }
+      
+      if (state.ticker[state.asset]) {
+        els.price.textContent = fmtPrice(state.ticker[state.asset].last);
+      }
+    }
+
+    function displayWaiting() {
+      els.signalBadge.className = "signal-badge flat";
+      els.signalBadge.textContent = "MENUNGGU";
+      els.signalTitle.className = "signal-title flat";
+      els.signalTitle.textContent = "—";
+      els.signalSub.textContent = "Menunggu sinyal di sesi baru...";
+      els.confValue.textContent = "0%";
+      els.confBar.style.width = "0%";
+    }
+
+    function updateWinrateDisplay() {
+      const wins = predictionHistory.filter(h => h.won === 1).length;
+      const total = predictionHistory.length;
+      const wr = total > 0 ? ((wins / total) * 100).toFixed(1) : 0;
+      
+      const card = document.getElementById('winrateCard');
+      if (total > 0) {
+        card.style.display = 'block';
+        document.getElementById('winrateValue').textContent = wr + '%';
+        document.getElementById('winrateDetail').textContent = `${wins}/${total} prediksi benar`;
+        document.getElementById('totalPred').textContent = total;
+      } else {
+        card.style.display = 'none';
+      }
+      
+      if (total > 0) {
+        setStatus(`Live · Winrate: ${wr}% (${wins}/${total})`, "ok");
+      }
+    }
+
+    function updateCountdown() {
+      const tf = state.interval;
+      const dur = INTERVAL_MS[tf] || 300000;
+      const now = Date.now();
+      const roundStart = getRoundStart(tf, now);
+      const roundEnd = roundStart + dur;
+      
+      const remaining = roundEnd - now;
+      const timerEl = document.getElementById('countdownTimer');
+      const labelEl = document.getElementById('countdownLabel');
+      
+      if (remaining <= 0) {
+        timerEl.textContent = "00:00";
+        labelEl.textContent = "Sesi baru dimulai...";
+        return;
+      }
+      
+      const totalSeconds = Math.ceil(remaining / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      
+      timerEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+      
+      const pct = ((dur - remaining) / dur) * 100;
+      labelEl.textContent = `${Math.round(100 - pct)}% tersisa · Sesi ${tf}`;
+    }
+
+    function clearHistory() {
+      if (!confirm('Reset semua history prediksi?')) return;
+      predictionHistory = [];
+      saveHistory();
+      updateWinrateDisplay();
+    }
+
+    function forceNewSession() {
+      if (!confirm('Force new session? Ini akan menghapus locked prediction dan generate sinyal baru.')) return;
+      clearLocked();
+      currentRoundStart = null;
+      refresh();
+    }
+
+    async function refresh() {
+      const tf = state.interval;
+      const asset = state.asset;
+      const now = Date.now();
+      const dur = INTERVAL_MS[tf] || 300000;
+      const currentRoundStart = getRoundStart(tf, now);
+
+      const currentLocked = getCurrentLocked();
+      
+      console.log('[REFRESH] now:', new Date(now).toISOString(), 'currentRoundStart:', new Date(currentRoundStart).toISOString());
+      if (currentLocked) {
+        console.log('[REFRESH] currentLocked:', { asset: currentLocked.asset, tf: currentLocked.tf, roundStart: currentLocked.roundStart, lockPrice: currentLocked.lockPrice, capturedAt: new Date(currentLocked.capturedAt).toISOString() });
+        console.log('[REFRESH] isSameSession:', isSameSession(currentLocked, now));
+      }
+      
+      // Clear stale locked prediction if not from current session
+      if (currentLocked && !isSameSession(currentLocked, now)) {
+        console.log('[REFRESH] clearing stale prediction');
+        clearLocked();
+      }
+      
+      const freshLocked = getCurrentLocked();
+      
+      if (freshLocked && isSameSession(freshLocked, now)) {
+        console.log('[REFRESH] using locked prediction');
+        displayLockedPrediction(freshLocked);
+        if (state.ticker[state.asset]) {
+          els.price.textContent = fmtPrice(state.ticker[state.asset].last);
+        }
+        updateWinrateDisplay();
+        updateCountdown();
+        setStatus("Live · Binance Prediction", "ok");
+        return;
+      }
+
+      console.log('[REFRESH] generating new prediction');
+      try {
+        els.refreshBtn.disabled = true;
+        els.refreshBtn.textContent = "Memuat...";
+        setStatus("Mengambil data Binance...", "warn");
+
+        const data = await fetchSnapshot();
+
+        state.candles[state.asset] = data.candles[state.asset] || {};
+        state.ticker[state.asset] = data.ticker[state.asset];
+        state.connected = true;
+
+        const roundStart = getRoundStart(tf, now);
+        const roundStartSec = Math.floor(roundStart / 1000);
+
+        if (currentRoundStart && currentRoundStart !== roundStart) {
+          const prevStartSec = Math.floor(currentRoundStart / 1000);
+          const result = evaluatePastRound(asset, tf, prevStartSec);
+          if (result && currentLocked) {
+            const won = currentLocked.dir === result.actual ? 1 : 0;
+            predictionHistory.push({
+              ts: Date.now(),
+              asset,
+              tf,
+              roundStart: currentRoundStart,
+              dir: currentLocked.dir,
+              conf: currentLocked.conf,
+              actual: result.actual,
+              won
+            });
+            saveHistory();
+          }
+          currentRoundStart = roundStart;
+          clearLocked();
+        } else if (!currentRoundStart) {
+          currentRoundStart = roundStart;
+        }
+
+        // Generate immediate prediction (no lag, based on current price vs lock)
+        const immediate = predictImmediately(asset, tf, data);
+        
+        // Generate pattern-based prediction in background (for future use)
+        const patternPromise = predictWithPatterns(asset, tf, data);
+
+        // Use immediate prediction first (instant)
+        let finalResult = immediate;
+        
+        // If immediate returns flat, wait for pattern-based
+        if (!immediate || immediate.prediction === "flat") {
+          finalResult = await patternPromise;
+        }
+
+        if (finalResult && finalResult.prediction !== "flat") {
+          const newLock = {
+            asset: state.asset,
+            tf: state.interval,
+            dir: finalResult.prediction,
+            conf: finalResult.conf,
+            mode: finalResult.mode,
+            lockPrice: finalResult.lockPrice,
+            roundStart,
+            capturedAt: now,
+            z: finalResult.z,
+            slope: finalResult.slope,
+            trendBias: finalResult.trendBias,
+            liquidity: finalResult.liquidity,
+            volRel: finalResult.volRel
+          };
+          setCurrentLocked(newLock);
+          saveLocked();
+          displayLockedPrediction(newLock);
+        } else {
+          displayWaiting();
+        }
+
+        updateWinrateDisplay();
+        updateCountdown();
+        setStatus("Live · Binance Prediction", "ok");
+      } catch (e) {
+        console.error('Fetch error:', e);
+        setStatus("Gagal: " + e.message, "err");
+      } finally {
+        els.refreshBtn.disabled = false;
+        els.refreshBtn.textContent = "Refresh Sinyal";
+      }
+    }
+
+    els.assetBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        els.assetBtns.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        state.asset = btn.dataset.asset;
+        saveState();
+        refresh();
+      });
+    });
+
+    els.tfBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        els.tfBtns.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        state.interval = btn.dataset.tf;
+        saveState();
+        refresh();
+        updateCountdown();
+      });
+    });
+
+    els.refreshBtn.addEventListener("click", refresh);
+
+    els.lockPriceManual.addEventListener("input", () => {
+      saveManualLockPrice();
+      refresh();
+    });
+
+    setInterval(refresh, 5000);
+    setInterval(updateCountdown, 1000);
+
+    loadState();
+    loadHistory();
+    loadLocked();
+    loadManualLockPrice();
+    refresh();
+    updateCountdown();
+  </script>
+</body>
+</html>

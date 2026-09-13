@@ -1825,6 +1825,19 @@ function start() {
   loadOlderCandles("ETH", 1000).catch(() => {});
   // timers
   setInterval(updateProjection, 1000);
+
+  // Active visitor tracking
+  let visitorId = localStorage.getItem("bps_vid") || null;
+  function sendVisit() {
+    if (!visitorId) {
+      fetch("/api/visit").then(r => r.json()).then(d => { visitorId = d.id; localStorage.setItem("bps_vid", visitorId); }).catch(() => {});
+    } else {
+      fetch(`/api/visit?id=${visitorId}`).catch(() => {});
+    }
+  }
+  sendVisit();
+  setInterval(sendVisit, 10000);
+
   window.addEventListener("resize", () => chart && chart.fit());
 }
 start();

@@ -336,8 +336,8 @@
           const maxAnchor = lastT + self.visible * barSec;
           // drag LEFT = older data, drag RIGHT = newer (live edge)
           self.anchorTime = clamp(self._panAnchor0 - dxBars * barSec, firstT, maxAnchor);
-          // dragging BACK into the live region → resume following
-          if (self.anchorTime <= liveLeft) { self.anchorTime = null; self.follow = true; }
+          // dragging toward the LIVE (newer) edge → resume following
+          if (self.anchorTime >= liveLeft) { self.anchorTime = null; self.follow = true; }
           // lazy-load: reached the start of loaded data → request older candles
           if (self.anchorTime != null && self.onReachStart && !self._loadingStart && !self.follow) {
             const leftT = self._leftTime();

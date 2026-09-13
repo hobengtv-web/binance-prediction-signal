@@ -1826,17 +1826,25 @@ function start() {
   // timers
   setInterval(updateProjection, 1000);
 
-  // Active visitor tracking
+   // Active visitor tracking
   let visitorId = localStorage.getItem("bps_vid") || null;
+  const visitorsEl = document.getElementById("visitors");
   function sendVisit() {
     if (!visitorId) {
-      fetch("/api/visit").then(r => r.json()).then(d => { visitorId = d.id; localStorage.setItem("bps_vid", visitorId); }).catch(() => {});
+      fetch("/api/visit").then(r => r.json()).then(d => { visitorId = d.id; localStorage.setItem("bps_vid", visitorId); updateVisitors(); }).catch(() => {});
     } else {
       fetch(`/api/visit?id=${visitorId}`).catch(() => {});
     }
   }
+  function updateVisitors() {
+    fetch("/api/stats").then(r => r.json()).then(d => {
+      if (visitorsEl) visitorsEl.innerHTML = `👁 <b>${d.activeUsers || 0}</b>`;
+    }).catch(() => {});
+  }
   sendVisit();
   setInterval(sendVisit, 10000);
+  setInterval(updateVisitors, 15000);
+  updateVisitors();
 
   window.addEventListener("resize", () => chart && chart.fit());
 }

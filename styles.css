@@ -41,6 +41,8 @@ body {
 .conn--on { color: var(--up); }
 .conn--off { color: var(--down); }
 .src { font-size: 9px; color: var(--muted); letter-spacing: .08em; margin-left: auto; margin-right: 8px; font-weight: 600; }
+.visitors { font-size: 9px; color: var(--muted); letter-spacing: .04em; margin-right: 8px; font-weight: 600; }
+.visitors b { color: var(--accent); }
 .err {
   margin: 6px 12px 0; padding: 8px 10px; border-radius: 8px;
   background: rgba(246,70,93,.12); border: 1px solid rgba(246,70,93,.4);

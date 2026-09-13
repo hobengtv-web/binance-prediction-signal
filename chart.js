@@ -278,10 +278,10 @@
     ctx.textBaseline = "top"; ctx.textAlign = "left";
     if (this._loadingStart) {
       ctx.fillStyle = "rgba(240,185,11,.95)";
-      ctx.fillText("Memuat sesi sebelumnya…", plotL + 8, plotT + 6);
+      ctx.fillText("Loading previous session…", plotL + 8, plotT + 6);
     } else if (this.follow) {
       ctx.fillStyle = "rgba(132,142,156,.6)";
-      ctx.fillText("← tarik untuk sesi sebelumnya", plotL + 8, plotT + 6);
+      ctx.fillText("← pull to load previous session", plotL + 8, plotT + 6);
     }
 
     // crosshair

@@ -250,15 +250,17 @@ async function fetchOlder(sym, beforeSec, limit) {
       const j = await r.json();
       if (j && Array.isArray(j.candles) && j.candles.length) return j.candles;
     }
-  } catch (_) {}
+  } catch (e) { console.warn("[HISTORY] proxy fetch failed:", e); }
   // 2) fallback: direct Binance (only if the browser can reach it)
-  const rows = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=1s&limit=${limit}&endTime=${beforeSec * 1000 - 1000}`);
-  return rows.map((r) => ({
-    time: Math.floor(r[0] / 1000),
-    open: +r[1], high: +r[2], low: +r[3], close: +r[4],
-    vol: +r[5], trades: +r[8],
-    openTime: r[0], closeTime: r[6],
-  }));
+  try {
+    const rows = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=1s&limit=${limit}&endTime=${beforeSec * 1000 - 1000}`);
+    return rows.map((r) => ({
+      time: Math.floor(r[0] / 1000),
+      open: +r[1], high: +r[2], low: +r[3], close: +r[4],
+      vol: +r[5], trades: +r[8],
+      openTime: r[0], closeTime: r[6],
+    }));
+  } catch (e) { console.warn("[HISTORY] direct Binance fetch failed:", e); throw e; }
 }
 
 async function loadOlderCandles(sym, limit) {
@@ -267,11 +269,11 @@ async function loadOlderCandles(sym, limit) {
   const oldest = store.candles.length ? store.candles[0].time : Math.floor(Date.now() / 1000);
   historyLoading[sym] = true;
   lastLoadAt[sym] = Date.now();
-  setStatus("Memuat sesi sebelumnya…");
+    setStatus("Loading previous session…");
   try {
     const ones = await fetchOlder(sym, oldest, limit);
     const added = mergeOlder(sym, ones);
-    if (added === 0) { historyExhausted[sym] = true; if (chart) chart.onReachStart = null; }
+    if (added === 0) historyExhausted[sym] = true;
     if (sym === state.asset) renderActive();
     hideStatus();
   } catch (_) {
@@ -281,7 +283,7 @@ async function loadOlderCandles(sym, limit) {
   }
 }
 
-// Pasang callback ke chart: dipanggil saat user mencapai ujung kiri (butuh data lebih lama)
+// Install callback to chart: called when user reaches the left edge (needs older data)
 function setReach() {
   if (!chart) return;
   chart.onReachStart = (done) => {

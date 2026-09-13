@@ -1025,11 +1025,14 @@ function applyType() {
     chart.setCurrentPrice(C);
 
     // Store session bounds for smooth rAF timer (client-time reference to avoid serverTimeOffset jitter)
+    const sk = state.asset + ":" + dur + ":" + t0;
     _sessionT0 = t0; _sessionT = T; _sessionO = O; _sessionC = C; _sessionDur = dur;
-    _sessionT_client = T - serverTimeOffset;  // session end in client time — stable for rAF
+    // Only recompute _sessionT_client when session boundary changes (prevents flicker)
+    if (sk !== _sessionKey) { _sessionKey = sk; _sessionT_client = T - serverTimeOffset; _lastTimerSec = -1; }
   }
 
   let _lastTimerSec = -1, _sessionT0 = 0, _sessionT = 0, _sessionO = 0, _sessionC = 0, _sessionDur = 0, _sessionT_client = 0;
+  let _sessionKey = "";  // guards against flicker: recompute _sessionT_client only when session changes
   function updateTimerDisplay() {
     const now = Date.now();  // pure client time — no serverTimeOffset jitter
     ensureTimeSync();  // re-sync if stale (>3s since last sync)

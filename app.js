@@ -213,8 +213,8 @@ async function loadHistory() {
 }
 
 /* ----------------------- Lazy history (older 5s candles) ----------------------- */
-// Memuat candle 1s yang lebih lama (sesi sebelumnya) saat user scroll chart ke kiri.
-// Lewat SERVER proxy (/api/klines) supaya tidak terblokir geo di browser; fallback ke Binance langsung.
+// Load older 1m candles (expanded to 1s) when user scrolls chart to the left.
+// Uses /api/klines proxy to avoid geo-blocking; fallback to direct Binance.
 const HISTORY_COOLDOWN = 800; // ms antar trigger lazy-load
 let historyLoading = { BTC: false, ETH: false };
 let historyExhausted = { BTC: false, ETH: false };
@@ -243,24 +243,40 @@ function mergeOlder(sym, ones) {
 }
 
 async function fetchOlder(sym, beforeSec, limit) {
-  // 1) proxy server (same-origin) — works even when the browser can't reach Binance
+  // Fetch 1m candles (Binance REST supports this) and expand to 1s granularity
+  const histLimit = Math.min(limit, 1000);
+  // 1) proxy server (same-origin)
   try {
-    const r = await fetch(`/api/klines?symbol=${sym}&tf=1s&before=${beforeSec}&limit=${limit}`);
+    const r = await fetch(`/api/klines?symbol=${sym}&tf=1m&before=${beforeSec}&limit=${histLimit}`);
     if (r.ok) {
       const j = await r.json();
-      if (j && Array.isArray(j.candles) && j.candles.length) return j.candles;
+      if (j && Array.isArray(j.candles) && j.candles.length) return expandTo1s(j.candles);
     }
   } catch (e) { console.warn("[HISTORY] proxy fetch failed:", e); }
-  // 2) fallback: direct Binance (only if the browser can reach it)
+  // 2) fallback: direct Binance
   try {
-    const rows = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=1s&limit=${limit}&endTime=${beforeSec * 1000 - 1000}`);
-    return rows.map((r) => ({
+    const rows = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=1m&limit=${histLimit}&endTime=${beforeSec * 1000 - 1000}`);
+    const candles = rows.map((r) => ({
       time: Math.floor(r[0] / 1000),
       open: +r[1], high: +r[2], low: +r[3], close: +r[4],
       vol: +r[5], trades: +r[8],
       openTime: r[0], closeTime: r[6],
     }));
+    return expandTo1s(candles);
   } catch (e) { console.warn("[HISTORY] direct Binance fetch failed:", e); throw e; }
+}
+
+// Expand 1m candles into 60 one-second candles (same OHLC per second within the minute)
+function expandTo1s(candles) {
+  const ones = [];
+  for (const c of candles) {
+    const baseTime = c.time;       // start of minute (in seconds)
+    for (let s = 0; s < 60; s++) {
+      const t = baseTime + s;
+      ones.push({ time: t, open: c.open, high: c.high, low: c.low, close: c.close, vol: (c.vol || 0) / 60, openTime: t * 1000, closeTime: (t + 1) * 1000 });
+    }
+  }
+  return ones.sort((a, b) => a.time - b.time);
 }
 
 async function loadOlderCandles(sym, limit) {
@@ -274,6 +290,7 @@ async function loadOlderCandles(sym, limit) {
     const ones = await fetchOlder(sym, oldest, limit);
     const added = mergeOlder(sym, ones);
     if (added === 0) historyExhausted[sym] = true;
+    rebuild5s(sym);  // <-- rebuild 5s candles from updated 1s cache
     if (sym === state.asset) renderActive();
     hideStatus();
   } catch (_) {
@@ -1823,8 +1840,8 @@ function start() {
   startData();
   renderConfidenceReport();   // tampilkan state awal panel akurasi
   // backfill awal: muat beberapa sesi sebelumnya agar bisa langsung di-scroll
-  loadOlderCandles("BTC", 1000).catch(() => {});
-  loadOlderCandles("ETH", 1000).catch(() => {});
+    loadOlderCandles("BTC", 160).catch(() => {});
+    loadOlderCandles("ETH", 160).catch(() => {});
   // timers
   setInterval(updateProjection, 1000);
 

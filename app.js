@@ -11,7 +11,8 @@ const SYMBOLS = {
 // Prediction round durations (lock period). Candle size is fixed 5s (aggregated from 1s).
 const INTERVALS = ["5m", "15m", "1h"];
 const INTERVAL_MS = { "5m": 300_000, "15m": 900_000, "1h": 3_600_000 };
-const CANDLE_SEC = 5; // each candle = 5 seconds
+const CANDLE_SEC = 5; // each chart candle = 5 seconds (default)
+const CHART_INTERVALS = ["5s", "30s", "1m"];
 const HISTORY = 160;
 const HISTORY_LOAD = 600;       // 1s candles per lazy fetch (~10 minutes)
 const HISTORY_CAP_1S = 1200;   // ~10 menit 1s candles (scrollable window for lazy load)
@@ -56,6 +57,7 @@ const WS_HOSTS = [
 const state = {
   asset: "BTC",
   interval: "5m",
+  chartInterval: "5s",
   type: "candle",
   // cache[symbol][interval] = { candles: [...], meta: {...} }
   cache: {},
@@ -67,7 +69,7 @@ const state = {
 };
 
 // cache[symbol][series] = { candles, meta }; series: 1s (raw), 5s (chart), 5m/15m/1h (trend)
-const CANDLE_SERIES = ["1s", "5s", "5m", "15m", "1h"];
+const CANDLE_SERIES = ["1s", "5s", "30s", "1m", "5m", "15m", "1h"];
 
 INTERVALS.forEach((tf) => {
   state.cache.BTC = state.cache.BTC || {};
@@ -145,31 +147,39 @@ function updateLegendFromState() {
 }
 
 function activeCandles() {
-  return state.cache[state.asset]["5s"].candles;
+  return state.cache[state.asset][state.chartInterval].candles;
 }
 
-/* ----- 1s -> 5s aggregation and prediction-session helpers ----- */
-function aggregate5s(ones) {
+/* ----- 1s -> chart interval aggregation (5s/30s/1m) ----- */
+const CHART_SEC = { "5s": 5, "30s": 30, "1m": 60 };
+function aggregateInterval(ones, sec) {
   const sorted = ones.slice().sort((a, b) => a.time - b.time);
   const out = [];
   for (const b of sorted) {
-    const t5 = Math.floor(b.time / CANDLE_SEC) * CANDLE_SEC;
+    const t = Math.floor(b.time / sec) * sec;
     const last = out[out.length - 1];
-    if (last && last.time === t5) {
+    if (last && last.time === t) {
       last.high = Math.max(last.high, b.high);
       last.low = Math.min(last.low, b.low);
       last.close = b.close;
       last.vol = (last.vol || 0) + (b.vol || 0);
     } else {
-      out.push({ time: t5, open: b.open, high: b.high, low: b.low, close: b.close, vol: b.vol || 0, openTime: t5 * 1000, closeTime: (t5 + CANDLE_SEC) * 1000 });
+      out.push({ time: t, open: b.open, high: b.high, low: b.low, close: b.close, vol: b.vol || 0, openTime: t * 1000, closeTime: (t + sec) * 1000 });
     }
   }
   return out;
 }
 function rebuild5s(sym) {
-  const arr = aggregate5s(state.cache[sym]["1s"].candles).slice(-HISTORY_CAP_5S);
-  state.cache[sym]["5s"].candles = arr;
-  state.cache[sym]["5s"].meta = arr[arr.length - 1] || null;
+  const ones = state.cache[sym]["1s"].candles;
+  for (const tf of CHART_INTERVALS) {
+    const sec = CHART_SEC[tf];
+    const arr = aggregateInterval(ones, sec).slice(-HISTORY_CAP_5S);
+    state.cache[sym][tf].candles = arr;
+    state.cache[sym][tf].meta = arr[arr.length - 1] || null;
+  }
+}
+function aggregate5s(ones) {
+  return aggregateInterval(ones, CANDLE_SEC);
 }
 function sessionBounds(durMs, now) {
   const start = Math.floor(now / durMs) * durMs;
@@ -223,16 +233,6 @@ let lastLoadAt = { BTC: 0, ETH: 0 };
 function mergeOlder(sym, ones) {
   if (!ones || !ones.length) return 0;
   let added = 0;
-  const five = aggregate5s(ones);
-  if (five.length) {
-    const s5 = state.cache[sym]["5s"];
-    const have5 = new Set(s5.candles.map((c) => c.time));
-    const fresh5 = five.filter((c) => !have5.has(c.time));
-    added += fresh5.length;
-    s5.candles = fresh5.concat(s5.candles);
-    if (s5.candles.length > HISTORY_CAP_5S) s5.candles = s5.candles.slice(-HISTORY_CAP_5S);
-    s5.meta = s5.candles[s5.candles.length - 1] || null;
-  }
   const s1 = state.cache[sym]["1s"];
   const have1 = new Set(s1.candles.map((c) => c.time));
   const fresh1 = ones.filter((c) => !have1.has(c.time));
@@ -394,7 +394,9 @@ function startTV() {
       tvGotData = true; hideStatus();
       state.cache[symKey][tf].candles = candles;
       state.cache[symKey][tf].meta = candles[candles.length - 1] || null;
-      if (tf === "1s") rebuild5s(symKey);
+   if (tf === "1s") rebuild5s(symKey);
+   hideStatus();
+
       if (symKey === state.asset && tf === "1s") { renderActive(); }
       updateGap();
     },
@@ -441,8 +443,7 @@ function feedCandle(symKey, tf, candle) {
   if (last && last.time === candle.time) arr[arr.length - 1] = candle;
   else if (!last || candle.time > last.time) { arr.push(candle); if (arr.length > HISTORY_CAP_1S) arr.shift(); }
   store.meta = candle;
-  if (tf === "1s") rebuild5s(symKey);
-  hideStatus();
+   if (tf === "1s") rebuild5s(symKey);
 
   if (symKey === state.asset && tf === "1s") { chart.setData(activeCandles()); updateProjection(); updateMobilePrediction(); }
   updateGap();
@@ -1213,21 +1214,24 @@ function updateLiveTrade(d) {
   }
   state.cache[sym]["1s"].meta = one;
   
-  // Aggregate into 5s candles (existing)
-  const t5 = Math.floor(ts / 1000 / CANDLE_SEC) * CANDLE_SEC;
-  const arr = state.cache[sym]["5s"].candles;
-  let last = arr[arr.length - 1];
-  if (last && last.time === t5) {
-    last.high = Math.max(last.high, price); last.low = Math.min(last.low, price); last.close = price;
-    last.vol = (last.vol || 0) + qty;
-  } else if (!last || t5 > last.time) {
-    last = { time: t5, open: price, high: price, low: price, close: price, vol: qty, openTime: t5 * 1000, closeTime: (t5 + CANDLE_SEC) * 1000 };
-    arr.push(last); if (arr.length > HISTORY_CAP_5S) arr.shift();
-  }
-  state.cache[sym]["5s"].meta = last;
-  state.ticker[sym] = state.ticker[sym] || {}; state.ticker[sym].last = price;
-  updateHeader(); updateGap();
-  if (sym === state.asset) { chart.setData(arr); updateProjection(); }
+   // Aggregate into chart intervals (5s/30s/1m) via live trade stream
+   for (const tf of CHART_INTERVALS) {
+     const sec = CHART_SEC[tf];
+     const t = Math.floor(ts / 1000 / sec) * sec;
+     const arr = state.cache[sym][tf].candles;
+     let last = arr[arr.length - 1];
+     if (last && last.time === t) {
+       last.high = Math.max(last.high, price); last.low = Math.min(last.low, price); last.close = price;
+       last.vol = (last.vol || 0) + qty;
+     } else if (!last || t > last.time) {
+       last = { time: t, open: price, high: price, low: price, close: price, vol: qty, openTime: t * 1000, closeTime: (t + sec) * 1000 };
+       arr.push(last); if (arr.length > HISTORY_CAP_5S) arr.shift();
+     }
+     state.cache[sym][tf].meta = last;
+   }
+   state.ticker[sym] = state.ticker[sym] || {}; state.ticker[sym].last = price;
+   updateHeader(); updateGap();
+   if (sym === state.asset) { chart.setData(activeCandles()); updateProjection(); }
 }
 function updateLiveTicker(d) {
   const t = state.ticker[d.sym] || (state.ticker[d.sym] = {});
@@ -1784,6 +1788,12 @@ function bindControls() {
     state.type = b.dataset.type;
     segActive("type-seg", b);
     applyType();
+  });
+  document.getElementById("chart-tf-seg").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-ctf]"); if (!b) return;
+    state.chartInterval = b.dataset.ctf;
+    segActive("chart-tf-seg", b);
+    renderActive(); updateProjection();
   });
   document.getElementById("conf-cta").addEventListener("click", (e) => {
     const b = e.target.closest("[data-mode]"); if (!b) return;

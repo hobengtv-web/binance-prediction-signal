@@ -52,7 +52,7 @@ function mapKline(r) {
 }
 
 async function getSnapshot(history) {
-  const out = { candles: {}, ticker: {}, mark: {}, serverTime: 0 };
+  const out = { candles: {}, ticker: {}, mark: {}, serverTime: 0, orderbook: {} };
   try {
     const t = await getJSON("/api/v3/time");
     out.serverTime = t.serverTime;
@@ -64,6 +64,11 @@ async function getSnapshot(history) {
       const rows = await getJSON(`/api/v3/klines?symbol=${SYMS[k]}&interval=${tf}&limit=${limit}`);
       out.candles[k][tf] = rows.map(mapKline);
     }));
+    // Futures orderbook (depth) — top 5 levels for buy/sell pressure bar
+    try {
+      const ob = await getFuturesJSON(`/fapi/v1/depth?symbol=${SYMS[k]}&limit=5`);
+      out.orderbook[k] = { bids: ob.bids, asks: ob.asks };
+    } catch (_) { out.orderbook[k] = null; }
   }));
   await Promise.all(Object.keys(SYMS).map(async (k) => {
     const t = await getJSON(`/api/v3/ticker/24hr?symbol=${SYMS[k]}`);

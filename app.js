@@ -62,6 +62,7 @@ const state = {
   // cache[symbol][interval] = { candles: [...], meta: {...} }
   cache: {},
   ticker: { BTC: null, ETH: null },
+  orderbook: { BTC: null, ETH: null },
   // previous live price for gap sync
   prevPrice: { BTC: null, ETH: null },
   connected: false,
@@ -1029,6 +1030,9 @@ function applyType() {
     _sessionT0 = t0; _sessionT = T; _sessionO = O; _sessionC = C; _sessionDur = dur;
     // Only recompute _sessionT_client when session boundary changes (prevents flicker)
     if (sk !== _sessionKey) { _sessionKey = sk; _sessionT_client = T - serverTimeOffset; _lastTimerSec = -1; }
+
+    // Update orderbook bar (real-time buy/sell pressure)
+    updateOrderbook(state.asset);
   }
 
   let _lastTimerSec = -1, _sessionT0 = 0, _sessionT = 0, _sessionO = 0, _sessionC = 0, _sessionDur = 0, _sessionT_client = 0;
@@ -1054,7 +1058,41 @@ function applyType() {
     if (stEl) { stEl.className = "round-status " + liveStatus; stEl.textContent = liveStatus === "up" ? "LIVE ▲ UP" : liveStatus === "down" ? "LIVE ▼ DOWN" : "LIVE —"; }
     const rbf = document.getElementById("round-bar-fill");
     if (rbf) rbf.style.width = Math.min(100, (elapsed / total) * 100) + "%";
-    requestAnimationFrame(updateTimerDisplay);
+     requestAnimationFrame(updateTimerDisplay);
+   }
+
+  /* ----------------------- Orderbook bar (real-time buy/sell pressure) ----------------------- */
+  function updateOrderbook(sym) {
+    const ob = state.orderbook && state.orderbook[sym];
+    const askEl = document.getElementById("ob-ask");
+    const bidEl = document.getElementById("ob-bid");
+    const ratioEl = document.getElementById("ob-ratio");
+    if (!ob || !ob.bids || !ob.asks || !askEl || !bidEl) {
+      if (askEl) askEl.style.width = "50%";
+      if (bidEl) bidEl.style.width = "50%";
+      if (ratioEl) ratioEl.textContent = "—";
+      return;
+    }
+    // Aggregate total bid (buy) and ask (sell) size across top levels
+    const bidVol = ob.bids.reduce((a, [p, s]) => a + +s, 0);
+    const askVol = ob.asks.reduce((a, [p, s]) => a + +s, 0);
+    const total = bidVol + askVol;
+    if (total <= 0) {
+      askEl.style.width = "50%";
+      bidEl.style.width = "50%";
+      if (ratioEl) ratioEl.textContent = "—";
+      return;
+    }
+    const askPct = Math.min(95, (askVol / total) * 100);
+    const bidPct = Math.min(95, (bidVol / total) * 100);
+    askEl.style.width = askPct + "%";
+    bidEl.style.width = bidPct + "%";
+    // Ratio: positive = more buy pressure (green dominant), negative = more sell (red dominant)
+    const ratio = ((bidVol - askVol) / total) * 100;
+    if (ratioEl) {
+      ratioEl.textContent = (ratio >= 0 ? "+" : "") + ratio.toFixed(0) + "%";
+      ratioEl.className = ratio >= 0 ? "ob-ratio up" : "ob-ratio down";
+    }
   }
 
 /* ----------------------- Trend (akumulasi N sesi interval aktif) ----------------------- */
@@ -1229,6 +1267,11 @@ function applySnapshot(snap, isHistory) {
       state.ticker[k] = snap.ticker[k];
     }
     updateHeader();
+  }
+  if (snap.orderbook) {
+    for (const k of Object.keys(snap.orderbook)) {
+      if (snap.orderbook[k]) state.orderbook[k] = snap.orderbook[k];
+    }
   }
   updateGap();
   if (state.asset && state.interval) renderActive();

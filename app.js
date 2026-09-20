@@ -8,6 +8,7 @@ const SYMBOLS = {
   BTC: "btcusdt",
   ETH: "ethusdt",
 };
+const OB_SYMBOLS = { BTC: "BTCUSDT", ETH: "ETHUSDT" };  // Binance spot REST symbol format
 // Prediction round durations (lock period). Candle size is fixed 5s (aggregated from 1s).
 const INTERVALS = ["5m", "15m", "1h"];
 const INTERVAL_MS = { "5m": 300_000, "15m": 900_000, "1h": 3_600_000 };
@@ -1091,9 +1092,29 @@ function applyType() {
       ratioEl.textContent = (ratio >= 0 ? "+" : "") + ratio.toFixed(0) + "%";
       ratioEl.className = ratio >= 0 ? "ob-ratio up" : "ob-ratio down";
     }
+   }
+
+  /* ----------------------- Real-time orderbook poller (browser-level, 200ms) ----------------------- */
+  let _obTimer = null;
+  function startOrderbookPoll() {
+    if (_obTimer) return;
+    _obTimer = setInterval(async () => {
+      const sym = state.asset;
+      const binanceSym = OB_SYMBOLS[sym];
+      if (!binanceSym) return;
+      try {
+        const r = await fetch(`https://data-api.binance.vision/api/v3/depth?symbol=${binanceSym}&limit=5`, { cache: "no-store" });
+        if (r.ok) {
+          const ob = await r.json();
+          if (ob.bids && ob.asks) {
+            state.orderbook[sym] = { bids: ob.bids, asks: ob.asks };
+            updateOrderbook(sym);
+          }
+        }
+      } catch (_) {}
+    }, 200);
   }
 
-/* ----------------------- Trend (akumulasi N sesi interval aktif) ----------------------- */
 // Mayoritas sesi naik -> BULLISH, mayoritas turun -> BEARISH, sisanya FLAT.
 // Dipakai utk TREND display & sbg bias tren di confidence / keputusan sinyal.
 function sessionTrend(sym, tf, n) {
@@ -1990,6 +2011,7 @@ function start() {
   // timers — use rAF for smooth timer, updateProjection only on data events
   requestAnimationFrame(updateTimerDisplay);
   setInterval(updateProjection, 5000);  // heavy projection update every 5s only
+  startOrderbookPoll();  // real-time orderbook (200ms browser fetch)
 
    // Active visitor tracking
   let visitorId = localStorage.getItem("bps_vid") || null;

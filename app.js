@@ -1065,33 +1065,32 @@ function applyType() {
     const ob = state.orderbook && state.orderbook[sym];
     const askEl = document.getElementById("ob-ask");
     const bidEl = document.getElementById("ob-bid");
-    const ratioEl = document.getElementById("ob-ratio");
+    const sellPctEl = document.getElementById("ob-sell-pct");
+    const buyPctEl = document.getElementById("ob-buy-pct");
     if (!ob || !ob.bids || !ob.asks || !askEl || !bidEl) {
       if (askEl) askEl.style.width = "50%";
       if (bidEl) bidEl.style.width = "50%";
-      if (ratioEl) ratioEl.textContent = "—";
+      if (sellPctEl) sellPctEl.textContent = "—";
+      if (buyPctEl) buyPctEl.textContent = "—";
       return;
     }
-    // Aggregate total bid (buy) and ask (sell) size across top levels
+    // Aggregate total bid (buy) and ask (sell) size across top 5 levels
     const bidVol = ob.bids.reduce((a, [p, s]) => a + +s, 0);
     const askVol = ob.asks.reduce((a, [p, s]) => a + +s, 0);
     const total = bidVol + askVol;
     if (total <= 0) {
       askEl.style.width = "50%";
       bidEl.style.width = "50%";
-      if (ratioEl) ratioEl.textContent = "—";
+      if (sellPctEl) sellPctEl.textContent = "0%";
+      if (buyPctEl) buyPctEl.textContent = "0%";
       return;
     }
     const askPct = Math.min(95, (askVol / total) * 100);
     const bidPct = Math.min(95, (bidVol / total) * 100);
     askEl.style.width = askPct + "%";
     bidEl.style.width = bidPct + "%";
-    // Ratio: positive = more buy pressure (green dominant), negative = more sell (red dominant)
-    const ratio = ((bidVol - askVol) / total) * 100;
-    if (ratioEl) {
-      ratioEl.textContent = (ratio >= 0 ? "+" : "") + ratio.toFixed(0) + "%";
-      ratioEl.className = ratio >= 0 ? "ob-ratio up" : "ob-ratio down";
-    }
+    if (sellPctEl) sellPctEl.textContent = askPct.toFixed(0) + "%";
+    if (buyPctEl) buyPctEl.textContent = bidPct.toFixed(0) + "%";
    }
 
   /* ----------------------- Real-time orderbook poller (browser-level, 200ms) ----------------------- */

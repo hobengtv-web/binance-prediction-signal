@@ -1031,8 +1031,6 @@ function applyType() {
     // Only recompute _sessionT_client when session boundary changes (prevents flicker)
     if (sk !== _sessionKey) { _sessionKey = sk; _sessionT_client = T - serverTimeOffset; _lastTimerSec = -1; }
 
-    // Update orderbook bar (real-time buy/sell pressure)
-    updateOrderbook(state.asset);
   }
 
   let _lastTimerSec = -1, _sessionT0 = 0, _sessionT = 0, _sessionO = 0, _sessionC = 0, _sessionDur = 0, _sessionT_client = 0;
@@ -1273,9 +1271,10 @@ function applySnapshot(snap, isHistory) {
       if (snap.orderbook[k]) state.orderbook[k] = snap.orderbook[k];
     }
   }
-  updateGap();
-  if (state.asset && state.interval) renderActive();
-  hideStatus();
+   updateGap();
+   if (state.asset && state.interval) renderActive();
+   updateOrderbook(state.asset);
+   hideStatus();
 }
 
 async function pollProxy() {

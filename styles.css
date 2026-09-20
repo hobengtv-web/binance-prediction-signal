@@ -147,7 +147,7 @@ body {
 .conf-seg.off { opacity: .15; }
 
 /* ---------- Orderbook bar (buy pressure / sell pressure) ---------- */
-.orderbook-bar { margin-top: 4px; }
+.orderbook-bar { margin-top: 16px; }
 .ob-bg { position: relative; height: 10px; border-radius: 2px; background: var(--panel-2); overflow: hidden; }
 .ob-ask { position: absolute; left: 0; top: 0; height: 100%; width: 50%; background: var(--down); border-radius: 2px 0 0 2px; transition: width .1s ease-out; }
 .ob-bid { position: absolute; right: 0; top: 0; height: 100%; width: 50%; background: var(--up); border-radius: 0 2px 2px 0; transition: width .1s ease-out; }

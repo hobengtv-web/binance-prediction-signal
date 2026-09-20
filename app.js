@@ -1085,8 +1085,8 @@ function applyType() {
       if (buyPctEl) buyPctEl.textContent = "0%";
       return;
     }
-    const askPct = Math.min(95, (askVol / total) * 100);
-    const bidPct = Math.min(95, (bidVol / total) * 100);
+    const askPct = (askVol / total) * 100;
+    const bidPct = 100 - askPct;  // normalize: always sums to 100% (no gaps, no shift)
     askEl.style.width = askPct + "%";
     bidEl.style.width = bidPct + "%";
     if (sellPctEl) sellPctEl.textContent = askPct.toFixed(0) + "%";

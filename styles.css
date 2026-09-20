@@ -148,9 +148,9 @@ body {
 
 /* ---------- Orderbook bar (buy pressure / sell pressure) ---------- */
 .orderbook-bar { margin-top: 4px; }
-.ob-bg { position: relative; height: 10px; border-radius: 2px; background: var(--panel-2); overflow: hidden; display: flex; }
-.ob-ask { background: var(--down); height: 100%; width: 50%; border-radius: 2px 0 0 2px; transition: width .1s ease-out; }
-.ob-bid { background: var(--up); height: 100%; width: 50%; border-radius: 0 2px 2px 0; transition: width .1s ease-out; }
+.ob-bg { position: relative; height: 10px; border-radius: 2px; background: var(--panel-2); overflow: hidden; }
+.ob-ask { position: absolute; left: 0; top: 0; height: 100%; width: 50%; background: var(--down); border-radius: 2px 0 0 2px; transition: width .1s ease-out; }
+.ob-bid { position: absolute; right: 0; top: 0; height: 100%; width: 50%; background: var(--up); border-radius: 0 2px 2px 0; transition: width .1s ease-out; }
 .ob-label { display: flex; justify-content: space-between; margin-top: 1px; font-size: 8px; font-variant-numeric: tabular-nums; }
 .ob-sell-pct { color: var(--down); font-weight: 700; }
 .ob-buy-pct { color: var(--up); font-weight: 700; }

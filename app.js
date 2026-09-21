@@ -1111,7 +1111,7 @@ function applyType() {
           }
         }
       } catch (_) {}
-    }, 200);
+    }, 500);
   }
 
 // Mayoritas sesi naik -> BULLISH, mayoritas turun -> BEARISH, sisanya FLAT.

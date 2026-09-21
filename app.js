@@ -1074,9 +1074,9 @@ function applyType() {
       if (buyPctEl) buyPctEl.textContent = "—";
       return;
     }
-    // Aggregate total bid (buy) and ask (sell) size across top 5 levels
-    const bidVol = ob.bids.reduce((a, [p, s]) => a + +s, 0);
-    const askVol = ob.asks.reduce((a, [p, s]) => a + +s, 0);
+    // Aggregate total bid (buy) and ask (sell) SIZE (USD value = price × qty) across top 5 levels
+    const bidVol = ob.bids.reduce((a, [p, s]) => a + +p * +s, 0);
+    const askVol = ob.asks.reduce((a, [p, s]) => a + +p * +s, 0);
     const total = bidVol + askVol;
     if (total <= 0) {
       askEl.style.width = "50%";

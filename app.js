@@ -96,6 +96,7 @@ INTERVALS.forEach((tf) => {
 
 /* ----------------------- Chart setup ----------------------- */
 let chart;
+let lastSignalState = null;  // Track previous signal untuk trigger alarm otomatis
 
 function setSrc(label) { document.getElementById("src").textContent = "SRC " + (label || "—"); }
 function showErr(msg) {
@@ -547,7 +548,55 @@ function applyType() {
     return Math.max(4, Math.min(want, Math.floor(five.length / 3)));
   }
 
-  function updateSignal(o) {
+// Generate dynamic entry reason based on analysis criteria
+    function generateEntryReason(o) {
+    // Use locked reason from _deskSig if available (sesi lock)
+    if (o.reason) {
+      return o.reason;
+    }
+    if (o.verdict === "flat") {
+      if (o.mode === "MENUNGGU") return "Waiting for signal…";
+      if (o.mode === "LOWVOL") return "🔍 Low volume: Entry too risky";
+      if (o.mode === "WARMUP") return "⏱️ Early round: Insufficient data";
+      if (o.mode === "FILTERED-REVERSAL") return "🔍 Quality filter: No reversal confirmation";
+      if (o.mode === "BLOCKED-GOAL") return "🚫 Goal filter: Continuation mode blocked";
+      if (o.zone && o.zone.indexOf("PEAK") >= 0) {
+        return "📊 " + o.zone + ": Waiting for " + (o.peakDir === "top" ? "▼ DOWN reversal" : "▲ UP reversal") + " confirmation";
+      }
+      return "⏳ Waiting for peak/reversal signal…";
+    }
+    
+    // Entry signal reasons (dynamic)
+    const reasons = [];
+    if (o.mode.indexOf("REVERSAL") === 0) {
+      reasons.push("🎯 REVERSAL: Peak detected, fading trend");
+    } else if (o.mode === "CLOSE") {
+      reasons.push("⏰ CLOSE: Late round, price vs LOCK dominance");
+    } else if (o.mode === "CONT") {
+      reasons.push("📈 CONT: Following trend continuation");
+    }
+    
+    if (o.peakPrice != null && o.peakDir) {
+      reasons.push("▲ PEAK: " + (o.peakDir === "top" ? "▼ top @ " + fmtPrice(o.peakPrice) : "▲ bottom @ " + fmtPrice(o.peakPrice)));
+    }
+    
+    if (o.rsi != null) {
+      if (o.rsi >= 70) reasons.push("📉 RSI " + o.rsi.toFixed(1) + " — Overbought (fade down)");
+      else if (o.rsi <= 30) reasons.push("📈 RSI " + o.rsi.toFixed(1) + " — Oversold (fade up)");
+      else reasons.push("RSI " + o.rsi.toFixed(1) + " (neutral)");
+    }
+    
+    if (o.reward > 0) reasons.push("💰 Reward: +" + o.reward.toFixed(2) + "%");
+    if (o.volRel != null) reasons.push("💥 Volume: " + (o.volRel >= 10 ? "≥10× spike" : o.volRel.toFixed(1) + "×"));
+    
+    if (o.verdict === "up") {
+      return '<span class="dot" style="color:var(--up);">✓</span> <b>UP</b> — ' + reasons.join(" • ");
+    } else {
+      return '<span class="dot" style="color:var(--down);">✓</span> <b>DOWN</b> — ' + reasons.join(" • ");
+    }
+  }
+   
+   function updateSignal(o) {
     const z = document.getElementById("s-zone");
     const m = document.getElementById("s-momentum");
     const r = document.getElementById("s-rsi");
@@ -559,6 +608,12 @@ function applyType() {
     const liqEl = document.getElementById("s-liq");
     const confEl = document.getElementById("s-conf");
     const confBar = document.getElementById("s-conf-bar");
+    const reasonEl = document.getElementById("entryReason");
+    
+    // Generate dynamic entry reason based on analysis
+    if (reasonEl) {
+      reasonEl.innerHTML = generateEntryReason(o);
+    }
     if (z) { z.textContent = o.zone; z.className = o.zone.indexOf("ATAS") >= 0 ? "down" : o.zone.indexOf("BAWAH") >= 0 ? "up" : ""; }
     if (m) { m.textContent = o.momentum; m.className = o.momentum === "BULLISH" ? "up" : o.momentum === "BEARISH" ? "down" : ""; }
     if (r) {
@@ -592,13 +647,21 @@ function applyType() {
     }
     if (rec) {
       if (o.verdict === "flat") {
-        rec.textContent = "Waiting for signal…";
+        rec.textContent = "No entry for this round";
         rec.className = "signal-rec flat";
       } else {
         rec.textContent = "RECOMMENDATION: " + (o.verdict === "up" ? "UP ▲ (fade peak)" : "DOWN ▼ (fade peak)");
         rec.className = "signal-rec " + (o.verdict === "up" ? "up" : o.verdict === "down" ? "down" : "flat");
       }
     }
+    
+    // Trigger alarm otomatis ketika sinyal entry muncul (flat -> up/down transisi)
+    const prevVerdict = lastSignalState ? lastSignalState.verdict : "flat";
+    if (o.verdict !== "flat" && prevVerdict === "flat" && confMode === "SIGNAL") {
+      playSoundAlert();
+      console.log("[ALERT] Sound alert triggered for new signal:", o.verdict);
+    }
+    lastSignalState = { verdict: o.verdict, mode: o.mode };
   }
 
   let confSegs = null;
@@ -811,7 +874,10 @@ function applyType() {
     // TREND (3 sesi interval aktif) sbg bias tren — jangan fade kalau trend berlawanan arah
     const tr = sessionTrend(state.asset, state.interval, TREND_SESSIONS);
     const trendBias = tr === "bullish" ? "up" : tr === "bearish" ? "down" : "flat";
-
+    
+    // Historical trend analysis (50 sessions) - for confidence boost & prediction override
+    const histTrend = analyzeHistoricalTrend(state.asset, state.interval, 50);
+    
     let zone = "NETRAL";
     if (isTopPeak) zone = nearTop ? "TOP PEAK" : "NEAR TOP PEAK";
     else if (isBotPeak) zone = nearBot ? "BOTTOM PEAK" : "NEAR BOTTOM PEAK";
@@ -836,75 +902,166 @@ function applyType() {
       mode = "CLOSE";
     }
 
+    // ----- AGGRESSIVE ENTRY FILTER -----
     const aligned = trendBias !== "flat" && ((trendBias === "up" && slope > 0) || (trendBias === "down" && slope < 0));
-    // continuation gated by TREND; peak-reversal & close-standing are independent edges
+    
+    // Simpan verdict & mode asli untuk race-condition-free GOAL logic
+    const verdictBeforeFilter = verdict;
+    const modeBeforeFilter = mode;
+    
+    const isReversalMode = mode.indexOf("REVERSAL") === 0;
+    const hasPeakConf = peakConf === true;
+    const histAligns = histTrend && histTrend.predictDir === verdict;
+    const hasVolumeSpikes = (typeof rel === 'number' && rel > 1.3) || (typeof volRel === 'number' && volRel > 1.3);
+    const hasRsiExtreme = rsi !== null && (rsi < 35 || rsi > 75);
+    
+    const isQualified = isReversalMode && hasPeakConf && (
+      (histTrend && histTrend.strength > 70 && histTrend.momentum && histAligns) ||
+      (hasVolumeSpikes && hasRsiExtreme)
+    );
+    
     let finalVerdict;
-    if (mode === "CLOSE" || mode.indexOf("REVERSAL") === 0) finalVerdict = verdict;
-    else finalVerdict = (verdict !== "flat" && aligned) ? verdict : "flat";
+    if (isQualified) {
+      finalVerdict = verdict;
+    } else {
+      finalVerdict = "flat";
+      if (isReversalMode) mode = "FILTERED-REVERSAL";
+    }
 
-    // ----- GOAL: penguat sinyal — hanya sinyal COUNTER-TREND (REVERSAL / proyeksi berlawanan) -----
-    // Aturan GOAL (sesuai ekspektasi):
-    //   • REVERSAL↑ (masuk UP saat harga dari bawah) & REVERSAL↓ (masuk DOWN saat harga dari atas)
-    //     → SELALU diizinkan & dikuatkan (ini sinyal momentum yg diinginkan)
-    //   • CONT & CLOSE → blokir bila SEARAH harga (Down saat down / Up saat up):
-    //       - berlaku sepanjang ronde, termasuk awal ronde (menit 0-3)
-    //         dan 20 detik terakhir (mode CLOSE) → DIBLOKIR → NETRAL
-    //   • bila berlawanan arah harga live → diizinkan & dikuatkan
+    // ----- GOAL: penguat sinyal hanya untuk counter-trend -----
     let goalHit = false;
     if (GOAL.mode === "REVERSAL_ONLY" && finalVerdict !== "flat") {
-      if (mode.indexOf("REVERSAL") === 0) {
-        goalHit = true; // reversal selalu counter-trend → sesuai GOAL
+      if (modeBeforeFilter.indexOf("REVERSAL") === 0) {
+        goalHit = true;
       } else {
-        // CONT (kelanjutan tren) & CLOSE (akhir ronde) sama-sama "lanjut tren" vs LOCK
-        const isContinuation = finalVerdict === liveStatus; // sama arah dgn harga → tidak diinginkan
+        const isContinuation = finalVerdict === liveStatus;
         if (isContinuation) {
           finalVerdict = "flat";
           mode = "BLOCKED-GOAL";
         } else {
-          goalHit = true; // berlawanan arah → sesuai GOAL
+          goalHit = true;
         }
       }
     }
-
-    // ----- WARMUP: 3 menit pertama ronde → signal di-suppress (kurang presisi) -----
+    
+    // ----- WARMUP -----
     if (elapsed < WARMUP_MS && finalVerdict !== "flat") {
       finalVerdict = "flat";
       mode = "WARMUP";
     }
 
-    // ----- LOW VOLUME: likuiditas tipis → entry berisiko, tekan ke NETRAL -----
-    if (liquidity === "LOW" && finalVerdict !== "flat") {
-      finalVerdict = "flat";
-      mode = "LOWVOL";
+// ----- LOW VOLUME: likuiditas tipis → entry berisiko, tekan ke NETRAL
+  if (liquidity === "LOW" && finalVerdict !== "flat") {
+    finalVerdict = "flat";
+    mode = "LOWVOL";
+  }
+  
+  // Historical trend override - hanya bila trend ekstrem + momentum presence
+  if (histTrend && histTrend.strength > 85 && histTrend.momentum) {
+    if (histTrend.predictDir !== 'flat' && finalVerdict === "flat") {
+      finalVerdict = histTrend.predictDir;
+      mode = "HIST-PREDICT";
     }
+  }
+  
+  // ----- confidence: distance from LOCK + TREND (3 sesi) + momentum -----
+  // Hitung confidence SEBELUM membuat _deskSig agar tersedia untuk lock
+  let conf = 0;
+  if (finalVerdict !== "flat") {
+    const edge = Math.abs(C - O) / std;
+    const edgeScore = clamp(edge / 2, 0, 1) * 35;
+    const htfScore = (trendBias === "flat") ? 0 : 20;
+    const momScore = clamp(Math.abs(slope) * remSec / std, 0, 1) * 15;
+    conf = Math.round(edgeScore + htfScore + momScore);
+    
+    // Historical trend momentum boost (max +20)
+    if (histTrend && histTrend.momentum && histTrend.strength > 60) {
+      const boost = Math.min(20, Math.round(histTrend.strength / 10));
+      conf = Math.min(100, conf + boost);
+    }
+    
+    if (mode === "CLOSE") conf = Math.min(100, conf + 10);
+    if (mode.indexOf("REVERSAL") === 0) conf = Math.min(100, conf + 5);
+    if (goalHit) conf = Math.min(100, conf + GOAL.boost);
+  }
 
-    // ----- confidence: distance from LOCK + TREND (3 sesi) + momentum -----
-    let conf = 0;
+  // ----- SESSION-START LOCK: signal hanya dihitung saat sesi dimulai, kemudian lock -----
+  // Reset _deskSig ketika sesi berubah (asal sudah cukup data, >15s)
+  const sessionStart = t0;
+  const sessionChanged = !_deskSig || _deskSig.roundStart !== sessionStart || _deskSig.asset !== state.asset || _deskSig.interval !== state.interval;
+  
+  if (sessionChanged && elapsed > 15000) {
+    // Generate detailed reason based on actual filter conditions
+    let reason = "";
     if (finalVerdict !== "flat") {
-      const edge = Math.abs(C - O) / std;
-      const edgeScore = clamp(edge / 2, 0, 1) * 35;
-      const htfScore = (trendBias === "flat") ? 0 : 20;
-      const momScore = clamp(Math.abs(slope) * remSec / std, 0, 1) * 15;
-      conf = Math.round(edgeScore + htfScore + momScore);
-      if (mode === "CLOSE") conf = Math.min(100, conf + 10);
-      if (mode.indexOf("REVERSAL") === 0) conf = Math.min(100, conf + 5);
-      if (goalHit) conf = Math.min(100, conf + GOAL.boost);
+      reason = `${mode} ${verdict.toUpperCase()} | peak:${peakPrice != null ? fmtPrice(peakPrice) : '—'} | conf:${conf}% | ` +
+               `${histTrend?.dir || '—'} (str:${histTrend?.strength || 0}) | ` +
+               `RSI:${rsi?.toFixed(1) || '—'} | vol:${rel?.toFixed(2) || '—'}x`;
+    } else {
+      // Build detailed reason for flat based on blocking mode
+      if (mode === "LOWVOL") {
+        reason = `NO ENTRY: LOW VOL | current:${rel?.toFixed(2)}x typical:${absRel.toFixed(2)}x | liquidity:${liquidity}`;
+      } else if (mode === "WARMUP") {
+        reason = `NO ENTRY: WARMUP | elapsed:${Math.round(elapsed/1000)}s < ${WARMUP_MS/1000}s threshold`;
+      } else if (mode === "FILTERED-REVERSAL") {
+        reason = `NO ENTRY: FILTER | reversal:${isReversalMode} peakConf:${peakConf} ` +
+                 `| histAlign:${histAligns} volSpikes:${hasVolumeSpikes} rsiExt:${hasRsiExtreme}`;
+      } else if (mode === "BLOCKED-GOAL") {
+        reason = `NO ENTRY: GOAL BLOCK | continuation mode, trendBias:${trendBias}`;
+      } else {
+        reason = `NO ENTRY: ${mode} | no qualified reversal signal`;
+      }
     }
+    
+    _deskSig = {
+      roundStart: sessionStart,
+      asset: state.asset,
+      interval: state.interval,
+      verdict: finalVerdict,
+      mode: mode,
+      reason: reason,
+      conf: conf,
+      timestamp: now,
+    };
+    console.log("[DESK-SIG] new session signal:", _deskSig);
+  }
+  
+  // Lock: gunakan signal dari sesi ini (hanya update setelah sesi baru)
+  if (_deskSig && _deskSig.asset === state.asset && _deskSig.interval === state.interval && _deskSig.roundStart === sessionStart) {
+    finalVerdict = _deskSig.verdict;
+    mode = _deskSig.mode;
+    conf = _deskSig.conf;
+  }
 
-    // Sync: hanya lock arah UP/DOWN (verdict) ke mobile prediction, confidence level tetap realtime
+    // Sync: confidence tetap realtime, verdict tetap di filter desktop
     const mob = _mobilePredSession;
     const mobLocked = mob && mob.prediction !== "flat" && mob.mode !== "MENUNGGU" && mob.mode !== "LOADING";
-    if (mobLocked && confMode === "SIGNAL") {
-      finalVerdict = mob.prediction;
-      mode = mob.mode;
+    
+    // Konsistensi mobile-desktop: jika desktop filter flat, override mobile prediction ke flat
+    if (mob && mob.prediction !== "flat" && finalVerdict === "flat" && confMode === "SIGNAL") {
+      mob.prediction = "flat";
+      mob.confidence = 0;
+      mob.mode = "BLOCKED";
+      try { sessionStorage.setItem(MOBILE_PRED_SESSION_KEY, JSON.stringify(mob)); } catch (_) {}
     }
 
+    // Generate fallback reason for early session (before lock)
+    let currentReason = _deskSig ? _deskSig.reason : "";
+    if (!currentReason) {
+      if (finalVerdict !== "flat") {
+        currentReason = `${mode} ${finalVerdict.toUpperCase()} | conf:${conf}%`;
+      } else {
+        currentReason = `NO ENTRY: ${(now - t0) < WARMUP_MS ? "WARMUP" : mode} | elapsed:${Math.round(elapsed/1000)}s`;
+      }
+    }
+    
     updateSignal({
       zone, momentum, rsi, verdict: finalVerdict, mode, trendBias, aligned, conf,
       peakPrice: peakPrice != null ? peakPrice : (peak ? peak.price : null),
       peakDir: peak ? peak.dir : null,
       reward: reward,
       volRel: hasVolData ? rel : null, liquidity: liquidity,
+      reason: currentReason,
     });
 
     // Confidence level LED bar: direction ikut mobile prediction pada tab SIGNAL (value tetap realtime)
@@ -1018,7 +1175,7 @@ function applyType() {
     // akurasi mobile prediksi: evaluasi di setiap tick
     // Pastikan _mobilePredSession fresh sebelum capture (hindari race condition)
     updateMobilePrediction();
-    captureMobilePrediction();
+    captureDesktopSignal();
 
     // price zone overlay (entry zone / sell TP)
     const pred = _mobilePredSession;
@@ -1469,92 +1626,50 @@ const MobilePredLog = (() => {
   };
 })();
 
+// SignalLog alias - untuk desktop signal capture (source of truth)
+const SignalLog = MobilePredLog;
+
 let _cap_t0 = null;        // t0 ronde yang sedang di-capture
 let _cap_pending = null;   // prediksi entry: { t0, asset, interval, mode, dir, conf, trend }
 let _cap_lastClose = null; // C terakhir (close ronde sebelumnya saat boundary)
 let _cap_lastLock = null;  // O terakhir (lock ronde sebelumnya)
 
-// Mobile prediction tracking
-let _mob_t0 = null;        // t0 ronde mobile pred yang sedang di-capture
-let _mob_pending = null;   // prediksi mobile: { t0, asset, interval, mode, dir, conf, lock }
-let _mob_lastClose = null; // close ronde sebelumnya
-let _mob_lastLock = null;  // lock ronde sebelumnya
+// Desktop signal lock - signal hanya dihitung saat sesi dimulai, kemudian lock
+let _deskSig = null;       // { roundStart, asset, interval, verdict, mode, reason, conf, timestamp }
 
-function captureMobilePrediction() {
-  const pred = _mobilePredSession;
-  if (!pred || pred.prediction === "flat") {
-    console.log("[MOBILE-PRED] skip capture: prediction is flat or no session");
-    return;
-  }
+// Desktop signal tracking - universal per coin/interval combo
+const _deskSigMap = {};  // key: `${sym}_${tf}_${roundStart}` -> saved desktop signal verdict
+
+function captureDesktopSignal() {
+  // ONLY capture based on desktop filter verdict (_deskSig) - NOT mobile prediction
+  // This ensures only quality-filtered signals are logged
+  const now = serverNow();
   
-  const dur = INTERVAL_MS[state.interval];
-   const now = serverNow();
-   const t0 = Math.floor(now / dur) * dur;
-    const O = sessionLock(state.asset, dur, now);
-    const five = state.cache[state.asset]["5s"].candles;
-    const last = five[five.length - 1];
-  const C = last ? last.close : null;
-  
-  console.log("[MOBILE-PRED] capture check:", { _mob_t0, t0, _mob_pending: !!_mob_pending, predDir: pred.prediction });
-  
-  // boundary: ronde sebelumnya baru saja berakhir
-  if (_mob_t0 !== null && _mob_t0 !== t0) {
-    console.log("[MOBILE-PRED] session boundary detected:", _mob_t0, "->", t0);
-    if (_mob_pending) {
-      // Ambil nilai ACTUAL sesi sebelumnya dari 5m candle sesuai session start
-      const prevStart = _mob_pending.t0;
-      const prevDur = INTERVAL_MS[_mob_pending.interval] || dur;
-      const prevStartSec = Math.floor(prevStart / 1000);
-      const tfSec = prevDur / 1000;
-      const candles5m = state.cache[_mob_pending.asset]["5m"].candles || [];
-      const sessionCandles = candles5m.filter(c => Math.floor(c.time / tfSec) * tfSec === prevStartSec);
-      const prevClose = sessionCandles.length ? sessionCandles[sessionCandles.length - 1].close : null;
-      const prevLock = _mob_pending.lock || sessionLock(_mob_pending.asset, prevDur, prevStart);
+  // Track current active session boundary
+  if (_deskSig && _deskSig.verdict !== "flat") {
+    const dur = INTERVAL_MS[state.interval];
+    const t0 = Math.floor(now / dur) * dur;
+    const key = `${state.asset}_${state.interval}_${t0}`;
+    
+    // Only capture once per session boundary (avoid duplicate logs)
+    if (!_deskSigMap[key]) {
+      _deskSigMap[key] = true;
       
-      console.log("[MOBILE-PRED] evaluating previous session:", { prevStart, prevClose, prevLock });
-      
-      if (prevClose != null && prevLock != null) {
-        const actual = prevClose >= prevLock ? "up" : "down";
-        const won = _mob_pending.dir === actual ? 1 : 0;
-        const entry = {
-          ts: Date.now(),
-          t0: _mob_pending.t0,
-          asset: _mob_pending.asset,
-          interval: _mob_pending.interval,
-          mode: _mob_pending.mode,
-          dir: _mob_pending.dir,
-          conf: _mob_pending.conf,
-          lock: prevLock,
-          close: prevClose,
-          actual,
-          won,
-        };
-        MobilePredLog.add(entry);
-        console.log("[MOBILE-PRED] logged:", entry);
-        renderConfidenceReport();
-      } else {
-        console.log("[MOBILE-PRED] missing data for evaluation:", { prevClose, prevLock });
-      }
+      const entry = {
+        ts: Date.now(),
+        t0: _deskSig.roundStart,
+        asset: state.asset,
+        interval: state.interval,
+        mode: _deskSig.mode,
+        dir: _deskSig.verdict,
+        conf: _deskSig.conf,
+        lock: sessionLock(state.asset, dur, now),
+        reason: _deskSig.reason,
+      };
+      SignalLog.add(entry);
+      console.log("[DESK-SIG] captured:", entry);
+      renderConfidenceReport();
     }
-    _mob_pending = null;
-  }
-  
-  _mob_t0 = t0;
-  _mob_lastClose = C;
-  _mob_lastLock = O;
-  
-  // Capture mobile prediction if not already captured for this session
-  if (_mob_pending === null && pred && pred.prediction !== "flat") {
-    _mob_pending = {
-      t0,
-      asset: state.asset,
-      interval: state.interval,
-      mode: pred.mode,
-      dir: pred.prediction,
-      conf: pred.confidence,
-      lock: pred.lockPrice,
-    };
-    console.log("[MOBILE-PRED] captured prediction:", _mob_pending);
   }
 }
 
@@ -1652,52 +1767,8 @@ function restoreMobilePredSession() {
       if (Math.abs(saved.roundStart - curStart) < 1000 && assetMatch && tfMatch) {
         _mobilePredSession = saved;
         console.log("[MOBILE-PRED] restored from sessionStorage:", saved);
-        // Seed boundary tracking so captureMobilePrediction() can detect next boundary
-        _mob_t0 = saved.roundStart;
-        _mob_pending = {
-          t0: saved.roundStart,
-          asset: saved.asset,
-          interval: saved.interval,
-          mode: saved.mode,
-          dir: saved.prediction,
-          conf: saved.confidence,
-          lock: saved.lockPrice,
-        };
-      } else {
-        // Session berbeda - evaluasi prediksi lama sebelum discard
-        console.log("[MOBILE-PRED] stale/mismatched session in storage, evaluating:", saved);
-        if (saved.prediction !== "flat") {
-          const prevDur = INTERVAL_MS[saved.interval] || dur;
-          const prevLock = saved.lockPrice || sessionLock(saved.asset, prevDur, saved.roundStart);
-          const prevFive = state.cache[saved.asset]["5s"].candles || [];
-          // Cari candle terakhir yang termasuk dalam sesi yang disimpan (bukan candle terakhir saat ini)
-          const sessionEnd = saved.roundStart + prevDur;
-          const sessionCandles = prevFive.filter(c => c.time * 1000 >= saved.roundStart && c.time * 1000 < sessionEnd);
-          const prevClose = sessionCandles.length ? sessionCandles[sessionCandles.length - 1].close : null;
-          
-          if (prevClose != null && prevLock != null) {
-            const actual = prevClose >= prevLock ? "up" : "down";
-            const won = saved.prediction === actual ? 1 : 0;
-            const entry = {
-              ts: Date.now(),
-              t0: saved.roundStart,
-              asset: saved.asset,
-              interval: saved.interval,
-              mode: saved.mode,
-              dir: saved.prediction,
-              conf: saved.confidence,
-              lock: prevLock,
-              close: prevClose,
-              actual,
-              won,
-            };
-            MobilePredLog.add(entry);
-            console.log("[MOBILE-PRED] logged restored session:", entry);
-            renderConfidenceReport();
-          }
-        }
-        sessionStorage.removeItem(MOBILE_PRED_SESSION_KEY);
       }
+      sessionStorage.removeItem(MOBILE_PRED_SESSION_KEY);
     }
   } catch (_) {}
 }
@@ -1835,7 +1906,7 @@ function predictSessionStart(sym, tf) {
   };
 }
 
-function updateMobilePrediction() {
+  function updateMobilePrediction() {
   const ticker = state.ticker[state.asset];
   if (!ticker) {
     console.log("[MOBILE-PRED] updateMobilePrediction: no ticker for", state.asset);
@@ -1845,6 +1916,45 @@ function updateMobilePrediction() {
     const dur = INTERVAL_MS[state.interval];
   const now = serverNow();
   const roundStart = Math.floor(now / dur) * dur;
+  const elapsed = now - roundStart;
+
+  // FIX: Sinkronkan mobile prediction dengan desktop filter
+  // Jika sesi baru (< 15s), paksa MENUNGGU sampai desktop filter siap analisis
+  if (elapsed < 15000) {
+    if (!_mobilePredSession || _mobilePredSession.roundStart !== roundStart || _mobilePredSession.asset !== state.asset || _mobilePredSession.interval !== state.interval) {
+      _mobilePredSession = {
+        roundStart,
+        asset: state.asset,
+        interval: state.interval,
+        lockPrice: sessionLock(state.asset, dur, now),
+        prediction: "flat",
+        confidence: 50,
+        mode: "MENUNGGU",
+      };
+      try { sessionStorage.setItem(MOBILE_PRED_SESSION_KEY, JSON.stringify(_mobilePredSession)); } catch (_) {}
+      console.log("[MOBILE-PRED] Early session guard, forcing MENUNGGU until desktop filter ready");
+    }
+    // Update DOM dan return sebelum compute prediksi
+    const pred = _mobilePredSession;
+    const lockPrice = pred.lockPrice;
+    const C = ticker.last;
+    const priceDelta = lockPrice ? (C - lockPrice) / lockPrice : 0;
+
+    const lockEl = document.getElementById("m-lock");
+    const dirEl = document.getElementById("m-dir");
+    const confEl = document.getElementById("m-conf");
+    const priceEl = document.getElementById("m-price");
+    const deltaEl = document.getElementById("m-delta");
+    const modeEl = document.getElementById("m-mode");
+
+    if (lockEl) lockEl.textContent = fmtPrice(lockPrice);
+    if (priceEl) priceEl.textContent = fmtPrice(C);
+    if (deltaEl) deltaEl.textContent = (priceDelta >= 0 ? "+" : "") + (priceDelta * 100).toFixed(2) + "%";
+    if (modeEl) modeEl.textContent = pred.mode;
+    if (dirEl) dirEl.textContent = "—";
+    if (confEl) confEl.textContent = "—";
+    return;
+  }
 
   const cacheKey = state.interval + "_" + roundStart;
   const cached = predCache[state.asset][cacheKey];
@@ -1882,10 +1992,11 @@ function updateMobilePrediction() {
          };
        }
      }
-     // Simpan ke sessionStorage agar tetap konsisten saat refresh
-     try { sessionStorage.setItem(MOBILE_PRED_SESSION_KEY, JSON.stringify(_mobilePredSession)); } catch (_) {}
-  }
+    // Simpan ke sessionStorage agar tetap konsisten saat refresh
+      try { sessionStorage.setItem(MOBILE_PRED_SESSION_KEY, JSON.stringify(_mobilePredSession)); } catch (_) {}
+    }
 
+  
   const pred = _mobilePredSession;
   const lockPrice = pred.lockPrice;
   const C = ticker.last;
@@ -1913,8 +2024,8 @@ function updateMobilePrediction() {
     confEl.className = pred.prediction === "up" ? "up" : pred.prediction === "down" ? "down" : "";
   }
   
-  // Track mobile prediction for accuracy logging
-  captureMobilePrediction();
+  // Track desktop signal for accuracy logging
+  captureDesktopSignal();
 }
 
 /* ----------------------- Controls ----------------------- */
@@ -1922,8 +2033,7 @@ function bindControls() {
   document.getElementById("asset-seg").addEventListener("click", (e) => {
     const b = e.target.closest("[data-asset]"); if (!b) return;
     state.asset = b.dataset.asset;
-    _mob_t0 = null;
-    _mob_pending = null;
+    _deskSig = null;  // Reset desktop signal lock on asset change
     segActive("asset-seg", b);
     renderActive(); updateProjection(); updateMobilePrediction(); updateGap();
     renderConfidenceReport();
@@ -1934,9 +2044,8 @@ function bindControls() {
   document.getElementById("tf-seg").addEventListener("click", (e) => {
     const b = e.target.closest("[data-tf]"); if (!b) return;
     state.interval = b.dataset.tf;
-    // Reset mobile prediction tracking karena interval berubah — jangan trigger boundary penilaian palsu
-    _mob_t0 = null;
-    _mob_pending = null;
+    // Reset desktop signal lock karena interval berubah
+    _deskSig = null;
     segActive("tf-seg", b);
     renderActive(); updateProjection(); updateMobilePrediction(); renderConfidenceReport();
   });
@@ -1995,6 +2104,97 @@ function segActive(segId, btn) {
   btn.classList.add("active");
 }
 
+/* ======================= Historical Trend Analysis ======================= */
+function analyzeHistoricalTrend(sym, tf, sessionCount) {
+  const candles = state.cache[sym]?.[tf]?.candles;
+  if (!candles || candles.length < sessionCount + 1) return { dir: 'flat', strength: 0, momentum: false, predictDir: 'flat', sessionDur: 300 };
+  
+  const recent = candles.slice(0, -1).slice(-sessionCount);
+  let bull = 0, bear = 0;
+  const totalWeight = sessionCount * (sessionCount + 1) / 2;
+  
+  for (let i = 0; i < recent.length; i++) {
+    const c = recent[i];
+    const d = c.close - c.open;
+    const weight = (i + 1) / totalWeight;
+    if (d > 0) bull += weight;
+    else if (d < 0) bear += weight;
+  }
+  
+  const strength = Math.abs(bull - bear) * 100;
+  const dir = bull > bear ? 'up' : bear > bull ? 'down' : 'flat';
+  const momentum = Math.abs(bull - bear) > 0.4;
+  
+  // Session duration calculation
+  let sessionDur = 300;
+  if (tf === '15m') sessionDur = 900;
+  else if (tf === '1h') sessionDur = 3600;
+  
+  // Predict next candle using acceleration (last 3 candles vs previous 3)
+  const last3 = recent.slice(-3);
+  const prev3 = recent.slice(-6, -3);
+  let lastBull = 0, prevBull = 0;
+  for (const c of last3) { if (c.close > c.open) lastBull++; else if (c.close < c.open) lastBull--; }
+  for (const c of prev3) { if (c.close > c.open) prevBull++; else if (c.close < c.open) prevBull--; }
+  
+  const predictDir = (dir === 'down' && lastBull > 0 && lastBull > prevBull) ? 'up' :
+                     (dir === 'up' && lastBull < 0 && Math.abs(lastBull) > Math.abs(prevBull)) ? 'down' : dir;
+  
+  return { dir, strength: Math.round(strength), momentum, predictDir, sessionDur };
+}
+
+/* ======================= Audio Alert (Web Audio API) ======================= */
+let audioCtx = null;
+function playSoundAlert() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audioCtx;
+    if (ctx.state === 'suspended') ctx.resume();
+    
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(440, ctx.currentTime);
+    
+    // Pulsing pattern - 8 beats over 2 seconds
+    const pattern = [
+      [0.00, 0.25, 0.30],
+      [0.25, 0.50, 0.30],
+      [0.50, 0.75, 0.35],
+      [0.75, 1.00, 0.35],
+      [1.00, 1.25, 0.40],
+      [1.25, 1.50, 0.40],
+      [1.50, 1.75, 0.40],
+      [1.75, 2.00, 0.40]
+    ];
+    
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    pattern.forEach(([start, end, vol]) => {
+      gain.gain.setValueAtTime(0, ctx.currentTime + start);
+      gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + end);
+    });
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 2.00);
+    console.log("[SOUND] 2-second pulsing alert played");
+  } catch (e) {
+    console.log("[SOUND] failed:", e.message);
+  }
+}
+
+// Preload audio context on first user interaction
+const unlockAudio = () => {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  }
+};
+document.addEventListener("click", unlockAudio, { once: true });
+document.addEventListener("touchstart", unlockAudio, { once: true });
+
 /* ----------------------- Boot ----------------------- */
 window.addEventListener("error", (e) => {
   const el = document.getElementById("err");
@@ -2031,6 +2231,20 @@ function start() {
   setInterval(sendVisit, 10000);
   setInterval(updateVisitors, 15000);
   updateVisitors();
+
+  // Audio test button
+  const audioTestBtn = document.getElementById("audio-test-btn");
+  if (audioTestBtn) {
+    audioTestBtn.addEventListener("click", () => {
+      try {
+        playSoundAlert();
+        audioTestBtn.textContent = "✓";
+      } catch (e) {
+        audioTestBtn.textContent = "❌";
+      }
+      setTimeout(() => { audioTestBtn.textContent = "🔊"; }, 2000);
+    });
+  }
 
   window.addEventListener("resize", () => chart && chart.fit());
 }

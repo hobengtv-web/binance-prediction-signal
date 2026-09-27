@@ -1048,7 +1048,12 @@ function applyType() {
     // Generate fallback reason for early session (before lock)
     let currentReason = _deskSig ? _deskSig.reason : "";
     if (!currentReason) {
-      if (finalVerdict !== "flat") {
+      // Fallback ke universal cache jika ada
+      const universalKey = `${state.asset}_${state.interval}_${sessionStart}`;
+      const universalCached = _deskSigCache[universalKey];
+      if (universalCached?.reason) {
+        currentReason = universalCached.reason;
+      } else if (finalVerdict !== "flat") {
         currentReason = `${mode} ${finalVerdict.toUpperCase()} | conf:${conf}%`;
       } else {
         currentReason = `NO ENTRY: ${(now - t0) < WARMUP_MS ? "WARMUP" : mode} | elapsed:${Math.round(elapsed/1000)}s`;
@@ -1170,12 +1175,16 @@ function applyType() {
     updateConfidenceDisplay(fadeDir, fadeConf);
 
     // akurasi: bekukan prediksi di momen entry, evaluasi saat round berakhir
-    captureConfidenceRound(t0, O, C, fadeDir, fadeConf, curTrendDir, confMode, state);
-    
-    // akurasi mobile prediksi: evaluasi di setiap tick
-    // Pastikan _mobilePredSession fresh sebelum capture (hindari race condition)
-    updateMobilePrediction();
-    captureDesktopSignal();
+     captureConfidenceRound(t0, O, C, fadeDir, fadeConf, curTrendDir, confMode, state);
+     
+
+     // Universal background: update all coin/interval signal cache setiap tick
+     updateProjectionUniversal();
+
+     // akurasi mobile prediksi: evaluasi di setiap tick
+     // Pastikan _mobilePredSession fresh sebelum capture (hindari race condition)
+     updateMobilePrediction();
+     captureDesktopSignal();
 
     // price zone overlay (entry zone / sell TP)
     const pred = _mobilePredSession;
@@ -1629,6 +1638,10 @@ const MobilePredLog = (() => {
 // SignalLog alias - untuk desktop signal capture (source of truth)
 const SignalLog = MobilePredLog;
 
+// Universal signal cache - untuk background calculation semua coin & interval
+let _deskSigCache = {};  // key: `${sym}_${tf}_${roundStart}` -> signal result
+const _deskSigMap = {};  // key: same -> boolean (mark sudah capture)
+
 let _cap_t0 = null;        // t0 ronde yang sedang di-capture
 let _cap_pending = null;   // prediksi entry: { t0, asset, interval, mode, dir, conf, trend }
 let _cap_lastClose = null; // C terakhir (close ronde sebelumnya saat boundary)
@@ -1636,41 +1649,193 @@ let _cap_lastLock = null;  // O terakhir (lock ronde sebelumnya)
 
 // Desktop signal lock - signal hanya dihitung saat sesi dimulai, kemudian lock
 let _deskSig = null;       // { roundStart, asset, interval, verdict, mode, reason, conf, timestamp }
-
-// Desktop signal tracking - universal per coin/interval combo
-const _deskSigMap = {};  // key: `${sym}_${tf}_${roundStart}` -> saved desktop signal verdict
+let _mob_t0 = null;        // t0 ronde mobile pred yang sedang di-capture
 
 function captureDesktopSignal() {
-  // ONLY capture based on desktop filter verdict (_deskSig) - NOT mobile prediction
-  // This ensures only quality-filtered signals are logged
+  // Universal capture - check semua coin & interval combos di background
   const now = serverNow();
   
-  // Track current active session boundary
-  if (_deskSig && _deskSig.verdict !== "flat") {
-    const dur = INTERVAL_MS[state.interval];
-    const t0 = Math.floor(now / dur) * dur;
-    const key = `${state.asset}_${state.interval}_${t0}`;
-    
-    // Only capture once per session boundary (avoid duplicate logs)
-    if (!_deskSigMap[key]) {
-      _deskSigMap[key] = true;
+  for (const sym of ["BTC", "ETH"]) {
+    for (const tf of INTERVALS) {
+      const dur = INTERVAL_MS[tf];
+      const t0 = Math.floor(now / dur) * dur;
+      const cacheKey = `${sym}_${tf}_${t0}`;
       
-      const entry = {
-        ts: Date.now(),
-        t0: _deskSig.roundStart,
-        asset: state.asset,
-        interval: state.interval,
-        mode: _deskSig.mode,
-        dir: _deskSig.verdict,
-        conf: _deskSig.conf,
-        lock: sessionLock(state.asset, dur, now),
-        reason: _deskSig.reason,
-      };
-      SignalLog.add(entry);
-      console.log("[DESK-SIG] captured:", entry);
-      renderConfidenceReport();
+      // Skip jika sudah capture untuk sesi ini
+      if (_deskSigMap[cacheKey]) continue;
+      
+      // Dapatkan signal result dari cache (di-generate oleh calculateAllSignals)
+      const cached = _deskSigCache[cacheKey];
+      if (cached && cached.verdict !== "flat") {
+        _deskSigMap[cacheKey] = true;  // Mark as captured
+        
+        const entry = {
+          ts: Date.now(),
+          t0: t0,
+          asset: sym,
+          interval: tf,
+          mode: cached.mode,
+          dir: cached.verdict,
+          conf: cached.conf,
+          lock: sessionLock(sym, dur, now),
+          reason: cached.reason || "",
+        };
+        SignalLog.add(entry);
+        console.log("[DESK-SIG] captured:", entry);
+        // Re-render hanya jika ini active combo
+        if (state.asset === sym && state.interval === tf) {
+          renderConfidenceReport();
+        }
+      }
     }
   }
+}
+
+// Universal signal calculator - calculate signal untuk semua coin & interval di background
+function updateProjectionUniversal() {
+  const now = serverNow();
+  
+  // Cleanup old cache entries (>3 hours old) untuk prevent memory leak
+  const CUTOFF = now - 3 * 3600000;
+  for (const k in _deskSigCache) {
+    const t = parseInt(k.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) {
+      delete _deskSigCache[k];
+      delete _deskSigMap[k];
+    }
+  }
+  
+  for (const sym of ["BTC", "ETH"]) {
+    for (const tf of INTERVALS) {
+      const dur = INTERVAL_MS[tf];
+      const t0 = Math.floor(now / dur) * dur;
+      const cacheKey = `${sym}_${tf}_${t0}`;
+      
+      // Skip jika sudah ada di cache dan sesi masih sama
+      if (_deskSigCache[cacheKey]) continue;
+      
+      // Minimal validation - pastikan ada candle data
+      const candles5m = state.cache[sym]["5m"]?.candles || [];
+      if (candles5m.length < 50) continue;  // Butuh minimal data untuk historical analysis
+      
+      // Untuk combo non-aktif, hitung signal berdasarkan historical pattern
+      // Ini adalah lightweight calculation - tidak perlu full desktop filter
+      const sig = calculateUniversalSignal(sym, tf, t0, now, candles5m);
+      if (sig) {
+        _deskSigCache[cacheKey] = sig;
+      }
+    }
+  }
+}
+
+// Calculate signal untuk coin/interval spesifik (dipakai universal)
+function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
+  // Use first-candle pattern analysis (lighter than full desktop filter)
+  const dur = INTERVAL_MS[tf];
+  const tfSec = dur / 1000;
+  const t0Sec = Math.floor(t0 / 1000);
+  
+  // Get session candles
+  const sessionCandles = candles5m.filter(c => Math.floor(c.time / tfSec) * tfSec === t0Sec);
+  if (sessionCandles.length < 1) {
+    // Session baru, belum ada candle
+    return {
+      roundStart: t0,
+      asset: sym,
+      interval: tf,
+      verdict: "flat",
+      mode: "MENUNGGU",
+      reason: `NO ENTRY: MENUNGGU (session just started)`,
+      conf: 0,
+    };
+  }
+  
+  // Get lock price + current price
+  const lockPrice = sessionLock(sym, dur, now);
+  const C = sessionCandles[sessionCandles.length - 1].close;
+  if (lockPrice == null || C == null) {
+    return null;  // Data belum lengkap
+  }
+  
+  const elapsed = now - t0;
+  
+  // WARMUP filter - skip if too early
+  if (elapsed < 15000) {
+    return {
+      roundStart: t0,
+      asset: sym,
+      interval: tf,
+      verdict: "flat",
+      mode: "WARMUP",
+      reason: `NO ENTRY: WARMUP (elapsed:${Math.round(elapsed/1000)}s ${'<'} ${WARMUP_MS/1000}s) — insufficient data`,
+      conf: 0,
+    };
+  }
+  
+  // Historical trend analysis (50 sessions) untuk non-active combo
+  const histTrend = analyzeHistoricalTrend(sym, tf, 50);
+  
+  // First candle direction (lightweight signal)
+  const firstCandleDir = sessionCandles[0].close > sessionCandles[0].open ? "bullish" : "bearish";
+  const currentDir = C > lockPrice ? "up" : C < lockPrice ? "down" : "flat";
+  
+  // Volume analysis
+  const volWindow = sessionCandles.slice(-5);
+  const volAvg = sessionCandles.slice(-30, -5).reduce((a, c) => a + (c.vol || 0), 0) / 25 || 1;
+  const volCurrent = volWindow.reduce((a, c) => a + (c.vol || 0), 0) / volWindow.length;
+  const volRel = volCurrent / volAvg;
+  
+  // RSI calculation
+  const rsi = rsiFromSeries(candles5m.slice(-50), 14);
+  
+  // Decision logic
+  let verdict = "flat", mode = "CONT", reason = "";
+  let conf = 0;
+  
+  // Historical trend based signal (for non-active combos - lightweight)
+  if (histTrend && histTrend.strength > 70 && histTrend.momentum && histTrend.predictDir !== "flat") {
+    verdict = histTrend.predictDir;
+    mode = "HIST-PREDICT";
+    reason = `ENTRY ${verdict.toUpperCase()}: HIST-PREDICT | lock:${fmtPrice(lockPrice)} | hist-str:${histTrend.strength} | momentum:${histTrend.momentum}`;
+    conf = Math.min(100, histTrend.strength);
+  } else if (firstCandleDir === "bullish" && rsi != null && rsi < 35 && volRel > 1.5) {
+    verdict = "up";
+    mode = "REVERSAL↑";
+    reason = `ENTRY UP: REVERSAL↑ | lock:${fmtPrice(lockPrice)} | RSI:${rsi?.toFixed(1) || '—'} | vol:${volRel?.toFixed(1) || '—'}x`;
+    conf = 75;
+  } else if (firstCandleDir === "bearish" && rsi != null && rsi > 75 && volRel > 1.5) {
+    verdict = "down";
+    mode = "REVERSAL↓";
+    reason = `ENTRY DOWN: REVERSAL↓ | lock:${fmtPrice(lockPrice)} | RSI:${rsi?.toFixed(1) || '—'} | vol:${volRel?.toFixed(1) || '—'}x`;
+    conf = 75;
+  } else {
+    // No entry
+    verdict = "flat";
+    if (elapsed < WARMUP_MS) {
+      mode = "WARMUP";
+      reason = `NO ENTRY: WARMUP (elapsed:${Math.round(elapsed/1000)}s ${'<'}${WARMUP_MS/1000}) — insufficient data`;
+    } else if (volRel < 1.1) {
+      mode = "LOWVOL";
+      reason = `NO ENTRY: LOWVOL (vol:${volRel?.toFixed(2) || '—'}x < 1.1x) — liquidity too thin`;
+    } else if (!histTrend || histTrend.strength < 50) {
+      mode = "WEAK-TREND";
+      reason = `NO ENTRY: WEAK-TREND (hist-str:${histTrend?.strength || 0} < ${50}) — no clear direction`;
+    } else {
+      mode = "FILTERED";
+      reason = `NO ENTRY: FILTER | hist-str:${histTrend?.strength || 0} | RSI:${rsi?.toFixed(0) || '—'} | vol:${volRel?.toFixed(2) || '—'}x`;
+    }
+    conf = 0;
+  }
+  
+  return {
+    roundStart: t0,
+    asset: sym,
+    interval: tf,
+    verdict,
+    mode,
+    reason,
+    conf,
+  };
 }
 
 function captureConfidenceRound(t0, O, C, fadeDir, fadeConf, trendDir, mode, state) {
@@ -1715,37 +1880,54 @@ function renderConfidenceReport() {
   const head = document.getElementById("conf-debug-head");
   const countEl = document.getElementById("conf-debug-count");
   if (!body) return;
-  const allData = MobilePredLog.data();
-  const data = allData.filter(r => r.interval === state.interval && r.asset === state.asset);
-  const n = data.length;
-    if (head) head.textContent = `MOBILE PREDICTION ACCURACY (${state.asset}/${state.interval}) · `;
-    if (countEl) countEl.textContent = `${n} rounds`;
   
-  if (!n) {
+  // Show universal report for ALL coin/interval combos
+  const allData = MobilePredLog.data();
+  
+  // Count total across all combos
+  const totalAll = allData.length;
+  if (head) head.textContent = `DESKTOP SIGNAL ACCURACY · Universal · `;
+  if (countEl) countEl.textContent = `${totalAll} rounds total`;
+  
+  if (!totalAll) {
     body.innerHTML = `<div class="cd-empty">no evaluation data yet — let it run a few rounds</div>`;
     return;
   }
 
-  const totW = data.reduce((a, r) => a + r.won, 0);
-  const overall = (totW / n * 100).toFixed(1);
+  // Generate report per combo
+  const combos = [["BTC", "5m"], ["ETH", "5m"], ["BTC", "15m"], ["ETH", "15m"], ["BTC", "1h"], ["ETH", "1h"]];
+  let html = "";
   
-  const dirLetter = (d) => d === "up" ? "U" : "D";
-  const dots = data.map(r => {
-    const cls = r.won ? "dot-win" : "dot-lose";
-    return `<span class="dot ${cls}" title="${r.dir.toUpperCase()} (${r.won ? 'BENAR' : 'SALAH'})">${dirLetter(r.dir)}</span>`;
-  }).join('');
+  for (const [sym, tf] of combos) {
+    const data = allData.filter(r => r.asset === sym && r.interval === tf);
+    const n = data.length;
+    if (n < 1) continue;  // Skip empty combos
+    
+    const totW = data.reduce((a, r) => a + r.won, 0);
+    const overall = (totW / n * 100).toFixed(1);
+    const wins = totW, losses = n - totW;
+    const winClass = overall >= 50 ? "cd-win" : "cd-lose";
+    
+    const dirLetter = (d) => d === "up" ? "U" : "D";
+    const dots = data.slice(-20).map(r => {
+      const cls = r.won ? "dot-win" : "dot-lose";
+      return `<span class="dot ${cls}" title="${r.dir.toUpperCase()} (${r.won ? 'BENAR' : 'SALAH'})">${dirLetter(r.dir)}</span>`;
+    }).join('');
+    
+    html += `
+      <div class="cd-row" style="margin-bottom:6px;">
+        <span class="cd-b">${sym}/${tf}</span>
+        <span class="cd-c">${n}</span>
+        <span class="cd-wr ${winClass}">${overall}%</span>
+        <span style="text-align:right;color:${overall >= 50 ? 'var(--up)' : 'var(--down)'}">
+          ${wins}W / ${losses}L
+        </span>
+      </div>
+      <div class="cd-dots" style="margin-top:4px; margin-bottom:8px;">${dots}</div>
+    `;
+  }
   
-  body.innerHTML = `
-    <div class="cd-row" style="margin-bottom:6px;">
-      <span class="cd-b">TOTAL</span>
-      <span class="cd-c">${n}</span>
-      <span class="cd-wr">${overall}%</span>
-      <span style="text-align:right;color:${overall >= 50 ? 'var(--up)' : 'var(--down)'}">
-        ${data.reduce((a,r)=>a+r.won,0)}W / ${n - data.reduce((a,r)=>a+r.won,0)}L
-      </span>
-    </div>
-    <div class="cd-dots" style="margin-top:6px;">${dots}</div>
-  `;
+  body.innerHTML = html;
 }
 
 /* ----------------------- Mobile Prediction ----------------------- */
@@ -2208,9 +2390,15 @@ function start() {
   startData();
   renderConfidenceReport();
   // timers — use rAF for smooth timer, updateProjection only on data events
-  requestAnimationFrame(updateTimerDisplay);
-  setInterval(updateProjection, 5000);  // heavy projection update every 5s only
-  startOrderbookPoll();  // real-time orderbook (200ms browser fetch)
+   requestAnimationFrame(updateTimerDisplay);
+   setInterval(updateProjection, 5000);  // heavy projection update every 5s only
+   setInterval(() => {  // Universal background: update all combos every 3s
+     if (state.connected) {
+       updateProjectionUniversal();
+       captureDesktopSignal();
+     }
+   }, 3000);
+   startOrderbookPoll();  // real-time orderbook (200ms browser fetch)
 
    // Active visitor tracking
   let visitorId = localStorage.getItem("bps_vid") || null;

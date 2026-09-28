@@ -461,6 +461,17 @@ http.createServer(async (req, res) => {
     return;
   }
 
+  // favicon: sebagian browser masih meminta /favicon.ico secara otomatis. Layani dengan SVG
+  // (Chrome/Safari menerima SVG di jalur ini) supaya console tidak penuh 404.
+  if (u.pathname === "/favicon.ico" || u.pathname === "/favicon.svg") {
+    try {
+      const svg = fs.readFileSync(path.join(__dirname, "favicon.svg"));
+      res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400" });
+      res.end(svg);
+    } catch (_) { res.writeHead(204); res.end(); }
+    return;
+  }
+
   if (u.pathname === "/api/ledger") {
     if (req.method === "OPTIONS") { res.writeHead(204, CORS); res.end(); return; }
     if (req.method === "POST") {

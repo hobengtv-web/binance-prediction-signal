@@ -3454,23 +3454,24 @@ function playSequence(notes, opts) {
     }
   } catch (e) { console.log("[SOUND] failed:", e.message); }
 }
-// SIGNAL ENTRY — aircraft MASTER CAUTION: bright two-tone "bing-bong" (B5 -> F#5) played twice.
-// Triangle wave + no reverb = an energetic cockpit alert, still far softer than a square wave.
+// SIGNAL ENTRY — DANGER ALARM: four identical short beeps "teett . teett . teett . teett"
+// Lower pitch + slower spacing than the trade sounds so it reads as an alarm, not a chirp.
 function playSoundAlert() {
   playSequence([
-    { f: 988, t: 0.00, d: 0.13, type: "triangle", vol: 0.26 },   // B5
-    { f: 740, t: 0.15, d: 0.20, type: "triangle", vol: 0.26 },   // F#5
-    { f: 988, t: 0.46, d: 0.13, type: "triangle", vol: 0.26 },
-    { f: 740, t: 0.61, d: 0.24, type: "triangle", vol: 0.26 },
-  ], { vol: 0.6, cutoff: 3400 });
-  console.log("[SOUND] master-caution (signal) played");
+    { f: 780, t: 0.00, d: 0.14, type: "triangle", vol: 0.26, ping: true },
+    { f: 780, t: 0.26, d: 0.14, type: "triangle", vol: 0.26, ping: true },
+    { f: 780, t: 0.52, d: 0.14, type: "triangle", vol: 0.26, ping: true },
+    { f: 780, t: 0.78, d: 0.20, type: "triangle", vol: 0.26, ping: true },
+  ], { vol: 0.6, cutoff: 3200 });
+  console.log("[SOUND] danger alarm (signal) played");
 }
-// TRADE ASSISTANT entry/average — AUTOPILOT DISCONNECT: three sharp identical beeps.
+// TRADE ASSISTANT entry/average — AUTOPILOT DISCONNECT: three quick high beeps (fewer, higher,
+// faster than the danger alarm so the two are not confused).
 function playTradeEntrySound() {
   playSequence([
-    { f: 1046, t: 0.00, d: 0.09, type: "triangle", vol: 0.26 },  // C6
-    { f: 1046, t: 0.18, d: 0.09, type: "triangle", vol: 0.26 },
-    { f: 1046, t: 0.36, d: 0.14, type: "triangle", vol: 0.26 },
+    { f: 1175, t: 0.00, d: 0.08, type: "triangle", vol: 0.26, ping: true },
+    { f: 1175, t: 0.16, d: 0.08, type: "triangle", vol: 0.26, ping: true },
+    { f: 1175, t: 0.32, d: 0.12, type: "triangle", vol: 0.26, ping: true },
   ], { vol: 0.6, cutoff: 3600 });
 }
 // TRADE ASSISTANT close/cut — MASTER WARNING: descending "whoop" (pitch glide), twice.
@@ -3678,14 +3679,14 @@ function start() {
   if (audioTestBtn) {
     audioTestBtn.addEventListener("click", () => {
       try {
-        playSoundAlert();                          // 1) master caution (signal entry)
-        setTimeout(playTradeEntrySound, 1300);     // 2) autopilot-disconnect triple beep
-        setTimeout(playCloseSound, 2300);          // 3) master warning whoop (close)
+        playSoundAlert();                          // 1) danger alarm (signal entry)
+        setTimeout(playTradeEntrySound, 1400);     // 2) autopilot-disconnect beeps
+        setTimeout(playCloseSound, 2200);          // 3) master warning whoop (close)
         audioTestBtn.textContent = "✓ 3 sounds";
       } catch (e) {
         audioTestBtn.textContent = "❌";
       }
-      setTimeout(() => { audioTestBtn.textContent = "🔊"; }, 3300);
+      setTimeout(() => { audioTestBtn.textContent = "🔊"; }, 3200);
     });
   }
 

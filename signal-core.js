@@ -156,15 +156,15 @@
       switch (mode) {
         case "HIST-PREDICT":
           return `Entry ${DIR}. The last 50 completed sessions lean ${verdict}, directional strength ${strTxt} of 100` +
-            (momentum ? ", momentum confirmed" : "") + `. RSI ${rsiTxt}. Volume ${volTxt}.`;
+            (momentum ? ", momentum confirmed" : "") + `. RSI ${rsiTxt}. Volume (5m pace) ${volTxt}.`;
         case "TREND":
-          return `Entry ${DIR}. Price is already ${aboveBelow} the session open in the first minute, with volume ${volTxt}.`;
+          return `Entry ${DIR}. Price is already ${aboveBelow} the session open in the first minute, with volume (5m pace) ${volTxt}.`;
         case "REVERSAL↑":
-          return `Entry UP. RSI ${rsiTxt} is oversold and the first candle of the session was bullish, with volume ${volTxt}.`;
+          return `Entry UP. RSI ${rsiTxt} is oversold and the first candle of the session was bullish, with volume (5m pace) ${volTxt}.`;
         case "REVERSAL↓":
-          return `Entry DOWN. RSI ${rsiTxt} is overbought and the first candle of the session was bearish, with volume ${volTxt}.`;
+          return `Entry DOWN. RSI ${rsiTxt} is overbought and the first candle of the session was bearish, with volume (5m pace) ${volTxt}.`;
         case "MOMENTUM":
-          return `Entry ${DIR}. After warmup, price is ${aboveBelow} the session open with volume ${volTxt}.`;
+          return `Entry ${DIR}. After warmup, price is ${aboveBelow} the session open with volume (5m pace) ${volTxt}.`;
         case "CLOSE":
           return `Entry ${DIR}. Near settlement, price is ${aboveBelow} the session open.`;
         default:
@@ -178,7 +178,7 @@
       case "WARMUP":
         return `No entry. Warmup in progress: ${secs} seconds elapsed, the minimum is 15 seconds.`;
       case "LOWVOL":
-        return `No entry. Volume ${volTxt} is below the 1.05x minimum, the market is too thin to trade.`;
+        return `No entry. Volume (5m pace) ${volTxt} is below the 1.05x minimum, the market is too thin to trade.`;
       case "WEAK-TREND":
         return `No entry. No clear historical trend: strength ${strTxt} of 100 is below 35, and volume is ${volTxt}.`;
       case "FILTERED":

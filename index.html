@@ -97,15 +97,16 @@
     
      <!-- Volume & Liquidity Section -->
     <div style="padding-top: 8px; margin-top: 12px; border-top: 1px solid var(--border);">
-      <div style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">VOLUME</div>
+      <div style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">VOLUME (traded)</div>
       <div style="display:flex; justify-content:space-between; font-size:13px;">
         <span>LIQUIDITY: <b id="s-liq">—</b></span>
-        <span>VOL: <b id="s-vol">—</b></span>
+        <span>VOL 5m: <b id="s-vol">—</b> · 5s: <b id="s-vol5s">—</b></span>
       </div>
     </div>
     
-    <!-- Orderbook Bar -->
+    <!-- Orderbook Bar (NOT traded volume: resting limit orders) -->
     <div class="orderbook-bar" id="orderbook-bar">
+      <div style="font-size:11px; color:var(--muted); margin-bottom:4px;">ORDERBOOK DEPTH — top 5 levels (USD notional, bukan volume transaksi)</div>
       <div class="ob-bg">
         <div class="ob-ask" id="ob-ask"></div>
         <div class="ob-bid" id="ob-bid"></div>

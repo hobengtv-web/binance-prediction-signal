@@ -602,7 +602,7 @@ function applyType() {
       else reasons.push("RSI " + o.rsi.toFixed(1) + " neutral");
     }
     if (o.reward > 0) reasons.push("Reward " + (o.reward >= 0 ? "+" : "") + o.reward.toFixed(2) + " percent");
-    if (o.volRel != null) reasons.push("Volume " + (o.volRel >= 10 ? "at least 10x" : o.volRel.toFixed(1) + "x"));
+    if (o.vol5m != null) reasons.push("Volume 5m " + (o.vol5m >= 10 ? "at least 10x" : o.vol5m.toFixed(1) + "x"));
 
     const dirWord = o.verdict === "up" ? "UP" : "DOWN";
     return "Entry " + dirWord + ". " + reasons.join(". ") + ".";
@@ -617,6 +617,7 @@ function applyType() {
     const rw = document.getElementById("s-reward");
     const rec = document.getElementById("s-rec");
     const volEl = document.getElementById("s-vol");
+    const vol5sEl = document.getElementById("s-vol5s");
     const liqEl = document.getElementById("s-liq");
     const confEl = document.getElementById("s-conf");
     const confBar = document.getElementById("s-conf-bar");
@@ -654,7 +655,9 @@ function applyType() {
       confBar.style.width = (o.verdict !== "flat" ? (o.conf || 0) : 0) + "%";
       confBar.className = "signal-conf-bar " + (o.verdict === "up" ? "up" : o.verdict === "down" ? "down" : "");
     }
-    if (volEl) volEl.textContent = (o.volRel == null) ? "—" : (o.volRel >= 10 ? "≥10×" : o.volRel.toFixed(1) + "×");
+    const fmtVol = (v) => v == null ? "—" : v >= 10 ? "≥10×" : v.toFixed(1) + "×";
+    if (volEl) volEl.textContent = fmtVol(o.vol5m);      // 5m traded-volume pace (drives the grade)
+    if (vol5sEl) vol5sEl.textContent = fmtVol(o.vol5s);  // 5s-window traded volume vs ~5 min baseline
     if (liqEl) {
       const liq = o.liquidity || "NORMAL";
       liqEl.textContent = liq;
@@ -1250,7 +1253,8 @@ function applyType() {
       peakPrice: peakPrice != null ? peakPrice : (peak ? peak.price : null),
       peakDir: peak ? peak.dir : null,
       reward: reward,
-      volRel: hasVolData ? rel : null, liquidity: liquidity,
+      vol5s: hasVolData ? rel : null, liquidity: liquidity,
+      vol5m: liveSig && liveSig.volRel != null ? liveSig.volRel : null,
       reason: currentReason,
       highConf: !!gateInfo,
       gateWr: gateInfo ? gateInfo.wr : null,
@@ -2391,6 +2395,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     conf,
     rsi,
     histStrength: histStr,
+    volRel,
     grade,
     expectedWR,
     ofi,

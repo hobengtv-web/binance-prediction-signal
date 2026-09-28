@@ -667,6 +667,9 @@ function applyType() {
       if (o.analyzing) {
         rec.textContent = "Sedang Menganalisa";
         rec.className = "signal-rec flat";
+      } else if (o.volWait) {
+        rec.textContent = `Menunggu volume ${o.vol5m != null ? o.vol5m.toFixed(2) + "×" : "—"} / ${o.volNeed}×`;
+        rec.className = "signal-rec flat";
       } else if (o.verdict === "flat") {
         rec.textContent = "No entry for this round";
         rec.className = "signal-rec flat";
@@ -1243,8 +1246,9 @@ function applyType() {
       : "";
     if (finalVerdict !== "flat") {
       const wr = uni && uni.expectedWR != null ? `${(uni.expectedWR * 100).toFixed(0)} percent` : null;
+      const minTxt = uni && uni.minuteIn ? ` (entry minute ${uni.minuteIn}${uni.late ? ", LATE — little time left" : ""})` : "";
       const head = grade
-        ? `EARLY ${grade}${wr ? `, measured hit rate ${wr}` : ""}. `
+        ? `EARLY ${grade}${minTxt}${wr ? `, measured hit rate ${wr}` : ""}. `
         : (gateInfo ? `High confidence, backtested winrate ${(gateInfo.wr * 100).toFixed(0)} percent. ` : "Watchlist. ");
       currentReason = head + currentReason + ofiTxt;
     }
@@ -1256,6 +1260,9 @@ function applyType() {
       reward: reward,
       vol5s: hasVolData ? rel : null, liquidity: liquidity,
       vol5m: liveSig && liveSig.volRel != null ? liveSig.volRel : null,
+      volWait: !uni && finalVerdict === "flat" && (elapsed / dur) < 0.6 &&
+        !!liveSig && (liveSig.mode === "LOWVOL" || liveSig.mode === "WARMUP" || liveSig.mode === "MENUNGGU"),
+      volNeed: fairMinVol(state.interval),
       reason: currentReason,
       highConf: !!gateInfo,
       gateWr: gateInfo ? gateInfo.wr : null,
@@ -2141,9 +2148,21 @@ async function loadTiers() {
     const res = await fetch("/backtest/out/early_tiers.json", { cache: "no-store" });
     if (!res.ok) { TIER_STATUS = "missing"; return; }
     TIERS = await res.json();
+    // Per-minute accuracy: entries that appear later in the session are measurably better.
+    try {
+      const r2 = await fetch("/backtest/out/tier_by_minute.json", { cache: "no-store" });
+      if (r2.ok) { const j = await r2.json(); TIERS.byMinute = j.tiers || null; }
+    } catch (_) {}
     TIER_STATUS = "ok";
-    console.log(`[TIERS] early tiers loaded · ${TIERS.windowDays}d window`);
+    console.log(`[TIERS] early tiers loaded · ${TIERS.windowDays}d window · byMinute ${TIERS.byMinute ? "yes" : "no"}`);
   } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
+}
+// Measured winrate for the exact minute the entry appeared (falls back to the grade table).
+function minuteWR(tf, minuteIn) {
+  if (!TIERS || !TIERS.byMinute) return null;
+  const t = TIERS.byMinute[tf];
+  const o = t && t[String(minuteIn)];
+  return o ? o.wr : null;
 }
 function gradeVariant(tf, grade) {
   if (grade === "STRONG") return "OFI strong+vol>=3";
@@ -2399,7 +2418,11 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     mode = why;
     conf = 0;
   }
-  const expectedWR = grade ? gradeWR(tf, grade) : null;
+  const expectedGradeWR = grade ? gradeWR(tf, grade) : null;
+  const minuteIn = Math.floor(elapsed / 60000) + 1;                 // 1-based, matches the calibration
+  const sessionMin = Math.round(dur / 60000);
+  const late = elapsed > 0 && minuteIn >= Math.ceil(0.8 * sessionMin);  // last ~20% of the session
+  const expectedWR = grade ? (minuteWR(tf, minuteIn) != null ? minuteWR(tf, minuteIn) : expectedGradeWR) : null;
   let reason = SignalCore.buildReason({
     verdict: verdict === "flat" && mode === "OFI contra" ? "flat" : verdict,
     mode: mode === "OFI contra" ? "FILTERED" : mode,
@@ -2422,6 +2445,8 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     volRel,
     grade,
     expectedWR,
+    minuteIn,
+    late,
     ofi,
     ofiAgree,
   };

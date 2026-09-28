@@ -3808,6 +3808,38 @@ function captureConfidenceRound(t0, O, C, fadeDir, fadeConf, trendDir, mode, sta
   }
 }
 
+/* ===== REPARASI HISTORY =====
+   Entri yang sudah tercatat bisa salah bila dinilai sebelum candle final (lihat gate di
+   evaluateUniversalSessions). Fungsi ini memeriksa ulang entri terakhir memakai candle yang
+   sekarang sudah final dan MEMPERBAIKI lock/close/actual/won bila berbeda.
+   Dijalankan saat start + berkala; hanya menyentuh entri yang candle-nya sudah final. */
+function repairLogOutcomes(limit = 400) {
+  const log = SignalLog.data();
+  if (!log.length) return 0;
+  const now = Date.now();
+  const tail = log.slice(-limit);
+  let fixed = 0;
+  for (const e of tail) {
+    if (e.t0 == null || !e.interval) continue;
+    const dur = INTERVAL_MS[e.interval];
+    if (!dur) continue;
+    const candles = state.cache[e.asset]?.[e.interval]?.candles || [];
+    const t0Sec = Math.floor(e.t0 / 1000);
+    const sc = candles.find((c) => c.time === t0Sec);
+    if (!sc) continue;
+    const tfSec = dur / 1000;
+    const finalNow = candles.some((c) => c.time === t0Sec + tfSec) || (sc.closeTime != null && sc.closeTime <= now) || now >= e.t0 + dur + 30000;
+    if (!finalNow) continue;
+    const actual = sc.close >= sc.open ? "up" : "down";
+    const won = e.dir === actual ? 1 : 0;
+    if (e.actual !== actual || e.won !== won || e.lock !== sc.open || e.close !== sc.close) {
+      e.actual = actual; e.won = won; e.lock = sc.open; e.close = sc.close; fixed++;
+    }
+  }
+  if (fixed) { SignalLog.replaceAll(log); console.log(`[LOG] perbaiki ${fixed} entri hasil (candle sudah final)`); }
+  return fixed;
+}
+
 // Finalize locked signals whose round has ENDED: write them to history with the outcome.
 // Rounds still running stay in PendingSig, so history never shows an unfinished round.
 function evaluateUniversalSessions(now) {
@@ -3828,6 +3860,16 @@ function evaluateUniversalSessions(now) {
       if (now > p.t0 + dur + 3 * 3600000) PendingSig.remove(p);
       continue;
     }
+
+    // ===== WAJIB: candle sesi harus SUDAH FINAL sebelum dinilai =====
+    // Tanpa ini, penilaian bisa memakai close parsial (candle masih berjalan tepat saat ronde
+    // berakhir) sehingga hasil salah PERMANEN -- mis. BTC diprediksi UP dan sesi memang close di
+    // atas lock, tapi tercatat merah. Finalitas dinilai dari: (a) candle berikutnya sudah ada,
+    // atau (b) closeTime candle sudah lewat, atau (c) cadangan: 30 detik setelah ronde berakhir.
+    const tfSec = dur / 1000;
+    const nextExists = candles.some((c) => c.time === t0Sec + tfSec);
+    const closedByTime = sc.closeTime != null && sc.closeTime <= now;
+    if (!nextExists && !closedByTime && now < p.t0 + dur + 30000) continue;
 
     const lock = sc.open;
     const close = sc.close;
@@ -4712,6 +4754,8 @@ function start() {
   evaluateUniversalSessions(serverNow());   // finalize rounds that already ended (e.g. after reload)
   renderConfidenceReport();
   LIVE.connect(state.interval);      // sinyal dari server (SSE)
+  setTimeout(() => { try { repairLogOutcomes(); } catch (_) {} }, 4000);
+  setInterval(() => { try { repairLogOutcomes(); } catch (_) {} }, 120000);
   loadGate();
   loadTiers();
   loadLearn();

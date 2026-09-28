@@ -1058,9 +1058,16 @@ function applyType() {
     conf = 0;
   }
   const elapsedSec = Math.round((now - sessionStart) / 1000);
-  const calcStatus = uni
+  // Live validity of the LOCKED signal (display only — the locked direction never changes).
+  let lockSuffix = "";
+  if (uni) {
+    const st = computeLockStatus(uniKey, uni.verdict, O, C, now);
+    const t = lockStatusText(st, now);
+    if (t) lockSuffix = ` · ${t}`;
+  }
+  const calcStatus = (uni
     ? `Signal locked ${elapsedSec - Math.round((now - uni.lockedAt) / 1000)}s after session open · mode ${uni.mode}`
-    : `Evaluating session, open +${elapsedSec}s · ${liveSig ? liveSig.mode : "collecting data"}`;
+    : `Evaluating session, open +${elapsedSec}s · ${liveSig ? liveSig.mode : "collecting data"}`) + lockSuffix;
   // Still analyzing until a signal locks OR the warmup window has passed with a verdict.
   const analyzing = !uni && (
     elapsedSec < 15 ||
@@ -1690,6 +1697,27 @@ function rebuildLoggedIndex() {
   for (const e of SignalLog.data()) _loggedKeys.add(logKeyOf(e));
 }
 
+// Live status of a LOCKED signal (display only — never changes the locked direction).
+// Tracks when price first moved to the opposite side of the lock (session open).
+const _lockStatusSince = {};
+function computeLockStatus(key, dir, lock, price, now) {
+  if (!key || (dir !== "up" && dir !== "down") || lock == null || price == null) return null;
+  const against = (dir === "up" && price < lock) || (dir === "down" && price > lock);
+  const aligned = (dir === "up" && price > lock) || (dir === "down" && price < lock);
+  if (against) {
+    if (!_lockStatusSince[key]) _lockStatusSince[key] = now;
+    return { state: "AGAINST", since: _lockStatusSince[key] };
+  }
+  _lockStatusSince[key] = null;
+  return { state: aligned ? "ALIGNED" : "AT_LOCK", since: null };
+}
+function lockStatusText(st, now) {
+  if (!st) return "";
+  if (st.state === "AGAINST") return `SUDAH BERBALIK ${Math.round((now - st.since) / 1000)}s`;
+  if (st.state === "ALIGNED") return "MASIH SESUAI";
+  return "DI HARGA LOCK";
+}
+
 /* Signals locked during a running session are held here (persisted) and only written to
    history when the round ENDS. Prevents history entries appearing before a round finishes,
    and prevents duplicates across page reloads. */
@@ -1821,7 +1849,7 @@ function updateProjectionUniversal() {
   // pruned independently — otherwise it grows without bound.
   for (const k in _deskSigLive) {
     const t = parseInt(k.split("_")[2]);
-    if (!isNaN(t) && t < CUTOFF) delete _deskSigLive[k];
+    if (!isNaN(t) && t < CUTOFF) { delete _deskSigLive[k]; delete _lockStatusSince[k]; }
   }
   
   for (const sym of ["BTC", "ETH"]) {
@@ -2619,11 +2647,18 @@ window.__comboStatus = function () {
       const hist = SignalLog.data().filter((e) => e.asset === sym && e.interval === tf);
       const ev = hist.filter((e) => e.won !== undefined);
       const wins = ev.reduce((a, e) => a + e.won, 0);
+      let status = "—";
+      if (locked) {
+        const lock = sessionLock(sym, dur, now);
+        const price = (state.cache[sym]?.["5s"]?.candles || []).slice(-1)[0]?.close ?? (state.ticker[sym] ? state.ticker[sym].last : null);
+        status = lockStatusText(computeLockStatus(key, locked.verdict, lock, price, now), now) || "—";
+      }
       rows.push({
         combo: `${sym}/${tf}`,
         elapsed: Math.round((now - t0) / 1000) + "s",
         live: live ? live.mode + (live.verdict !== "flat" ? " " + live.verdict : "") : "—",
         locked: locked ? locked.mode + " " + locked.verdict : "—",
+        status: status,
         pending: PendingSig.has(key) ? "yes" : "no",
         rounds: hist.length,
         evaluated: ev.length,

@@ -48,7 +48,6 @@
   <section class="dual" id="dual"></section>
 
   <!-- WIDE SCREENS: both coins side by side (coin tabs are hidden) -->
-  <section class="monitors" id="monitors"></section>
 
   <main class="chart-wrap">
     <div id="chart"></div>
@@ -58,6 +57,8 @@
       <span id="legend-ohlc"></span>
     </div>
   </main>
+
+  <section class="monitors" id="monitors"></section>
 
   <section class="round" id="round">
     <div class="round-head">
@@ -110,8 +111,6 @@
         <span>LIQUIDITY: <b id="s-liq">—</b></span>
         <span>VOL 5m: <b id="s-vol">—</b> · 5s: <b id="s-vol5s">—</b></span>
       </div>
-      <!-- Ambang yang SEDANG BERLAKU (diisi dari /api/model/gates, bukan angka tetap) -->
-      <div id="gate-line" style="font-size:10.5px;color:var(--muted);margin-top:5px;line-height:1.5;">AMBANG AKTIF: memuat…</div>
     </div>
     
     <!-- Orderbook Bar (NOT traded volume: resting limit orders) -->
@@ -125,6 +124,12 @@
         <span class="ob-sell-pct" id="ob-sell-pct">—</span>
         <span class="ob-buy-pct" id="ob-buy-pct">—</span>
       </div>
+    </div>
+
+    <!-- INFO AMBANG AKTIF (profil gate: bootstrap / hasil belajar) — setelah VOLUME + ORDERBOOK -->
+    <div style="padding-top:8px; margin-top:12px; border-top:1px solid var(--border);">
+      <div style="font-size:11px; color:var(--muted); margin-bottom:4px;">AMBANG AKTIF (profil gate)</div>
+      <div id="gate-line" style="font-size:10.5px;color:var(--muted);line-height:1.5;">AMBANG AKTIF: memuat…</div>
     </div>
     
     <!-- Signal Info Section -->

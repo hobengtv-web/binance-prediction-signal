@@ -108,6 +108,8 @@
         <span>LIQUIDITY: <b id="s-liq">—</b></span>
         <span>VOL 5m: <b id="s-vol">—</b> · 5s: <b id="s-vol5s">—</b></span>
       </div>
+      <!-- Ambang yang SEDANG BERLAKU (diisi dari /api/model/gates, bukan angka tetap) -->
+      <div id="gate-line" style="font-size:10.5px;color:var(--muted);margin-top:5px;line-height:1.5;">AMBANG AKTIF: memuat…</div>
     </div>
     
     <!-- Orderbook Bar (NOT traded volume: resting limit orders) -->
@@ -204,19 +206,20 @@
   <details class="help">
     <summary>HOW TO READ &amp; ACT ▾</summary>
     <div class="help-body">
-      <p><b>Binance Prediction:</b> win <b>UP</b> if price at end of round ≥ open (<b>LOCK</b>); win <b>DOWN</b> if &lt; LOCK. Ties (exact same) are usually <b>refund</b>.</p>
-      <p><b>MOBILE PREDICTION:</b> panel above (LOCK PRICE, PREDICTION, CONFIDENCE, PRICE, DELTA, MODE) gives early signal based on <b>first 1s candle</b> + pattern analysis of 30 previous sessions. Prediction is computed <b>once per session</b> and <b>locked</b> until the session ends — it does not change every tick.</p>
-      <p><b>SIGNAL sync:</b> on <b>SIGNAL</b> tab (confMode = SIGNAL), the <b>signal direction (UP/DOWN)</b> and <b>confidence LED bar direction</b> are locked to the mobile prediction. On <b>UP/DOWN</b> tabs, signal uses realtime price action (counter-trend). <b>Confidence values</b> (%) remain realtime on all tabs — only <b>direction</b> is locked on SIGNAL tab.</p>
-      <p><b>Entry focus:</b> 5m → last <b>2 minutes</b>, 15m → last <b>5 minutes</b>, 1h → last 10 minutes. Outside the window, confidence is lower.</p>
-      <p><b>PEAK / inflection:</b> find price extremum (▲P top / ▼P bottom) within window. This is the core strategy — we <b>FADE</b> (counter) the peak so that at close we get <b>larger reward</b>: top peak → predict <b>DOWN</b>, bottom peak → predict <b>UP</b>.</p>
-      <p><b>REWARD</b> = estimated % movement from PEAK price to projected close (larger = more worth fading).</p>
-      <p><b>ZONE</b> TOP/BOTTOM = price at extremum (reversal candidate). <b>MOMENTUM</b> = slope direction. <b>RSI 5m</b> &gt;70 overbought, &lt;30 oversold.</p>
-      <p><b>TREND</b> = direction of 3 most recent completed sessions (BULLISH / BEARISH / FLAT) used as trend bias — affects CONFIDENCE &amp; signal filter. % = <b>trend strength/age</b>: longer consecutive candles in same direction → higher %; detected <b>reversal</b> (peak against trend direction) → % drops.</p>
-      <p><b>MODE:</b> REVERSAL↑/↓ = we fade the peak (top→DOWN, bottom→UP); CONT = follow trend; CLOSE = last 20 seconds, use current price vs LOCK (most decisive).</p>
-      <p><b>CONFIDENCE</b> = confidence level for chosen direction. Computed from: candle pattern (2-3 candle confirmation post-peak) + indicators (RSI, z-score, momentum, 3-session TREND, liquidity) — then multiplied by <b>feasibility factor</b>: chance price reaches target (LOCK/OPEN) within remaining time. Closer to deadline &amp; further price drifts from LOCK (against chosen direction) → confidence decreases.</b> Always active &amp; realtime.</p>
-      <p><b>CONFIDENCE MODE:</b> <b>SIGNAL</b> = auto counter-trend (UP when price down, etc). Pick <b>UP</b>/<b>DOWN</b> to force confidence display in that direction — e.g. TREND 3 sessions BEARISH → pick DOWN, wait for price to rise forming a peak, then DOWN confidence rises as entry confirmation. <b>Source indicator adjusts:</b> WITH trend → calculated from <b>3 PREVIOUS SESSIONS</b> (proof trend continues); AGAINST trend → calculated from <b>ACTIVE SESSION</b> (old fade-peak logic). Indicator "3 SESSIONS PRIOR / ACTIVE SESSION" above shows the source.</p>
-      <p><b>MOBILE PREDICTION ACCURACY:</b> panel below shows history of mobile prediction accuracy — each dot is green (correct) / red (wrong). Reset only clears accuracy data, not active prediction.</p>
-      <p class="help-cta"><b>How to use:</b> (1) monitor <b>MOBILE PREDICTION</b> for early signal; (2) on SIGNAL tab, signal direction &amp; confidence LED follow mobile prediction — confidence values remain realtime; (3) wait for <b>ENTRY WINDOW: ACTIVE</b>; (4) check <b>PEAK</b> + <b>REVERSAL</b> + <b>REWARD</b>; (5) if MODE REVERSAL &amp; high CONFIDENCE → take UP/DOWN (fade peak); (6) if <b>NEUTRAL</b> (no peak / wrong direction) → don't select or wait; (7) check LIVE alignment for confirmation.</p>
+      <p><b>Binance Prediction:</b> win <b>UP</b> if price at end of round ≥ open (<b>LOCK</b>); win <b>DOWN</b> if &lt; LOCK. Ties are usually <b>refund</b>.</p>
+      <p><b>Sinyal 2 detik:</b> arah dibentuk dari <b>2 detik pertama</b> sesi (harga vs LOCK), lalu digrade oleh <b>tier</b>: STRONG / GOOD / FAIR. Nilai ambangnya berasal dari <b>profil gate</b> yang aktif (dilonggarkan/diketatkan learner tanpa deploy).</p>
+      <p><b>AMBANG AKTIF (dari server, mode <span id="help-gate-mode">—</span>):</b> <span id="help-gates">memuat…</span></p>
+      <p><b>Play utama (terukur):</b> harga pada 2 detik hampir selalu kembali menyentuh LOCK (79% pada sinyal ter-gate; turun seiring besarnya jarak/gap). Jadi <b>mean-reversion</b>: entry contra-lock, exit di LOCK — bukan menebak arah akhir sesi (di 2 detik hanya ~54–57%).</p>
+      <p><b>Exit (terukur):</b> jual-di-lock win <b>~86%</b> · ladder 40% lock / 30% +0.02% / 30% trail puncak-halus win <b>~70%</b> dengan capture ~8× lebih besar · <b>menahan sampai settle akhir sesi hanya ~43%</b> — jangan.</p>
+      <p><b>PEAK / ZONE / MOMENTUM / RSI:</b> PEAK = titik ekstrem harga sesi (▲ atas / ▼ bawah). ZONE = harga pada ekstrem itu. MOMENTUM = arah slope. RSI 5m &gt;70 overbought, &lt;30 oversold. Ini konteks bantu, bukan sinyal utama.</p>
+      <p><b>REWARD</b> = jarak harga sekarang ke LOCK dalam % (potensi hasil bila lock tersentuh). Makin jauh dari lock makin besar rewardnya — tapi peluang tersentuhnya makin kecil (lihat baris TOUCH LOCK di REASON).</p>
+      <p><b>TREND</b> = arah 3 sesi terakhir yang selesai (BULLISH/BEARISH/FLAT) sebagai konteks/bias, bukan penentu arah sinyal.</p>
+      <p><b>MODE</b> = alasan sinyal begini: <b>TREND</b> (lolos gate) · <b>LOWVOL</b> (volume di bawah ambang FAIR aktif) · <b>FILTERED</b> (tidak lolos tier/ambang) · <b>LATE</b> (lewat batas telat profil gate) · <b>NO-LIQ</b> (pasar terlalu sepi) · <b>WARMUP</b> (data 2 detik belum lengkap) · <b>LEARN-BLOCK</b> (ditahan oleh pelajaran learner).</p>
+      <p><b>CONFIDENCE</b> = skor keyakinan tampilan (pola candle + RSI + momentum + likuiditas + faktor kelayakan). Ini indikator bantu; yang mengikat adalah <b>tier + ambang gate</b> dan <b>hit rate terukur</b> yang tertulis di REASON.</p>
+      <p><b>Tab SIGNAL / UP / DOWN:</b> SIGNAL = keyakinan mengikuti sinyal 2 detik yang aktif; UP/DOWN = paksa tampilan untuk arah itu (untuk memantau skenario arah lawan).</p>
+      <p><b>DESKTOP SIGNAL ACCURACY:</b> riwayat sinyal desktop (hijau benar / merah salah). Tombol <b>reset</b> hanya menghapus riwayat tampilan di browser ini — <b>ledger belajar di server tidak terhapus</b>.</p>
+      <p><b>Learner (tanpa AI):</b> setiap sesi — termasuk yang <b>ditolak</b> gate — direkam beserta hasilnya. Re-fit harian menyesuaikan <b>konteks</b> (bucket + Wilson bound) dan <b>ambang</b> (coordinate ascent memaksimalkan Wilson lower bound), dinilai <b>walk-forward</b> (70% data awal untuk latih, 30% paling akhir untuk uji). Model hanya menggantikan yang berjalan bila <b>menang pada jendela uji</b>, dan setiap keputusan tercatat beserta alasannya. Pantau di panel <b>STATUS LEARNER</b>. Balik ke ambang konservatif: env server <code>GATES_MODE=strict</code>.</p>
+      <p class="help-cta"><b>Cara pakai:</b> (1) baca <b>AMBANG AKTIF</b> untuk tahu sedang mode bootstrap (longgar) atau ambang hasil belajar; (2) tunggu <b>Recommendation: UP/DOWN</b> (sinyal lolos gate) dan ikuti <b>TRADE ASSISTANT</b> untuk entry/exit; (3) entry contra-lock saat harga berbalik ke arah lock; (4) exit sesuai instruksi (JUAL DI LOCK / LADDER / TRAIL) — jangan menahan sampai settle; (5) cek <b>STATUS LEARNER</b> untuk progres data &amp; ambang yang dipakai.</p>
     </div>
   </details>
 

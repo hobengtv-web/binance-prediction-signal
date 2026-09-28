@@ -128,8 +128,8 @@
     noEntry: [
       "MENUNGGU (session just started, no candle yet)",
       "WARMUP (elapsed below 15 seconds, or desktop below 180 seconds)",
-      "LOWVOL (volume below the interval minimum: 1.2x 5m / 2x 15m / 1.5x 1h)",
-      "WEAK-TREND (trend strength below 35, volume below minimum)",
+      "LOWVOL (volume pace below the CURRENT interval minimum — see the gate profile)",
+      "WEAK-TREND (trend strength low, volume below the current minimum)",
       "FILTERED (volume ok but direction not aligned)",
       "FILTERED-REVERSAL (reversal not confirmed by peak/trend/volume/RSI)",
       "BLOCKED-GOAL (continuation suppressed by reversal-only policy)",

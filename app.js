@@ -1247,11 +1247,17 @@ function applyType() {
       ? ` Order flow (OFI) ${(liveSig.ofi * 100).toFixed(0)} percent, ${liveSig.ofiAgree ? "agreeing" : "against"}.`
       : "";
     if (finalVerdict !== "flat") {
-      const wr = uni && uni.expectedWR != null ? `${(uni.expectedWR * 100).toFixed(0)} percent` : null;
+      // Angka winrate harus jelas sumbernya: kalau profil gate BUKAN strict, kalibrasi 90d
+      // lama tidak lagi menggambarkan ambang yang dipakai -> sebut sumbernya, dan pakai
+      // winrate hasil uji ambang aktif bila learner sudah memilikinya.
+      const learnedWR = (GATES && GATES.metrics && GATES.metrics.takenWinrate != null) ? GATES.metrics.takenWinrate : null;
+      const strictMode = (GATES && GATES.mode === "strict");
+      const wr = (learnedWR != null) ? `winrate uji ambang aktif ${(learnedWR * 100).toFixed(0)} percent`
+        : (uni && uni.expectedWR != null) ? `${(uni.expectedWR * 100).toFixed(0)} percent${strictMode ? "" : " (kalibrasi ambang lama)"}` : null;
       const minTxt = uni && uni.minuteIn ? ` (entry minute ${uni.minuteIn}${uni.late ? ", LATE — little time left" : ""})` : "";
       const head = grade
         ? `EARLY ${grade}${minTxt}${wr ? `, measured hit rate ${wr}` : ""}. `
-        : (gateInfo ? `High confidence, backtested winrate ${(gateInfo.wr * 100).toFixed(0)} percent. ` : "Watchlist. ");
+        : (gateInfo ? `Backtested winrate ${(gateInfo.wr * 100).toFixed(0)} percent${strictMode ? "" : " (kalibrasi ambang lama)"}. ` : "Watchlist. ");
       currentReason = head + currentReason + ofiTxt;
     }
     
@@ -1261,7 +1267,8 @@ function applyType() {
       peakDir: peak ? peak.dir : null,
       reward: reward,
       vol5s: hasVolData ? rel : null, liquidity: liquidity,
-      vol5m: liveSig && liveSig.volRel != null ? liveSig.volRel : null,
+      // tampilkan metrik yang SAMA dengan gate (volRel2), agar angka di UI = angka yang dinilai
+      vol5m: liveSig && liveSig.volRel2 != null ? liveSig.volRel2 : (liveSig && liveSig.volRel != null ? liveSig.volRel : null),
       volWait: !uni && finalVerdict === "flat" && (elapsed / dur) < 0.6 &&
         !!liveSig && (liveSig.mode === "LOWVOL" || liveSig.mode === "WARMUP" || liveSig.mode === "MENUNGGU"),
       volNeed: fairMinVol(state.interval),
@@ -2180,13 +2187,11 @@ async function loadGate() {
   } catch (e) { GATE_STATUS = "error"; console.warn("[GATE] load failed — all signals will be marked watchlist:", e.message); renderConfidenceReport(); }
 }
 
-/* ===== Early-signal calibration (see backtest/out/early_tiers.json) =====
-   The signal is produced at the START of the session. Accuracy is graded from the
-   first-minute price direction + volume pace + executed order flow (OFI):
-      STRONG = OFI strongly agrees and volume pace >= 3x
-      GOOD   = OFI agrees and volume pace >= 3x
-      FAIR   = OFI agrees and volume pace >= 1.2x (5m) / 2.0x (15m) / 1.5x (1h)
-   Anything else = no entry. */
+/* ===== Calibration tables (see backtest/out/early_tiers.json, tiers.json) =====
+   TABEL HISTORIS: dipakai hanya sebagai angka pembanding, dan key-nya masih memakai
+   definisi kalibrasi lama. Ambang yang BENAR-BENAR berlaku sekarang ada di
+   gates.js / /api/model/gates (profil bootstrap / learned) — lihat gatesSummary().
+   Tiers yang dipakai live: STRONG / GOOD / FAIR dari profil gate tersebut. */
 let TIERS = null;
 let TIER_STATUS = "loading";
 async function loadTiers() {
@@ -2236,7 +2241,20 @@ async function loadGates() {
     const r = await fetch("/api/model/gates", { cache: "no-store" });
     if (r.ok) { const g = await r.json(); if (g && g.tiers) { GATES = g; console.log(`[GATES] profil ${g.mode}${g.thresholds && g.thresholds.length ? " · threshold " + g.thresholds.map((t) => `${t.f}${t.op}${t.t}`).join(" ") : ""}`); } }
   } catch (_) {}
+  renderGateLine();
+  renderLessons();
   renderLearnerStatus();
+}
+// Tampilkan ambang yang SEDANG BERLAKU di UI (selalu dari satu sumber: GATES).
+function renderGateLine() {
+  const sum = gatesSummary();
+  const a = document.getElementById("help-gates"); if (a) a.textContent = sum;
+  const b = document.getElementById("help-gate-mode"); if (b) b.textContent = GATES.mode;
+  const c = document.getElementById("gate-line");
+  if (c) {
+    const learned = GATES.mode === "learned";
+    c.innerHTML = `${learned ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR</span>' : (GATES.mode === "strict" ? '<span class="lstat-badge def">AMBANG KONSERVATIF</span>' : '<span class="lstat-badge sup">BOOTSTRAP (DILONGGARKAN)</span>')} <b>AMBANG AKTIF:</b> ${sum}`;
+  }
 }
 // Terapkan threshold hasil belajar (lapisan kedua setelah tier ladder).
 function gateThresholdsOK(f) {
@@ -2619,6 +2637,8 @@ function continuationOf(tf, cp, isUp, price) {
     target,
   };
 }
+// CATATAN: string di bawah adalah KEY tabel kalibrasi lama (bukan ambang yang berlaku).
+// Jangan ditampilkan ke user tanpa label "kalibrasi ambang lama".
 function gradeVariant(tf, grade) {
   if (grade === "STRONG") return "OFI strong+vol>=3";
   if (grade === "GOOD") return "OFI agree+vol>=3";
@@ -2633,7 +2653,21 @@ function gradeWR(tf, grade) {
   return o ? o.wr : null;
 }
 // Minimum volume pace for the FAIR tier, per interval (calibrated 30d).
-function fairMinVol(tf) { return tf === "5m" ? 0.5 : tf === "15m" ? 2.0 : 1.5; }
+// Ambang volume yang SEDANG BERLAKU untuk tier FAIR — dibaca dari profil gate aktif,
+// bukan angka tetap, supaya teks UI tidak pernah menyimpang dari gate yang dipakai.
+function fairMinVol(tf) {
+  const T = GATES && GATES.tiers;
+  return (T && T.FAIR && T.FAIR.volRel2 != null) ? T.FAIR.volRel2 : 0.9;
+}
+// Ringkasan ambang aktif untuk ditampilkan di UI (satu sumber kebenaran).
+function gatesSummary() {
+  const T = (GATES && GATES.tiers) || null;
+  if (!T) return "—";
+  const th = (GATES.thresholds && GATES.thresholds.length)
+    ? " · ambang: " + GATES.thresholds.map((t) => `${t.f}${t.op}${t.t}`).join(" & ")
+    : "";
+  return `tier STRONG volRel2≥${T.STRONG.volRel2}${T.STRONG.surprise ? " & surprise≥" + T.STRONG.surprise : ""} · GOOD ≥${T.GOOD.volRel2}${T.GOOD.surprise ? " & surprise≥" + T.GOOD.surprise : ""} · FAIR ≥${T.FAIR.volRel2} · floor likuiditas ×${GATES.liqFloorMul} · batas telat ${(GATES.lateFrac * 100).toFixed(0)}%${th} · mode ${GATES.mode}`;
+}
 // After this fraction of the session the price sits close to the lock, so the reward of a
 // recapture is tiny even if the direction is right -> those entries are suppressed.
 const LATE_FRAC = 0.7;
@@ -2705,7 +2739,7 @@ function analyzeCoin(asset, tf, now) {
   dw.turnSince = turn.count >= 2 ? (dw.turnSince || now) : null;
   dw.fadeSince = fade.count >= 2 ? (dw.fadeSince || now) : null;
   const entered = !!(_tradeEntered[key] && _tradeEntered[key].entered);
-  const trail = sig && sig.verdict !== "flat" ? trailOf(a, t0Sec, nowSec, O, sig.verdict === "up") : null;
+  const trail = sig && sig.verdict !== "flat" ? trailOf(asset, t0Sec, nowSec, O, sig.verdict === "up") : null;
   const plan = (sig && sig.verdict !== "flat")
     ? computeTradePlan(sig.verdict, {
         tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
@@ -3229,7 +3263,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     tf, volMin: FAIR_MIN,
   });
   if (mode === "OFI contra") reason = "No entry. Executed order flow is against this direction.";
-  if (mode === "LATE") reason = `No entry. Late in the session (${Math.round((elapsed / dur) * 100)}% elapsed) — reward too small at this distance from the lock.`;
+  if (mode === "LATE") reason = `No entry. Late in the session (${Math.round((elapsed / dur) * 100)}% elapsed, batas aktif ${(((GATES && GATES.lateFrac != null) ? GATES.lateFrac : LATE_FRAC) * 100).toFixed(0)}%) — reward too small at this distance from the lock.`;
   if (mode === "NO-LIQ") reason = `No entry. Liquidity too thin — the market is quiet (volume ${(liqRatio * 100).toFixed(0)}% of typical, need above ${((liqFloor / (typ5m || 1)) * 100).toFixed(0)}%).`;
   if (touch) reason += ` TOUCH LOCK: arah ${touch.dir.toUpperCase()} · jarak ${touch.dist.toFixed(3)}% dari lock · peluang historis ${(touch.rate * 100).toFixed(0)}% (median ${touch.tMed}s, dd ${touch.ddMed}%)${touch.tooClose ? " · PERINGATAN: terlalu dekat lock (sentuh hampir instan, reward ~0)" : ""}.`;
 
@@ -4150,6 +4184,7 @@ function start() {
   loadTiers();
   loadLearn();
   loadGates();
+  renderGateLine();
   loadLearnerStatus();
   setInterval(loadGate, 10 * 60 * 1000);
   setInterval(loadTiers, 10 * 60 * 1000);

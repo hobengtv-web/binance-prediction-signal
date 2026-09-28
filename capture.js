@@ -19,6 +19,7 @@
    klien yang mengirim hasil dari jalur 1s (lebih presisi), hasil itu yang dipakai.
    ============================================================================ */
 const LEARNER_BUCKETS = require("./learner.js").BUCKETS;
+const GATES_DEF = require("./gates.js");
 
 const VOL_TYPICAL = { BTC: 0.515, ETH: 8.22 };
 const DUR_S = { "5m": 300, "15m": 900 };
@@ -33,7 +34,7 @@ const strBucket = (s) => (s == null ? "na" : s < 35 ? "<35" : s <= 50 ? "35-50" 
 
 function createCapture(deps) {
   const { getKlines, SignalCore, learner, getModel, save, log = console.log } = deps;
-  let stats = { enabled: true, captured: 0, skipped: 0, errors: 0, lastAt: null, lastErr: null, lastKey: null };
+  let stats = { enabled: true, captured: 0, accepted: 0, rejected: 0, skipped: 0, errors: 0, lastAt: null, lastErr: null, lastKey: null };
 
   async function captureOne(sym, tf, t0) {
     const tfSec = DUR_S[tf];
@@ -77,18 +78,24 @@ function createCapture(deps) {
     // adalah ladder tier 2 detik yang terdokumentasi (early2s.json) + gate likuiditas;
     // `mode`/`conf` diset seperti yang app tampilkan untuk sinyal high-frequency (TREND).
     const mode = "TREND", conf = 65;
-    // tier 2 detik (sama dengan app)
-    const grade = (volRel2 >= 3 && surprise >= 3) ? "STRONG"
-      : (volRel2 >= 1.5 && surprise >= 2) ? "GOOD"
-        : volRel2 >= 0.9 ? "FAIR" : null;
-    if (!grade) return { skipped: "no-grade" };
-    // likuiditas: pasar mati tidak boleh disinyal
+    // Profil gate yang SEDANG BERLAKU (bootstrap/learned) — dipakai untuk menentukan
+    // `accepted`, TAPI semua sesi tetap direkam (shadow ledger) supaya learner bisa
+    // belajar dari sesi yang DITOLAK. Inilah kunci agar threshold bisa dipelajari.
+    const profile = (typeof getGates === "function" ? getGates() : null) || GATES_DEF.BOOTSTRAP;
+    const T = profile.tiers || GATES_DEF.BOOTSTRAP.tiers;
+    const gateNow = Math.abs((C2 - lock) / lock) * 100;
+    const grade = (volRel2 >= T.STRONG.volRel2 && surprise >= (T.STRONG.surprise || 0)) ? "STRONG"
+      : (volRel2 >= T.GOOD.volRel2 && surprise >= (T.GOOD.surprise || 0)) ? "GOOD"
+        : (volRel2 >= T.FAIR.volRel2 && surprise >= (T.FAIR.surprise || 0)) ? "FAIR" : null;
     const typ5m = (VOL_TYPICAL[sym] || 0) * 60;
     const proj = vol2sum * (tfSec / 2);
-    const floor = Math.max(pctile(prior5, 15), typ5m * 0.3);
+    const liqMul = profile.liqFloorMul != null ? profile.liqFloorMul : 0.3;
+    const floor = Math.max(pctile(prior5, 15), typ5m * liqMul);
     const liqLow = typ5m > 0 && proj < floor;
     const liqRatio = typ5m > 0 ? proj / typ5m : 1;
-    if (liqLow) return { skipped: "no-liq" };
+    const thOK = GATES_DEF.applyThresholds({ volRel2, surprise, liqRatio, gapPct: gateNow, histStrength: histTrend.strength, rsi }, profile.thresholds);
+    const accepted = !!grade && !liqLow && thOK;
+    const reject = accepted ? null : (!thOK ? "threshold" : !grade ? "tier" : "liq-low");
 
     const d2 = ((C2 - lock) / lock) * 100;
     const rewardPct = Math.abs(d2);
@@ -127,10 +134,13 @@ function createCapture(deps) {
         grade, expectedWR: null,
         volRel: null, volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5),
         rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
-        minuteIn: 1, rewardPct: +rewardPct.toFixed(4), liqRatio: +liqRatio.toFixed(3), liqLow: false,
+        minuteIn: 1, rewardPct: +rewardPct.toFixed(4), liqRatio: +liqRatio.toFixed(3), liqLow: !!liqLow,
         ofi: null, touchRate, gateKey: `${tf}|${mode}|${currentDir}|rsi:${rsiBucket(rsi)}|str:${strBucket(histTrend.strength)}`, gateWr: null,
         learn,
       },
+      // Keputusan gate pada saat perekaman: dipakai learner untuk membandingkan
+      // populasi yang diterima vs yang ditolak (dasar belajar threshold).
+      gate: { grade, liqLow: !!liqLow, liqRatio: +liqRatio.toFixed(3), thresholdsOK: !!thOK, accepted, reject, profile: profile.mode },
     };
     save(rec, "server");
     stats.captured++; stats.lastAt = Date.now(); stats.lastKey = rec.k;
@@ -157,7 +167,10 @@ function createCapture(deps) {
           try {
             const r = await captureOne(sym, tf, t0 / 1000);
             if (r && r.skipped) { stats.skipped++; log(`[CAPTURE] ${sym} ${tf} dilewati: ${r.skipped}`); }
-            else if (r && r.ok) log(`[CAPTURE] ${sym} ${tf} ${r.rec.k} dir=${r.rec.sig.dir} grade=${r.rec.sig.grade} volRel2=${r.rec.sig.volRel2} surprise=${r.rec.sig.surprise} gap=${r.rec.sig.learn.gap}`);
+            else if (r && r.ok) {
+              if (r.rec.gate && r.rec.gate.accepted) stats.accepted = (stats.accepted || 0) + 1; else stats.rejected = (stats.rejected || 0) + 1;
+              log(`[CAPTURE] ${sym} ${tf} ${r.rec.k} dir=${r.rec.sig.dir} grade=${r.rec.sig.grade || "-"} volRel2=${r.rec.sig.volRel2} surprise=${String(r.rec.sig.surprise).slice(0, 6)} gap=${r.rec.sig.learn.gap} ${r.rec.gate.accepted ? "DITERIMA" : "DITOLAK:" + r.rec.gate.reject}`);
+            }
           } catch (e) { stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] gagal ${sym} ${tf}: ${e && e.message}`); }
         }
       }

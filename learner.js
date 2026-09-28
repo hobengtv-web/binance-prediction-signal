@@ -57,6 +57,16 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       hist: bHist(s.histStrength),
       trend: (s.learn && s.learn.trend && s.learn.trend !== "na") ? s.learn.trend : "na",
       dir, gap: gapRaw,
+      // fitur numerik mentah — dibutuhkan untuk BELAJAR THRESHOLD (bukan hanya bucket)
+      volRel2: typeof s.volRel2 === "number" ? s.volRel2 : (typeof s.volRel === "number" ? s.volRel : null),
+      surprise: typeof s.surprise === "number" ? s.surprise : null,
+      liqRatio: typeof s.liqRatio === "number" ? s.liqRatio : null,
+      gapPct: typeof s.rewardPct === "number" ? Math.abs(s.rewardPct) : null,
+      histStrength: typeof s.histStrength === "number" ? s.histStrength : null,
+      rsi: typeof s.rsi === "number" ? s.rsi : null,
+      // apakah profil gate yang SEDANG BERLAKU akan menerima sesi ini (diisi capture/klien)
+      accepted: r.gate ? !!r.gate.accepted : null,
+      reject: r.gate ? (r.gate.reject || null) : null,
       capOffsetMs: off, canonical,
       won: r.res.won === 1 ? 1 : 0,
       touch: r.res.touch === 1 ? 1 : 0,
@@ -177,6 +187,81 @@ function lessonsFrom(gateRules, touchRules, test, dirBase, touchBase) {
   return L.slice(0, 40);
 }
 
+/* ---------- BELAJAR THRESHOLD (menyesuaikan ambang tiap kriteria) ----------
+   Metode: coordinate-ascent sederhana yang tervalidasi walk-forward.
+     - dilatih pada 70% data paling awal, dinilai pada 30% paling akhir
+     - kandidat = konjungsi aturan bentuk "fitur >= t" / "fitur <= t" (grid kuantil)
+     - objektif = winrate(sinyal diambil) x cakupan^alpha, alpha=0.5
+       (supaya "mengambil sangat sedikit sinyal" tidak otomatis dianggap menang)
+     - setiap langkah hanya diterima bila menaikkan objektif latih > 1%
+   Hasilnya = daftar threshold konkret yang bisa langsung dipakai app, bukan sekadar
+   daftar konteks bucket. Aturan bucket (gate/touch) tetap ada sebagai lapisan kedua. */
+const TH_FEATS = { volRel2: 1, surprise: 1, liqRatio: 1, gapPct: -1, histStrength: 1, rsi: 1 };
+function evalTaken(rows, thresholds) {
+  const taken = rows.filter((r) => applyThresholds2(r, thresholds));
+  const cov = rows.length ? taken.length / rows.length : 0;
+  const wr = taken.length ? mean(taken.map((r) => r.won)) : 0;
+  return { n: rows.length, taken: taken.length, coverage: +cov.toFixed(4), takenWinrate: +wr.toFixed(4), score: +(wr * Math.sqrt(cov)).toFixed(4) };
+}
+function applyThresholds2(row, thresholds) {
+  if (!thresholds || !thresholds.length) return true;
+  for (const th of thresholds) {
+    const v = row[th.f];
+    if (typeof v !== "number" || !isFinite(v)) return false;
+    if (th.op === ">=" ? v < th.t : v > th.t) return false;
+  }
+  return true;
+}
+function learnThresholds(rows, opts = {}) {
+  const o = Object.assign({ minRows: 300, minTaken: 80, minCov: 0.2, grid: 20, rounds: 3, minGain: 0.004 }, opts);
+  const usable = rows.filter((r) => r.dir === "up" || r.dir === "down");
+  if (usable.length < o.minRows) return { ok: false, reason: `butuh >= ${o.minRows} baris berarah, ada ${usable.length}` };
+  const splitIdx = Math.floor(usable.length * 0.7);
+  const train = usable.slice(0, splitIdx), test = usable.slice(splitIdx);
+  if (train.length < 100 || test.length < 60) return { ok: false, reason: "jendela latih/uji terlalu kecil" };
+  // Objektif = Wilson LOWER BOUND dari winrate sinyal yang diambil, dengan syarat
+  // cakupan >= minCov dan jumlah diambil >= minTaken. LB otomatis menghukum sampel
+  // kecil, jadi tidak bisa "menang" hanya dengan mengambil 5 sinyal yang kebetulan benar.
+  const util = (sel) => {
+    const taken = train.filter((r) => applyThresholds2(r, sel));
+    if (taken.length < o.minTaken) return { u: -1, taken: taken.length, cov: 0, wr: 0, lb: 0 };
+    const st = stat(taken, "won");
+    const cov = taken.length / train.length;
+    if (cov < o.minCov) return { u: -1, taken: taken.length, cov, wr: st.wr, lb: st.lb };
+    return { u: st.lb, taken: taken.length, cov, wr: st.wr, lb: st.lb };
+  };
+  let sel = [];
+  let cur = util(sel);
+  for (let round = 0; round < o.rounds; round++) {
+    let best = null;
+    for (const f of Object.keys(TH_FEATS)) {
+      const vals = train.map((r) => r[f]).filter((v) => typeof v === "number" && isFinite(v)).sort((a, b) => a - b);
+      if (vals.length < 50) continue;
+      for (let i = 1; i <= o.grid; i++) {
+        const t = vals[Math.min(vals.length - 1, Math.round((i / (o.grid + 1)) * (vals.length - 1)))];
+        for (const op of [">=", "<="]) {
+          const cand = sel.concat([{ f, op, t: +t.toFixed(6) }]);
+          const m = util(cand);
+          if (m.u > cur.u + o.minGain && (!best || m.u > best.m.u)) best = { cand, m };
+        }
+      }
+    }
+    if (!best) break;
+    sel = best.cand; cur = best.m;
+  }
+  const trainM = evalTaken(train, sel), testM = evalTaken(test, sel);
+  const baseTest = evalTaken(test, []);
+  const baseLbTest = stat(test, "won").lb;
+  const candLbTest = testM.taken ? stat(test.filter((r) => applyThresholds2(r, sel)), "won").lb : 0;
+  return {
+    ok: sel.length > 0, thresholds: sel, train: trainM, test: testM, baselineTest: baseTest,
+    trainLb: cur.lb, testLb: +candLbTest.toFixed(4), baselineLbTest: +baseLbTest.toFixed(4),
+    // menang out-of-sample: LB uji lebih tinggi DAN cakupan masih memadai DAN winrate naik
+    beatsBaseline: candLbTest > baseLbTest && testM.taken >= (o.minTakenTest || 40) && (testM.coverage || 0) >= o.minCov && testM.takenWinrate > baseTest.takenWinrate,
+    note: sel.map((x) => `${x.f} ${x.op} ${x.t}`).join(" & ") || "tidak ada threshold yang menambah nilai",
+  };
+}
+
 /* ---------- keputusan promosi: hanya bila MENANG pada jendela uji ---------- */
 function shouldPromote(candidate, incumbent, minTake = 40) {
   const c = candidate && candidate.metrics, i = incumbent && incumbent.metrics;
@@ -187,4 +272,4 @@ function shouldPromote(candidate, incumbent, minTake = 40) {
   return { promote: false, why: `skor kandidat ${c.score} tidak mengalahkan insiden ${i.score}` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, shouldPromote, blockersOf, decide, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, shouldPromote, blockersOf, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

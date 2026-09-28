@@ -153,7 +153,9 @@ const MODEL_DIR = path.join(LEDGER_DIR, "..", "models");
 const MODEL_CUR = path.join(MODEL_DIR, "current");
 const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
 const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
-const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json" };
+const GATES_DEF = require("./gates.js");
+const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json" };
+let gatesMeta = { mode: GATES_DEF.BOOTSTRAP.mode, promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
 
 function ensureModelDirs() { try { fs.mkdirSync(MODEL_CUR, { recursive: true }); } catch (_) {} }
@@ -168,6 +170,17 @@ function loadModelMeta() {
     const p = path.join(MODEL_CUR, "meta.json");
     if (fs.existsSync(p)) modelMeta = JSON.parse(fs.readFileSync(p, "utf8"));
   } catch (_) {}
+}
+// Profil gate yang dipakai app: hasil belajar (volume) bila ada, kalau belum -> bootstrap.
+function readGates() {
+  try {
+    const p = path.join(MODEL_CUR, "gates.json");
+    if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch (_) {}
+  // Belum ada ambang hasil belajar. Default = bootstrap (dilonggarkan, untuk mengumpulkan data);
+  // set GATES_MODE=strict untuk kembali ke ambang konservatif TANPA deploy ulang.
+  const mode = String(process.env.GATES_MODE || "bootstrap").toLowerCase();
+  return mode === "strict" ? GATES_DEF.STRICT : GATES_DEF.BOOTSTRAP;
 }
 function incumbentModel() {          // bentuk {metrics, gate:{rules}, touch:{rules}} untuk perbandingan
   const g = readModelPart("gate"), t = readModelPart("touch");
@@ -192,26 +205,43 @@ async function refit(trigger = "manual") {
       res.promote = dec.promote; res.why = dec.why;
       res.candidate = cand.metrics;
       res.incumbent = inc ? inc.metrics : null;
+      ensureModelDirs();
+      const ver = new Date().toISOString().replace(/[:.]/g, "-");
+      const hist = path.join(MODEL_DIR, "v-" + ver);
+      try { fs.mkdirSync(hist, { recursive: true }); } catch (_) {}
+      const write = (name, obj) => {
+        fs.writeFileSync(path.join(MODEL_CUR, name), JSON.stringify(obj, null, 1));
+        try { fs.writeFileSync(path.join(hist, name), JSON.stringify(obj, null, 1)); } catch (_) {}
+      };
+
+      // ---- BELAJAR THRESHOLD: sesuaikan ambang kriteria/filter dari data nyata ----
+      // Hanya dipakai bila pada jendela UJI dia benar-benar lebih baik (Wilson LB naik,
+      // cakupan masih memadai, winrate naik). Kalau tidak, profil gate lama tetap berlaku.
+      const th = LEARNER.learnThresholds(rows);
+      res.thresholds = th.ok
+        ? { note: th.note, train: th.train, test: th.test, baselineTest: th.baselineTest, testLb: th.testLb, baselineLbTest: th.baselineLbTest, beatsBaseline: th.beatsBaseline }
+        : { ok: false, reason: th.reason };
+      if (th.ok && th.beatsBaseline) {
+        const gates = GATES_DEF.fromThresholds(th.thresholds, { metrics: th.test, note: th.note });
+        gates.generated = new Date().toISOString(); gates.version = ver; gates.rows = rows.length;
+        gates.train = th.train; gates.baselineTest = th.baselineTest; gates.testLb = th.testLb; gates.baselineLbTest = th.baselineLbTest;
+        write("gates.json", gates);
+        gatesMeta = { mode: "learned", promotedAt: gates.generated, version: ver, thresholds: th.thresholds, metrics: th.test, note: th.note };
+        res.gatesPromoted = true;
+      } else res.gatesPromoted = false;
+
       if (dec.promote) {
-        ensureModelDirs();
-        const ver = new Date().toISOString().replace(/[:.]/g, "-");
-        const hist = path.join(MODEL_DIR, "v-" + ver);
-        try { fs.mkdirSync(hist, { recursive: true }); } catch (_) {}
-        const write = (name, obj) => {
-          fs.writeFileSync(path.join(MODEL_CUR, name), JSON.stringify(obj, null, 1));
-          try { fs.writeFileSync(path.join(hist, name), JSON.stringify(obj, null, 1)); } catch (_) {}
-        };
         write("learn_gate.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.gate));
         write("learn_touch90.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, baseline: cand.baseline }, cand.touch));
         write("lessons.json", Object.assign({ generated: new Date().toISOString(), version: ver }, cand.lessons));
-        const meta = { version: ver, promotedAt: new Date().toISOString(), trigger, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline, why: dec.why };
+        const meta = { version: ver, promotedAt: new Date().toISOString(), trigger, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline, why: dec.why, gatesMode: gatesMeta.mode, gatesThresholds: gatesMeta.thresholds || null, gatesMetrics: gatesMeta.metrics || null };
         write("meta.json", meta);
         modelMeta = meta;
         res.version = ver;
       }
     }
     try { fs.appendFileSync(MODEL_LOG, JSON.stringify(res) + "\n"); } catch (_) {}
-    console.log(`[REFIT] ${res.promote ? "PROMOTE" : "KEEP"} · ${res.why || ""} · rows ${rows.length}`);
+    console.log(`[REFIT] ${res.promote ? "PROMOTE" : "KEEP"} · ${res.why || ""} · rows ${rows.length} · gates ${res.gatesPromoted ? "BELAJAR-DIPAKAI" : "tetap"}`);
     return res;
   } finally { refitting = false; }
 }
@@ -221,6 +251,7 @@ ensureModelDirs(); loadModelMeta();
 const capture = createCapture({
   getKlines, SignalCore: require("./signal-core.js"), learner: LEARNER,
   getModel: (part) => readModelPart(part),
+  getGates: () => readGates(),
   save: (rec) => mergeRecord(rec),
   log: console.log,
 });
@@ -454,6 +485,12 @@ http.createServer(async (req, res) => {
       res.end(JSON.stringify({ meta: modelMeta, served: { gate: !!readModelPart("gate"), touch: !!readModelPart("touch"), lessons: !!readModelPart("lessons") }, pending: (() => { let n = 0; for (const r of ledger.values()) if (r.res && !r.sig) n++; return n; })() }));
       return;
     }
+    if (part === "gates") {
+      const g = readGates();
+      res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+      res.end(JSON.stringify(g));
+      return;
+    }
     if (MODEL_FILES[part]) {
       const m = readModelPart(part);
       if (!m) { res.writeHead(404, CORS); res.end('{"error":"no model"}'); return; }
@@ -504,6 +541,7 @@ http.createServer(async (req, res) => {
         why: modelMeta.why || null,
       },
       blockers: { gate: single(g && g.suppress, "interval="), touch: single(t && t.suppress, "gap=") },
+      gates: (() => { const gg = readGates(); return { mode: gg.mode, thresholds: gg.thresholds || [], liqFloorMul: gg.liqFloorMul, lateFrac: gg.lateFrac, note: gg.note, metrics: gg.metrics || null, promotedAt: gatesMeta.promotedAt || null }; })(),
       capture: capture.status(),
       history,
     }));

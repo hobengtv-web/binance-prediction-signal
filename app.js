@@ -2219,6 +2219,37 @@ async function loadTiers() {
   } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
 }
 
+/* ===== PROFIL GATE (ambang sinyal) — bisa diganti learner TANPA deploy =====
+   Ambang yang menentukan apakah sinyal ditampilkan (tier volRel2/surprise, floor likuiditas,
+   lateFrac, plus threshold hasil belajar) disajikan server lewat /api/model/gates. Default =
+   profil bootstrap (dilonggarkan untuk mengumpulkan data); begitu learner punya cukup bukti
+   uji, profil `learned` menggantikannya. Nilai fallback di bawah hanya dipakai bila server
+   tidak terjangkau, supaya aplikasi tetap berjalan. */
+let GATES = {
+  mode: "bootstrap",
+  tiers: { STRONG: { volRel2: 3, surprise: 3 }, GOOD: { volRel2: 1.5, surprise: 2 }, FAIR: { volRel2: 0.3, surprise: 0 } },
+  liqFloorMul: 0.12, lateFrac: 0.85, thresholds: [],
+  note: "fallback lokal (server tidak terjangkau)",
+};
+async function loadGates() {
+  try {
+    const r = await fetch("/api/model/gates", { cache: "no-store" });
+    if (r.ok) { const g = await r.json(); if (g && g.tiers) { GATES = g; console.log(`[GATES] profil ${g.mode}${g.thresholds && g.thresholds.length ? " · threshold " + g.thresholds.map((t) => `${t.f}${t.op}${t.t}`).join(" ") : ""}`); } }
+  } catch (_) {}
+  renderLearnerStatus();
+}
+// Terapkan threshold hasil belajar (lapisan kedua setelah tier ladder).
+function gateThresholdsOK(f) {
+  const ths = GATES && GATES.thresholds;
+  if (!Array.isArray(ths) || !ths.length) return true;
+  for (const th of ths) {
+    const v = f[th.f];
+    if (typeof v !== "number" || !isFinite(v)) return false;
+    if (th.op === ">=" ? v < th.t : v > th.t) return false;
+  }
+  return true;
+}
+
 /* ===== PHASE 1 LEARNER — "belajar dari sinyal yang sudah berlalu" =====
    Tabel konteks tervalidasi walk-forward: dilatih pada 70% data paling awal, diuji pada
    30% data paling akhir (bukan random split), dinilai dengan Wilson lower/upper bound —
@@ -2348,7 +2379,7 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": 
 function renderLearnerStatus() {
   const el = document.getElementById("lstat-body"); if (!el) return;
   if (LEARNER_ERR || !LEARNER_STATUS) { el.innerHTML = `<div class="cd-empty">status learner belum tersedia${LEARNER_ERR ? " (" + esc(LEARNER_ERR) + ")" : ""}</div>`; return; }
-  const S = LEARNER_STATUS, L = S.ledger || {}, M = S.model || {}, B = S.blockers || {};
+  const S = LEARNER_STATUS, L = S.ledger || {}, M = S.model || {}, B = S.blockers || {}, g = S.gates || {};
   const pctv = Math.round((L.pct || 0) * 1000) / 10;
   const learned = M.source === "learned";
   const mt = M.metrics || {};
@@ -2364,7 +2395,7 @@ function renderLearnerStatus() {
       <div class="lstat-line"><b>${L.canonicalWithRes || 0}</b> / ${L.target || 120} sinyal kanonik berhasil
         (${pctv}%) · ${L.canonicalWithRes >= (L.target || 120) ? "target tercapai — re-fit otomatis berjalan" : "mengumpulkan, re-fit otomatis tiap hari 03:00"}</div>
       <div class="lstat-line">${(S.capture && S.capture.enabled)
-        ? `capture otomatis server: <span class="lstat-badge ok">AKTIF</span> · <b>${S.capture.captured || 0}</b> sinyal kanonik tersimpan · ${S.capture.skipped || 0} dilewati (pasar sepi/tanpa sinyal)${S.capture.errors ? ` · <span class="lstat-warn">${S.capture.errors} error</span>` : ""}${S.capture.lastAt ? ` · terakhir ${new Date(S.capture.lastAt).toLocaleTimeString()}` : ""}`
+        ? `capture otomatis server: <span class="lstat-badge ok">AKTIF</span> · <b>${S.capture.captured || 0}</b> sinyal kanonik tersimpan · ${S.capture.accepted || 0} lolos gate · ${S.capture.rejected || 0} ditolak (tetap direkam untuk belajar) · ${S.capture.skipped || 0} dilewati (tanpa arah/data)${S.capture.errors ? ` · <span class="lstat-warn">${S.capture.errors} error</span>` : ""}${S.capture.lastAt ? ` · terakhir ${new Date(S.capture.lastAt).toLocaleTimeString()}` : ""}`
         : `capture otomatis server: <span class="lstat-badge def">MATI</span> — data hanya terkumpul saat ada browser terbuka`}</div>
       <div class="lstat-grid">
         <span><i>total record</i><b>${L.total || 0}</b></span>
@@ -2387,12 +2418,23 @@ function renderLearnerStatus() {
       <div class="lstat-line">penahan aktif: ${blockers.length ? blockers.map((k) => `<code>${esc(k)}</code>`).join(" · ") : '<span class="lstat-dim">tidak ada</span>'}</div>
     </div>
     <div class="lstat-sec">
-      <b>3 · EFEK DI BROWSER INI (sejak halaman dibuka)</b>
+      <b>3 · AMBANG / FILTER YANG SEDANG DIPAKAI UNTUK SINYAL</b>
+      <div class="lstat-line">${(g.mode === "learned")
+        ? `<span class="lstat-badge ok">AMBANG HASIL BELAJAR</span> <span class="lstat-dim">dipromosikan ${g.promotedAt ? new Date(g.promotedAt).toLocaleString() : "—"}</span>`
+        : `<span class="lstat-badge sup">BOOTSTRAP (DILONGGARKAN)</span> <span class="lstat-dim">kriteria sengaja dilonggarkan agar cepat mengumpulkan data — learner akan mengetatkan sendiri</span>`}</div>
+      <div class="lstat-line">ambang aktif: ${(g.thresholds && g.thresholds.length)
+        ? g.thresholds.map((t) => `<code>${esc(t.f)} ${esc(t.op)} ${esc(t.t)}</code>`).join(" · ")
+        : '<span class="lstat-dim">belum ada (memakai tier ladder saja)</span>'}</div>
+      <div class="lstat-line lstat-dim">tier: STRONG volRel2≥${g.tiers ? g.tiers.STRONG.volRel2 : "—"} · GOOD ≥${g.tiers ? g.tiers.GOOD.volRel2 : "—"} · FAIR ≥${g.tiers && g.tiers.FAIR ? g.tiers.FAIR.volRel2 : "—"} · floor likuiditas ×${g.liqFloorMul != null ? g.liqFloorMul : "—"} · batas telat ${g.lateFrac != null ? (g.lateFrac * 100).toFixed(0) + "%" : "—"} sesi</div>
+      ${g.metrics ? `<div class="lstat-line">hasil uji ambang ini: cakupan <b>${((g.metrics.coverage || 0) * 100).toFixed(0)}%</b> · winrate sinyal diambil <b>${((g.metrics.takenWinrate || 0) * 100).toFixed(1)}%</b></div>` : ""}
+    </div>
+    <div class="lstat-sec">
+      <b>4 · EFEK DI BROWSER INI (sejak halaman dibuka)</b>
       <div class="lstat-line">sinyal diamati <b>${LEARN_STATS.signals}</b> · konteks kuat <b>${LEARN_STATS.strong}</b> · campuran <b>${LEARN_STATS.mixed}</b> · lemah <b>${LEARN_STATS.weak}</b> · <span class="${LEARN_STATS.wouldBlock ? "lstat-warn" : "lstat-dim"}">akan ditahan <b>${LEARN_STATS.wouldBlock}</b></span>${LEARN_BLOCK ? ' <span class="lstat-badge sup">TAHAN AKTIF</span>' : ' <span class="lstat-badge def">TAHAN MATI</span>'}</div>
       <div class="lstat-line lstat-dim">aktifkan penahanan: <code>window.setLearnBlock(true)</code></div>
     </div>
     <div class="lstat-sec">
-      <b>4 · RIWAYAT PENYESUAIAN MODEL</b>
+      <b>5 · RIWAYAT PENYESUAIAN MODEL</b>
       ${hist.length ? hist.slice().reverse().map((h) => `<div class="lstat-row">
         <span class="lstat-badge ${h.promote ? "ok" : "def"}">${h.promote ? "PROMOTE" : "KEEP"}</span>
         <span class="lstat-dim">${h.at ? new Date(h.at).toLocaleString() : ""} · pemicu ${esc(h.trigger || "—")} · data ${h.rows != null ? h.rows : "—"}</span>
@@ -3108,7 +3150,8 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   const prior5 = candles5m.filter((c) => c.time < t0Sec).slice(-50).map((c) => c.vol || 0).filter((v) => v > 0);
   const typ5m = (VOL_TYPICAL[sym] || 0) * 60;
   const projVol = (forming.vol || 0) / frac;
-  const liqFloor = Math.max(pctile(prior5, 15), typ5m * 0.3);
+  const liqMul = (GATES && GATES.liqFloorMul != null) ? GATES.liqFloorMul : 0.3;
+  const liqFloor = Math.max(pctile(prior5, 15), typ5m * liqMul);
   const liqLow = typ5m > 0 && projVol < liqFloor;
   const liqRatio = typ5m > 0 ? projVol / typ5m : 1;   // 1.0 = typical market activity
 
@@ -3146,21 +3189,25 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   //   GOOD   : volRel2 >= 1.5 & surprise >= 2  -> ~59.6% (lock-recapture 58%, ~98/day)
   //   FAIR   : volRel2 >= 0.9                  -> ~56.9% (lock-recapture 55%, ~166/day)
   // NOTE: 90% accuracy is NOT reachable at 2s — the measured ceiling is ~57-62%.
+  const T = (GATES && GATES.tiers) || { STRONG: { volRel2: 3, surprise: 3 }, GOOD: { volRel2: 1.5, surprise: 2 }, FAIR: { volRel2: 0.9, surprise: 0 } };
+  const gapNow = lockPrice > 0 ? Math.abs((C - lockPrice) / lockPrice) * 100 : 0;
   let grade = null;
   if (verdict !== "flat") {
-    if (volRel2 >= 3 && surprise >= 3) grade = "STRONG";
-    else if (volRel2 >= 1.5 && surprise >= 2) grade = "GOOD";
-    else if (volRel2 >= 0.9) grade = "FAIR";
+    if (volRel2 >= T.STRONG.volRel2 && surprise >= (T.STRONG.surprise || 0)) grade = "STRONG";
+    else if (volRel2 >= T.GOOD.volRel2 && surprise >= (T.GOOD.surprise || 0)) grade = "GOOD";
+    else if (volRel2 >= T.FAIR.volRel2 && surprise >= (T.FAIR.surprise || 0)) grade = "FAIR";
+    // lapisan kedua: ambang hasil belajar (bila learner sudah punya cukup bukti)
+    if (grade && !gateThresholdsOK({ volRel2, surprise, liqRatio, gapPct: gapNow, histStrength: histStr, rsi })) grade = null;
   }
   if (!grade) {
     verdict = "flat";
-    mode = volRel2 < 0.9 ? "LOWVOL" : "FILTERED";
+    mode = volRel2 < T.FAIR.volRel2 ? "LOWVOL" : "FILTERED";
     conf = 0;
   }
-  const FAIR_MIN = 0.9;
+  const FAIR_MIN = T.FAIR.volRel2;
   // LATE gate: after LATE_FRAC of the session the price is close to the lock, so the reward
   // is tiny even when accurate. Those entries are suppressed (user avoids them by choice).
-  const late = elapsed >= LATE_FRAC * dur;
+  const late = elapsed >= ((GATES && GATES.lateFrac != null) ? GATES.lateFrac : LATE_FRAC) * dur;
   if (late && grade) { grade = null; verdict = "flat"; mode = "LATE"; conf = 0; }
   // LIQUIDITY gate: never signal in a dead market, whatever the ratio says.
   if (liqLow && grade) { grade = null; verdict = "flat"; mode = "NO-LIQ"; conf = 0; }
@@ -4102,11 +4149,13 @@ function start() {
   loadGate();
   loadTiers();
   loadLearn();
+  loadGates();
   loadLearnerStatus();
   setInterval(loadGate, 10 * 60 * 1000);
   setInterval(loadTiers, 10 * 60 * 1000);
   setInterval(loadLearn, 30 * 60 * 1000);   // pelajaran di-refresh tiap 30 menit
   setInterval(loadLearnerStatus, 60 * 1000);   // status learner di-refresh tiap menit
+  setInterval(loadGates, 30 * 60 * 1000);      // profil gate di-refresh tiap 30 menit
   setTimeout(rescoreAll, 8000);        // after history candles are loaded
   setTimeout(rescoreAll, 25000);
   // timers — use rAF for smooth timer, updateProjection only on data events

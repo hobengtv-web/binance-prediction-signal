@@ -626,9 +626,9 @@ function applyType() {
     
     // Live calculation status (when and how the signal is produced)
     if (statusEl) statusEl.textContent = o.calcStatus || "";
-    // Generate dynamic entry reason based on analysis
+    // Generate dynamic entry reason based on analysis (volume token emphasised inline)
     if (reasonEl) {
-      reasonEl.textContent = generateEntryReason(o);
+      reasonEl.innerHTML = emphasizeVolume(generateEntryReason(o), o.vol5m);
     }
     if (z) { z.textContent = o.zone; z.className = o.zone.indexOf("ATAS") >= 0 ? "down" : o.zone.indexOf("BAWAH") >= 0 ? "up" : ""; }
     if (m) { m.textContent = o.momentum; m.className = o.momentum === "BULLISH" ? "up" : o.momentum === "BEARISH" ? "down" : ""; }
@@ -656,7 +656,6 @@ function applyType() {
       confBar.className = "signal-conf-bar " + (o.verdict === "up" ? "up" : o.verdict === "down" ? "down" : "");
     }
     const fmtVol = (v) => v == null ? "—" : v >= 10 ? "≥10×" : v.toFixed(1) + "×";
-    const volClass = (v) => v == null ? "v-na" : v < 1.0 ? "v-low" : v < 1.5 ? "v-mid" : v < 2.5 ? "v-good" : v < 4 ? "v-strong" : "v-hot";
     if (volEl) { volEl.textContent = fmtVol(o.vol5m); volEl.className = "vol-val " + volClass(o.vol5m); }      // 5m traded-volume pace (drives the grade)
     if (vol5sEl) { vol5sEl.textContent = fmtVol(o.vol5s); vol5sEl.className = "vol-val " + volClass(o.vol5s); }  // 5s-window traded volume vs ~5 min baseline
     if (liqEl) {
@@ -1964,6 +1963,17 @@ function fadeEvidence(isUp, ctx) {
 }
 function partList(parts) {
   return Object.keys(parts).filter((k) => parts[k]).join(", ");
+}
+// Volume emphasis: colour grade by magnitude (bigger = greener), shared by the VOL fields
+// and the volume token inside the REASON text.
+function volClass(v) {
+  return v == null ? "v-na" : v < 1.0 ? "v-low" : v < 1.5 ? "v-mid" : v < 2.5 ? "v-good" : v < 4 ? "v-strong" : "v-hot";
+}
+// Wrap only the volume ratio that follows a "volume" phrase, leaving RSI/strength numbers alone.
+function emphasizeVolume(text, vol) {
+  const esc = String(text).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const cls = "vol-val " + volClass(vol);
+  return esc.replace(/(volume[^.]*?)(\d+(?:\.\d+)?x|≥10×)/i, `$1<span class="${cls}">$2</span>`);
 }
 
 /* TRADE ASSISTANT — position-aware, matching a mean-reversion entry + momentum exit:

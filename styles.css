@@ -392,3 +392,12 @@ body {
 .lstat-badge.sup { background: rgba(246,70,93,.16); color: var(--down); }
 .lstat-row { display: grid; grid-template-columns: 70px 1fr; gap: 4px 8px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
 .lstat-row > span:nth-child(3) { grid-column: 1 / -1; color: var(--muted); }
+
+/* ===== chip akses cepat STATUS LEARNER (di topbar) ===== */
+.learn-chip { margin-left: 8px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .05em;
+  cursor: pointer; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.learn-chip:active { transform: translateY(1px); }
+.learn-chip.learned { background: rgba(14,203,129,.16); color: var(--up); border-color: rgba(14,203,129,.35); }
+.learn-chip.bootstrap { background: rgba(246,70,93,.12); color: var(--down); border-color: rgba(246,70,93,.3); }
+.learn-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

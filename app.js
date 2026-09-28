@@ -2245,6 +2245,29 @@ async function loadGates() {
   renderLessons();
   renderLearnerStatus();
 }
+// Jejak build: berguna untuk memastikan browser memuat JS terbaru (bukan cache lama).
+const BUILD = "2026-09-28 17:50 WIB";
+// Chip di topbar: status learner sekilas + klik = buka & scroll ke panelnya.
+let _learnChipBound = false;
+function updateLearnChip() {
+  const c = document.getElementById("learn-chip"); if (!c) return;
+  const L = LEARNER_STATUS && LEARNER_STATUS.ledger, G = LEARNER_STATUS && LEARNER_STATUS.gates;
+  const learned = G && G.mode === "learned";
+  const boot = G && G.mode === "bootstrap";
+  c.className = "learn-chip" + (learned ? " learned" : boot ? " bootstrap" : "");
+  c.textContent = L
+    ? `LEARNER ${L.canonicalWithRes || 0}/${L.target || 120} · ${learned ? "AMBANG BELAJAR" : boot ? "BOOTSTRAP" : "KONSERVATIF"}`
+    : "LEARNER —";
+  if (!_learnChipBound) {
+    _learnChipBound = true;
+    c.addEventListener("click", () => {
+      ensureLearnerPanel();
+      const d = document.getElementById("learn-status");
+      if (d) { d.open = true; if (d.scrollIntoView) d.scrollIntoView({ behavior: "smooth", block: "start" }); }
+    });
+  }
+}
+
 // Tampilkan ambang yang SEDANG BERLAKU di UI (selalu dari satu sumber: GATES).
 function renderGateLine() {
   const sum = gatesSummary();
@@ -2395,6 +2418,7 @@ async function loadLearnerStatus() {
 }
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function renderLearnerStatus() {
+  updateLearnChip();
   const el = document.getElementById("lstat-body"); if (!el) return;
   if (LEARNER_ERR || !LEARNER_STATUS) { el.innerHTML = `<div class="cd-empty">status learner belum tersedia${LEARNER_ERR ? " (" + esc(LEARNER_ERR) + ")" : ""}</div>`; return; }
   const S = LEARNER_STATUS, L = S.ledger || {}, M = S.model || {}, B = S.blockers || {}, g = S.gates || {};
@@ -2452,7 +2476,7 @@ function renderLearnerStatus() {
       <div class="lstat-line lstat-dim">aktifkan penahanan: <code>window.setLearnBlock(true)</code></div>
     </div>
     <div class="lstat-sec">
-      <b>5 · RIWAYAT PENYESUAIAN MODEL</b>
+      <b>5 · RIWAYAT PENYESUAIAN MODEL</b> <span class="lstat-dim">(build JS: ${BUILD})</span>
       ${hist.length ? hist.slice().reverse().map((h) => `<div class="lstat-row">
         <span class="lstat-badge ${h.promote ? "ok" : "def"}">${h.promote ? "PROMOTE" : "KEEP"}</span>
         <span class="lstat-dim">${h.at ? new Date(h.at).toLocaleString() : ""} · pemicu ${esc(h.trigger || "—")} · data ${h.rows != null ? h.rows : "—"}</span>
@@ -4173,6 +4197,16 @@ window.addEventListener("error", (e) => {
 // (tab lama / cache), panel dibuat sendiri di sini sehingga fitur tetap terlihat tanpa
 // harus mengandalkan versi HTML terbaru.
 function ensureLearnerPanel() {
+  // chip akses cepat di topbar (dibuat juga bila HTML lama tidak memilikinya)
+  if (!document.getElementById("learn-chip")) {
+    const brand = document.querySelector(".brand") || document.querySelector(".topbar");
+    if (brand) {
+      const b = document.createElement("button");
+      b.id = "learn-chip"; b.className = "learn-chip"; b.type = "button";
+      b.title = "Buka panel STATUS LEARNER"; b.textContent = "LEARNER —";
+      brand.appendChild(b);
+    }
+  }
   if (!document.getElementById("learn-status")) {
     const d = document.createElement("details");
     d.className = "learn-status"; d.id = "learn-status"; d.open = true;
@@ -4215,6 +4249,7 @@ function start() {
   loadLearn();
   loadGates();
   renderGateLine();
+  updateLearnChip();
   loadLearnerStatus();
   setInterval(loadGate, 10 * 60 * 1000);
   setInterval(loadTiers, 10 * 60 * 1000);

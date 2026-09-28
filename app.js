@@ -695,13 +695,22 @@ function applyType() {
     if (tpAction) {
       const tp = o.tradePlan;
       const se = tp && tp.statusEntry, sc = tp && tp.statusClose;
+      // Chip harus muat 1 baris di mobile: isi dipendekkan, detail lengkap masuk tooltip (title).
       if (tpStEntry) {
-        tpStEntry.className = "tp-st" + (se && se.ok ? " ok" : " wait");
-        tpStEntry.innerHTML = `ENTRY: <b>${se && se.ok ? `SUCCESS · ${fmtClock(se.at)}${se.price != null ? " @ " + fmtPrice(se.price) : ""}` : `WAITING… <i>${se && se.waiting ? se.waiting : ""}</i>`}</b>`;
+        const ok = !!(se && se.ok);
+        tpStEntry.className = "tp-st" + (ok ? " ok" : " wait");
+        tpStEntry.innerHTML = `ENTRY: <b>${ok ? "SUCCESS" : "WAITING…"}</b>`;
+        tpStEntry.title = ok
+          ? `ENTRY SUCCESS · ${fmtClock(se.at)}${se.price != null ? " @ " + fmtPrice(se.price) : ""}`
+          : `Menunggu entry — ${se && se.waiting ? se.waiting : "menunggu sinyal"}`;
       }
       if (tpStClose) {
-        tpStClose.className = "tp-st" + (sc && sc.ok ? " ok" : " wait");
-        tpStClose.innerHTML = `EARLY CLOSE: <b>${sc && sc.ok ? `SUCCESS · ${fmtClock(sc.at)}` : `WAITING… <i>${se && se.ok ? "posisi terbuka — menunggu sinyal close" : "belum ada posisi"}</i>`}</b>`;
+        const ok = !!(sc && sc.ok);
+        tpStClose.className = "tp-st" + (ok ? " ok" : " wait");
+        tpStClose.innerHTML = `EARLY CLOSE: <b>${ok ? "SUCCESS" : "WAITING…"}</b>`;
+        tpStClose.title = ok
+          ? `EARLY CLOSE SUCCESS · ${fmtClock(sc.at)}`
+          : (se && se.ok ? "Posisi terbuka — menunggu sinyal close" : "Belum ada posisi");
       }
       if (!tp) {
         tpAction.textContent = "—"; tpAction.className = "tp-action wait";
@@ -2939,6 +2948,8 @@ function buildDual() {
 }
 // jam lokal untuk status ENTRY / EARLY CLOSE (dipakai panel TA dan kolom dual)
 function fmtClock(t) { return t ? new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""; }
+// versi pendek (tanpa detik) untuk chip — supaya ENTRY & EARLY CLOSE muat 1 baris di mobile
+function fmtClockShort(t) { return t ? new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""; }
 
 function renderDual(force) {
   const el = document.getElementById("dual");
@@ -2978,12 +2989,16 @@ function renderDual(force) {
     const seEl = g("st-entry"), scEl = g("st-close");
     const se = plan && plan.statusEntry, sc = plan && plan.statusClose;
     if (seEl) {
-      seEl.className = "tp-st" + (se && se.ok ? " ok" : " wait");
-      seEl.innerHTML = `ENTRY: <b>${se && se.ok ? `SUCCESS · ${fmtClock(se.at)}${se.price != null ? " @ " + fmtPrice(se.price) : ""}` : "WAITING…"}</b>`;
+      const ok = !!(se && se.ok);
+      seEl.className = "tp-st" + (ok ? " ok" : " wait");
+      seEl.innerHTML = `ENTRY: <b>${ok ? "SUCCESS" : "WAITING…"}</b>`;
+      seEl.title = ok ? `ENTRY SUCCESS · ${fmtClock(se.at)}${se.price != null ? " @ " + fmtPrice(se.price) : ""}` : "Menunggu entry";
     }
     if (scEl) {
-      scEl.className = "tp-st" + (sc && sc.ok ? " ok" : " wait");
-      scEl.innerHTML = `EARLY CLOSE: <b>${sc && sc.ok ? `SUCCESS · ${fmtClock(sc.at)}` : "WAITING…"}</b>`;
+      const ok = !!(sc && sc.ok);
+      scEl.className = "tp-st" + (ok ? " ok" : " wait");
+      scEl.innerHTML = `EARLY CLOSE: <b>${ok ? "SUCCESS" : "WAITING…"}</b>`;
+      scEl.title = ok ? `EARLY CLOSE SUCCESS · ${fmtClock(sc.at)}` : "Menunggu early close";
     }
     const lvEl = g("levels");
     if (lvEl) lvEl.innerHTML = (plan && plan.levels)

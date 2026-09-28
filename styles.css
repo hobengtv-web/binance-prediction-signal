@@ -492,3 +492,8 @@ body {
   color: var(--text); background: var(--panel-2); border: 1px solid var(--border);
   padding: 2px 7px; border-radius: 7px; }
 .dc-cd.warn { color: var(--down); border-color: rgba(246,70,93,.35); background: rgba(246,70,93,.12); }
+
+/* ===== Baris VOLUME & LIQUIDITY di kartu dual (ditonjolkan seperti mobile) ===== */
+.dc-volrow { display: flex; gap: 16px; flex-wrap: wrap; align-items: baseline;
+  font-size: 11px; color: var(--muted); letter-spacing: .02em; }
+.dc-volrow .vol-val { font-size: 14px; }

@@ -3043,6 +3043,11 @@ function buildDual() {
   el.innerHTML = ["BTC", "ETH"].map((a) => `
     <div class="dual-col" id="dc-${a}-col">
       <div class="dc-head"><span class="dc-coin">${a}</span><span class="dc-price" id="dc-${a}-price">—</span><span class="dc-chg" id="dc-${a}-chg"></span><span class="dc-dusd" id="dc-${a}-dusd"></span><span class="dc-chg24" id="dc-${a}-chg24"></span><span class="dc-cd" id="dc-${a}-cd" title="Sisa waktu sesi">--:--</span></div>
+      <!-- VOLUME & LIQUIDITY: ditonjolkan (bold + gradasi warna) seperti di tampilan mobile -->
+      <div class="dc-volrow">
+        <span>LIQUIDITY <b class="vol-val v-na" id="dc-${a}-liq" title="Rasio likuiditas: proyeksi volume sesi dibanding volume 5m typical (>1 = lebih ramai)">—</b></span>
+        <span>VOL <b class="vol-val v-na" id="dc-${a}-vol" title="Pace volume 5m terhadap rata-rata (angka yang dinilai gate)">—</b></span>
+      </div>
       <div class="dc-chart" id="dc-${a}-chart"></div>
       <div class="dc-recrow"><span class="dc-rec" id="dc-${a}-rec">—</span><span class="rec-status" id="dc-${a}-badge"></span></div>
       <div class="dc-act" id="dc-${a}-act">—</div>
@@ -3094,16 +3099,24 @@ function fmtUsdDelta(d) {
      kind = "signal" (ada sinyal masuk) | "entry" (Trade Assistant: entry/average) | "exit" (close/cut)
    Kartu berkedip + glow sebentar (~2.6s), lalu kelasnya dilepas. Di mobile langsung keluar
    (tidak ada perubahan perilaku). */
+const _FLASH_CLASSES = ["flash-signal", "flash-entry", "flash-exit"];
 function flashCard(asset, kind) {
   if (typeof window.matchMedia === "function" && !window.matchMedia("(min-width: 1100px)").matches) return;
   const el = document.getElementById(`dc-${asset}-col`);
   if (!el) return;
+  // EKSKLUSIF: hanya kartu yang memicu notifikasi yang menyala. Kartu lain dimatikan dulu
+  // supaya tidak ada dua kartu ber-glow bersamaan (permintaan user).
+  for (const other of document.querySelectorAll(".dual-col")) {
+    if (other === el) continue;
+    other.classList.remove(..._FLASH_CLASSES);
+    if (other._flashT) { clearTimeout(other._flashT); other._flashT = null; }
+  }
   const cls = "flash-" + kind;
-  el.classList.remove("flash-signal", "flash-entry", "flash-exit");
+  el.classList.remove(..._FLASH_CLASSES);
   void el.offsetWidth;                 // paksa restart animasi
   el.classList.add(cls);
   if (el._flashT) clearTimeout(el._flashT);
-  el._flashT = setTimeout(() => el.classList.remove(cls), 2600);
+  el._flashT = setTimeout(() => el.classList.remove(cls), 1800);   // lebih singkat: tidak tumpang tindih
   console.log(`[WIDE][FLASH] ${asset} ${kind}`);
 }
 
@@ -3226,6 +3239,19 @@ function renderDual(force) {
     }
 
     const pEl = g("price"); if (pEl) pEl.textContent = fmtPrice(px);
+    // VOLUME & LIQUIDITY (ditonjolkan) — sumber sama dgn sinyal: server bila segar, else cache lokal
+    {
+      // m.sig = hasil analyzeCoin (sudah memakai sinyal SERVER bila segar, else cache lokal)
+      const srcV = (m && m.sig) || null;
+      const vEl = g("vol"), lEl = g("liq");
+      const volVal = srcV ? (srcV.volRel2 != null ? srcV.volRel2 : (srcV.volRel != null ? srcV.volRel : null)) : null;
+      if (vEl) { vEl.textContent = volVal != null ? volVal.toFixed(2) + "\u00d7" : "\u2014"; vEl.className = "vol-val " + volClass(volVal); }
+      const liqVal = srcV && srcV.liqRatio != null ? srcV.liqRatio : null;
+      if (lEl) {
+        lEl.textContent = liqVal != null ? liqVal.toFixed(2) + "\u00d7" + (srcV && srcV.liqLow ? " LOW" : "") : "\u2014";
+        lEl.className = "vol-val " + volClass(liqVal);
+      }
+    }
     const cdEl = g("cd");
     if (cdEl) {
       if (cdEl.textContent !== cdTxt) cdEl.textContent = cdTxt;

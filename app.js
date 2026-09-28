@@ -1942,7 +1942,7 @@ function healthClass(label) {
    fadeEvidence: signs the favourable move is EXHAUSTING (used for close).
    At least 2 independent parts must agree, and they must persist for a dwell time, so a
    single noisy tick cannot trigger a signal (too fast) and waiting never drags on (too late). */
-const DWELL_ENTRY_MS = 10000;   // entry: turn must hold ~10s
+const DWELL_ENTRY_MS = 4000;    // entry: peak/turn must hold ~4s (fast, but not a single tick)
 const DWELL_AVG_MS = 15000;     // averaging: hold ~15s (be more careful adding)
 const DWELL_CLOSE_MS = 10000;   // close: fade must hold ~10s
 function turnEvidence(isUp, ctx) {
@@ -2068,16 +2068,24 @@ function computeTradePlan(bias, ctx) {
 
   if (!entered) {
     // ---------------- PHASE 1: no position ----------------
-    // Entry trigger: the moment price crosses to the CONTRA side of the lock, tell the user
-    // to enter (no wait for extra depth / confirmation — that is what this workflow needs).
+    // Behaviour: wait for the CONTRA PEAK (the adverse move exhausting), enter there, then sell
+    // when price returns to the lock. A confirmed peak needs >=2 evidence parts held ~4s — fast
+    // enough to catch the turn, slow enough not to buy a falling knife on one noisy tick.
+    // A genuine reversal (higher-tf trend flipped AND strong opposing flow) is the main source of
+    // the tail losses, so it blocks the entry.
     if (favor >= 0) {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU — tunggu harga contra ke ${fmtPrice(ctx.lock)}`;
-    } else {
+    } else if (realReversal) {
+      state = "STAND_DOWN"; cls = "exit";
+      action = `JANGAN ENTRY — tren historis berbalik & arus kuat melawan (kemungkinan reversal nyata)`;
+    } else if (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS) {
       state = "ENTRY"; cls = "entry";
       nowEntered = true;
-      action = `ENTRY SEKARANG ${bias.toUpperCase()} — harga contra lock (${rNowTxt})`
-        + (realReversal ? " · AWAS tren historis berbalik" : "");
+      action = `ENTRY SEKARANG ${bias.toUpperCase()} — peak contra terkonfirmasi (${rNowTxt}, ${partList(turn.parts)})`;
+    } else {
+      state = "WAIT"; cls = "wait";
+      action = `TUNGGU PEAK — harga contra ${rNowTxt}; konfirmasi pembalikan ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
     }
   } else {
     // ---------------- PHASE 2: position open ----------------
@@ -2085,11 +2093,16 @@ function computeTradePlan(bias, ctx) {
       state = "STAND_DOWN"; cls = "exit";
       action = "CUT SEKARANG — sinyal berbalik terkonfirmasi";
     } else if (favor >= 0) {
-      if (ctx.retreat && fade.count >= 1) { state = "CLOSE"; cls = "exit"; action = `CLOSE SEKARANG — harga mundur dari puncak${contTxt}`; }
-      else if (closeReady) { state = "CLOSE"; cls = "exit"; action = `CLOSE SEKARANG — momentum melemah (${partList(fade.parts)})${contTxt}`; }
-      else if (fs < 45) { state = "CLOSE"; cls = "exit"; action = `CLOSE SEKARANG — momentum searah melemah${contTxt}`; }
-      else if (fs < 65 || (fade.count >= 2 && dwellFade >= DWELL_CLOSE_MS / 2)) { state = "CAUTION"; cls = "wait"; action = `SIAP CLOSE — ${fade.count}/4 bukti melemah${contTxt}`; }
-      else { state = "HOLD"; cls = "entry"; action = `HOLD — momentum masih searah${contTxt}`; }
+      // Behaviour: sell when price reaches/exceeds the lock. Only hold when momentum is clearly
+      // strong and there is measurable extra room.
+      if (ctx.retreat || closeReady || fs < 65) {
+        state = "CLOSE"; cls = "exit";
+        const why = ctx.retreat ? "harga mundur dari puncak" : closeReady ? "momentum melemah" : "momentum mulai lemah";
+        action = `JUAL SEKARANG DI LOCK — ${why}${contTxt}`;
+      } else {
+        state = "HOLD"; cls = "entry";
+        action = `TAHAN (opsional) — momentum masih kuat${cont ? `, sisa potensi ~${cont.est.toFixed(2)}% → target ${fmtPrice(cont.target)}` : ""} · jika tidak, jual di lock sekarang`;
+      }
     } else if (inZone2 && avgReady) {
       state = "AVERAGE"; cls = "entry";
       action = `TAMBAH ENTRY SEKARANG ${bias.toUpperCase()} — harga ${rNowTxt} (average terkonfirmasi)`;

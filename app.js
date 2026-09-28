@@ -1151,9 +1151,19 @@ function applyType() {
     const retreat = peakFavor > 0 && (peakFavor - favorNow) >= 0.25 * Math.max(std, 1e-9);
     const entryRec = _tradeEntered[uniKey];
     const wasEntered = !!(entryRec && entryRec.entered);
+    // Confirmation evidence + how long it has persisted (dwell), so signals are neither
+    // too fast (single noisy tick) nor too late.
+    const turn = turnEvidence(uni.verdict === "up", { slope, slopeRecent, ofiShort, win });
+    const fade = fadeEvidence(uni.verdict === "up", { slope, slopeRecent, ofiShort, retreat, rsi });
+    const dw = _tradeDwell[uniKey] || (_tradeDwell[uniKey] = { turnSince: null, fadeSince: null });
+    dw.turnSince = turn.count >= 2 ? (dw.turnSince || now) : null;
+    dw.fadeSince = fade.count >= 2 ? (dw.fadeSince || now) : null;
+    const dwellTurnMs = dw.turnSince ? now - dw.turnSince : 0;
+    const dwellFadeMs = dw.fadeSince ? now - dw.fadeSince : 0;
     tradePlan = computeTradePlan(uni.verdict, {
       lock: O, price: C, std, slope, slopeRecent, rsi, z,
       ofi: uni.ofi, ofiShort, retreat, health, entered: wasEntered,
+      turn, fade, dwellTurnMs, dwellFadeMs,
     });
     if (tradePlan.entered && !wasEntered) {
       _tradeEntered[uniKey] = { entered: true, since: now, price: C };
@@ -1906,14 +1916,60 @@ function healthClass(label) {
   return "bad";
 }
 
+/* Confirmation evidence for the Trade Assistant.
+   turnEvidence: signs that price is ABOUT TO move toward the bias (used for entry/average).
+   fadeEvidence: signs the favourable move is EXHAUSTING (used for close).
+   At least 2 independent parts must agree, and they must persist for a dwell time, so a
+   single noisy tick cannot trigger a signal (too fast) and waiting never drags on (too late). */
+const DWELL_ENTRY_MS = 10000;   // entry: turn must hold ~10s
+const DWELL_AVG_MS = 15000;     // averaging: hold ~15s (be more careful adding)
+const DWELL_CLOSE_MS = 10000;   // close: fade must hold ~10s
+function turnEvidence(isUp, ctx) {
+  const p = {};
+  p.momentum = ctx.slope != null && (isUp ? ctx.slope > 0 : ctx.slope < 0);
+  p.flow = ctx.ofiShort != null && (isUp ? ctx.ofiShort > 0.08 : ctx.ofiShort < -0.08);
+  const w = ctx.win || [];
+  if (w.length >= 12) {
+    if (isUp) {
+      const recent = Math.min(...w.slice(-6).map((c) => c.low));
+      const prior = Math.min(...w.slice(-12, -6).map((c) => c.low));
+      p.structure = recent > prior;                   // higher low = down move stalling
+    } else {
+      const recent = Math.max(...w.slice(-6).map((c) => c.high));
+      const prior = Math.max(...w.slice(-12, -6).map((c) => c.high));
+      p.structure = recent < prior;                   // lower high = up move stalling
+    }
+  } else p.structure = false;
+  p.decel = ctx.slope != null && ctx.slopeRecent != null &&
+    (isUp ? ctx.slopeRecent > ctx.slope : ctx.slopeRecent < ctx.slope);   // adverse move easing
+  const count = Object.values(p).filter(Boolean).length;
+  return { count, parts: p };
+}
+function fadeEvidence(isUp, ctx) {
+  const p = {};
+  // momentum in favour is weakening
+  p.decel = ctx.slope != null && ctx.slopeRecent != null &&
+    (isUp ? (ctx.slopeRecent < ctx.slope) : (ctx.slopeRecent > ctx.slope));
+  // short-window flow no longer supports the move
+  p.flowFade = ctx.ofiShort == null ? false : (isUp ? ctx.ofiShort < 0.05 : ctx.ofiShort > -0.05);
+  p.retreat = !!ctx.retreat;
+  p.rsi = ctx.rsi != null && (isUp ? ctx.rsi >= 70 : ctx.rsi <= 30);
+  const count = Object.values(p).filter(Boolean).length;
+  return { count, parts: p };
+}
+function partList(parts) {
+  return Object.keys(parts).filter((k) => parts[k]).join(", ");
+}
+
 /* TRADE ASSISTANT — position-aware, matching a mean-reversion entry + momentum exit:
    PHASE 1 (no position): WAIT until price goes CONTRA the bias (below lock for UP),
-     then WAIT_TURN until there is evidence it is about to turn back, then ENTRY.
+     then WAIT_TURN until confirmed evidence the move is turning back, then ENTRY.
      It never says HOLD/CLOSE before a position exists.
    PHASE 2 (in position): manage the position — AVERAGE deeper on a confirmed turn,
      HOLD while momentum stays with us, CLOSE when momentum fades or price retreats. */
 const _tradePeak = {};     // key -> max favourable excursion after recovery
 const _tradeEntered = {};  // key -> { entered, since, price }
+const _tradeDwell = {};    // key -> { turnSince, fadeSince }
 function computeTradePlan(bias, ctx) {
   if (bias !== "up" && bias !== "down") {
     return { state: "NO_SIGNAL", action: "Tidak ada sinyal — tunggu bias sesi", cls: "wait", levels: null, fs: 0, adverseStd: null, why: [], entered: false };
@@ -1937,6 +1993,15 @@ function computeTradePlan(bias, ctx) {
     ? ((ctx.slope != null && ctx.slope > 0) || (ctx.ofiShort != null && ctx.ofiShort > 0.1))
     : ((ctx.slope != null && ctx.slope < 0) || (ctx.ofiShort != null && ctx.ofiShort < -0.1));
   const ofiAgainst = ctx.ofi != null && (isUp ? ctx.ofi < -0.15 : ctx.ofi > 0.15);
+  // Confirmation: >=2 independent evidence parts AND a minimum dwell time, so a single
+  // noisy tick cannot trigger (too fast) and waiting never drags on (too late).
+  const turn = ctx.turn || { count: 0, parts: {} };
+  const fade = ctx.fade || { count: 0, parts: {} };
+  const dwellTurn = ctx.dwellTurnMs || 0;
+  const dwellFade = ctx.dwellFadeMs || 0;
+  const turnReady = turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS;
+  const avgReady = turn.count >= 2 && dwellTurn >= DWELL_AVG_MS;
+  const closeReady = fade.count >= 2 && dwellFade >= DWELL_CLOSE_MS;
 
   // momentum in favour (only used in PHASE 2)
   let fs = 0; const why = [];
@@ -1953,6 +2018,7 @@ function computeTradePlan(bias, ctx) {
   const entered = !!ctx.entered;
   const ZONE = 0.4;                 // minimum retracement (in sigma) before an entry is allowed
   let state, action, cls, nowEntered = entered;
+  const prog = `${turn.count}/4 bukti · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
 
   if (!entered) {
     // ---------------- PHASE 1: no position ----------------
@@ -1968,13 +2034,13 @@ function computeTradePlan(bias, ctx) {
     } else if (adverseStd >= 1.3 && ofiAgainst && biasWeakening) {
       state = "NO_AVERAGE"; cls = "exit";
       action = "JANGAN MASUK — tren melawan terlalu kuat";
-    } else if (turnToward) {
+    } else if (turnReady) {
       state = "ENTRY"; cls = "entry";
-      action = `ENTRY ${bias.toUpperCase()} di zona ${(-adverseStd).toFixed(2)}σ — pembalikan terkonfirmasi`;
+      action = `ENTRY ${bias.toUpperCase()} di zona ${(-adverseStd).toFixed(2)}σ — terkonfirmasi (${partList(turn.parts)})`;
       nowEntered = true;
     } else {
       state = "WAIT_TURN"; cls = "wait";
-      action = `TUNGGU PEMBALIKAN — harga di zona ${(-adverseStd).toFixed(2)}σ, belum ada tanda berbalik`;
+      action = `TUNGGU KONFIRMASI — ${prog}${partList(turn.parts) ? " · " + partList(turn.parts) : ""}`;
     }
   } else {
     // ---------------- PHASE 2: position open ----------------
@@ -1982,18 +2048,23 @@ function computeTradePlan(bias, ctx) {
       state = "STAND_DOWN"; cls = "exit";
       action = "CUT — sinyal berbalik terkonfirmasi, keluar";
     } else if (favor >= 0) {
-      if (ctx.retreat || fs < 45) { state = "CLOSE"; cls = "exit"; action = "CLOSE SEKARANG — momentum searah melemah"; }
-      else if (fs < 65) { state = "CAUTION"; cls = "wait"; action = "SIAP CLOSE — momentum mulai melemah"; }
+      if (ctx.retreat && fade.count >= 1) { state = "CLOSE"; cls = "exit"; action = "CLOSE SEKARANG — harga mundur dari puncak"; }
+      else if (closeReady) { state = "CLOSE"; cls = "exit"; action = `CLOSE — momentum melemah terkonfirmasi (${partList(fade.parts)})`; }
+      else if (fs < 45) { state = "CLOSE"; cls = "exit"; action = "CLOSE SEKARANG — momentum searah melemah"; }
+      else if (fs < 65 || (fade.count >= 2 && dwellFade >= DWELL_CLOSE_MS / 2)) { state = "CAUTION"; cls = "wait"; action = `SIAP CLOSE — ${fade.count}/4 bukti melemah · ${Math.round(dwellFade / 1000)}s/${DWELL_CLOSE_MS / 1000}s`; }
       else { state = "HOLD"; cls = "entry"; action = "HOLD — momentum masih searah"; }
-    } else if (adverseStd >= 0.8 && turnToward) {
+    } else if (adverseStd >= 0.8 && avgReady) {
       state = "AVERAGE"; cls = "entry";
-      action = `AVERAGE ${bias.toUpperCase()} di ${(-adverseStd).toFixed(2)}σ — pembalikan terkonfirmasi`;
+      action = `AVERAGE ${bias.toUpperCase()} di ${(-adverseStd).toFixed(2)}σ — terkonfirmasi (${partList(turn.parts)})`;
+    } else if (adverseStd >= 0.8) {
+      state = "HOLD_POS"; cls = "wait";
+      action = `TAHAN POSISI — di zona ${(-adverseStd).toFixed(2)}σ, konfirmasi average ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_AVG_MS / 1000}s`;
     } else {
       state = "HOLD_POS"; cls = "wait";
       action = `TAHAN POSISI — harga di zona ${(-adverseStd).toFixed(2)}σ, tunggu pembalikan`;
     }
   }
-  return { state, action, cls, levels, fs, adverseStd, favor, why, entered: nowEntered };
+  return { state, action, cls, levels, fs, adverseStd, favor, why, entered: nowEntered, turn, fade, dwellTurnMs: dwellTurn, dwellFadeMs: dwellFade };
 }
 
 /* Signals locked during a running session are held here (persisted) and only written to
@@ -2165,6 +2236,10 @@ function updateProjectionUniversal() {
   for (const k in _tradeLastState) {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) delete _tradeLastState[k];
+  }
+  for (const k in _tradeDwell) {
+    const t = parseInt(k.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) delete _tradeDwell[k];
   }
   for (const k of _warnedKeys) {
     const t = parseInt(k.split("_")[2]);

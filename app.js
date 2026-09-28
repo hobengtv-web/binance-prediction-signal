@@ -771,6 +771,7 @@ function applyType() {
     const prevVerdict = lastSignalState ? lastSignalState.verdict : "flat";
     if (o.verdict !== "flat" && prevVerdict === "flat" && confMode === "SIGNAL" && o.highConf) {
       playSoundAlert();
+      flashCard(state.asset, "signal");
       console.log("[ALERT] High-confidence signal:", o.verdict, o.mode, o.gateWr);
     }
     lastSignalState = { verdict: o.verdict, mode: o.mode, highConf: !!o.highConf };
@@ -1210,10 +1211,12 @@ function applyType() {
     if (prevTradeState !== undefined && tradePlan.state !== prevTradeState) {
       if (tradePlan.state === "ENTRY" || tradePlan.state === "AVERAGE") {
         playTradeEntrySound();
+        flashCard(state.asset, "entry");
         console.log(`[TRADE][SOUND-ENTRY] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
         flashTitle(`▶ ${tradePlan.action} ${state.asset}/${state.interval}`);
       } else if (tradePlan.state === "CLOSE" || tradePlan.state === "STAND_DOWN") {
         playCloseSound();
+        flashCard(state.asset, "exit");
         console.log(`[TRADE][SOUND-CLOSE] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
         flashTitle(`■ ${tradePlan.action} ${state.asset}/${state.interval}`);
       }
@@ -2943,7 +2946,7 @@ function buildDual() {
   const el = document.getElementById("dual");
   if (!el || dualCharts) return;
   el.innerHTML = ["BTC", "ETH"].map((a) => `
-    <div class="dual-col">
+    <div class="dual-col" id="dc-${a}-col">
       <div class="dc-head"><span class="dc-coin">${a}</span><span class="dc-price" id="dc-${a}-price">—</span><span class="dc-chg" id="dc-${a}-chg"></span><span class="dc-dusd" id="dc-${a}-dusd"></span><span class="dc-chg24" id="dc-${a}-chg24"></span></div>
       <div class="dc-chart" id="dc-${a}-chart"></div>
       <div class="dc-recrow"><span class="dc-rec" id="dc-${a}-rec">—</span><span class="rec-status" id="dc-${a}-badge"></span></div>
@@ -2987,6 +2990,24 @@ function fmtUsdDelta(d) {
   const dec = a >= 100 ? 0 : a >= 10 ? 1 : 2;
   const sign = d > 0 ? "+" : d < 0 ? "-" : "";
   return `${sign}$${a.toFixed(dec)}`;
+}
+
+/* Efek VISUAL pada kartu coin ketika ada notifikasi suara (khusus layar lebar/dual):
+   supaya terlihat notifikasi itu datang dari coin yang mana.
+     kind = "signal" (ada sinyal masuk) | "entry" (Trade Assistant: entry/average) | "exit" (close/cut)
+   Kartu berkedip + glow sebentar (~2.6s), lalu kelasnya dilepas. Di mobile langsung keluar
+   (tidak ada perubahan perilaku). */
+function flashCard(asset, kind) {
+  if (typeof window.matchMedia === "function" && !window.matchMedia("(min-width: 1100px)").matches) return;
+  const el = document.getElementById(`dc-${asset}-col`);
+  if (!el) return;
+  const cls = "flash-" + kind;
+  el.classList.remove("flash-signal", "flash-entry", "flash-exit");
+  void el.offsetWidth;                 // paksa restart animasi
+  el.classList.add(cls);
+  if (el._flashT) clearTimeout(el._flashT);
+  el._flashT = setTimeout(() => el.classList.remove(cls), 2600);
+  console.log(`[WIDE][FLASH] ${asset} ${kind}`);
 }
 
 // jam lokal untuk status ENTRY / EARLY CLOSE (dipakai panel TA dan kolom dual)
@@ -3071,6 +3092,7 @@ function renderDual(force) {
         if (!_wideSigSounded.has(m.key)) {
           _wideSigSounded.add(m.key);
           playSoundAlert();
+          flashCard(a, "signal");
           flashTitle(`▶ SIGNAL ${dir.toUpperCase()} ${a}/${tf}`);
           console.log(`[WIDE][SOUND-SIGNAL] ${a}/${tf} ${dir}${sig && sig.grade ? " " + sig.grade : ""}`);
         }
@@ -3083,10 +3105,12 @@ function renderDual(force) {
         if (prevW !== undefined && plan.state !== prevW) {
           if (plan.state === "ENTRY" || plan.state === "AVERAGE") {
             playTradeEntrySound();
+            flashCard(a, "entry");
             flashTitle(`▶ ${plan.action} ${a}/${tf}`);
             console.log(`[WIDE][SOUND-ENTRY] ${a}/${tf} ${plan.state}: ${plan.action}`);
           } else if (plan.state === "CLOSE" || plan.state === "STAND_DOWN") {
             playCloseSound();
+            flashCard(a, "exit");
             flashTitle(`■ ${plan.action} ${a}/${tf}`);
             console.log(`[WIDE][SOUND-CLOSE] ${a}/${tf} ${plan.state}: ${plan.action}`);
           }

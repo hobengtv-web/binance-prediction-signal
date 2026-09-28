@@ -453,3 +453,27 @@ body {
 .tp-bias.up b:last-of-type { color: var(--up); }
 .tp-bias.down b:last-of-type { color: var(--down); }
 .dc-arahtrade.up { color: var(--up); } .dc-arahtrade.down { color: var(--down); }
+
+/* ===== Efek visual kartu coin saat ada notifikasi (khusus layar lebar/dual) ===== */
+@keyframes dcFlashSignal {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(240,185,11,0); border-color: var(--border); }
+  15%, 45% { box-shadow: 0 0 0 3px rgba(240,185,11,.85), 0 0 26px rgba(240,185,11,.55); border-color: #f0b90b; }
+  30%, 60% { box-shadow: 0 0 0 1px rgba(240,185,11,.35); border-color: var(--border); }
+}
+@keyframes dcFlashEntry {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(14,203,129,0); border-color: var(--border); }
+  15%, 45% { box-shadow: 0 0 0 3px rgba(14,203,129,.85), 0 0 26px rgba(14,203,129,.5); border-color: var(--up); }
+  30%, 60% { box-shadow: 0 0 0 1px rgba(14,203,129,.35); border-color: var(--border); }
+}
+@keyframes dcFlashExit {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(246,70,93,0); border-color: var(--border); }
+  15%, 45% { box-shadow: 0 0 0 3px rgba(246,70,93,.85), 0 0 26px rgba(246,70,93,.5); border-color: var(--down); }
+  30%, 60% { box-shadow: 0 0 0 1px rgba(246,70,93,.35); border-color: var(--border); }
+}
+.dual-col.flash-signal { animation: dcFlashSignal 2.5s ease-out 1; }
+.dual-col.flash-entry  { animation: dcFlashEntry 2.5s ease-out 1; }
+.dual-col.flash-exit   { animation: dcFlashExit 2.5s ease-out 1; }
+/* label kecil di kepala kartu saat flash supaya jenis notifikasi jelas */
+.dual-col.flash-signal .dc-coin::after { content: " ● SIGNAL"; color: #f0b90b; font-size: 10px; }
+.dual-col.flash-entry  .dc-coin::after { content: " ● ENTRY"; color: var(--up); font-size: 10px; }
+.dual-col.flash-exit   .dc-coin::after { content: " ● CLOSE"; color: var(--down); font-size: 10px; }

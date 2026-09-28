@@ -103,8 +103,9 @@ body {
 }
 .round-timer { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .04em; }
 .round-status {
-  margin-left: auto; font-size: 14px; font-weight: 800; padding: 5px 12px;
-  border-radius: 8px; letter-spacing: .05em;
+  margin-left: auto; font-size: 12.5px; font-weight: 800; padding: 4px 10px;
+  border-radius: 8px; letter-spacing: .01em; white-space: nowrap;
+  font-variant-numeric: tabular-nums;   /* harga live + selisih $ dari LOCK */
 }
 .round-status.up { background: rgba(14,203,129,.15); color: var(--up); }
 .round-status.down { background: rgba(246,70,93,.15); color: var(--down); }
@@ -427,3 +428,21 @@ body {
 .dc-dusd.up { color: var(--up); } .dc-dusd.down { color: var(--down); } .dc-dusd.flat { color: var(--muted); }
 .dc-chg24 { font-size: 10px; font-weight: 600; color: var(--muted); opacity: .85; margin-left: 2px; font-variant-numeric: tabular-nums; }
 @media (max-width: 1240px) { .dc-chg24 { display: none; } }   /* layar sempit: 24h masuk tooltip harga saja */
+
+/* Layar sempit: rapatkan baris countdown agar chip (harga live + Δ$ dari LOCK)
+   tetap satu baris bersama timer & tombol donate. */
+@media (max-width: 470px) {
+  .round-head { gap: 6px; }
+  .round-status { font-size: 11px; padding: 3px 7px; }
+  .donate-label { display: none; }                 /* label "Profit?" dekoratif -> disembunyikan */
+  .donate-btn { padding: 4px 8px; font-size: 11px; }
+}
+
+/* Layar sangat sempit (<=380px, mis. iPhone SE): chip tetap satu baris bersama timer.
+   Tombol donate dikecilkan jadi ikon saja (judul tetap ada lewat atribut title). */
+@media (max-width: 380px) {
+  .round-head { gap: 5px; }
+  .round-status { font-size: 10.5px; padding: 3px 6px; }
+  .donate-btn { font-size: 0; padding: 4px 7px; }
+  .donate-btn::before { content: "☕"; font-size: 13px; }
+}

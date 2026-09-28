@@ -1475,7 +1475,20 @@ function applyType() {
     const stEl = document.getElementById("round-status");
     if (tfEl) tfEl.textContent = state.interval;
     if (tmrEl) tmrEl.textContent = `${mm}:${ss}`;
-    if (stEl) { stEl.className = "round-status " + liveStatus; stEl.textContent = liveStatus === "up" ? "LIVE ▲ UP" : liveStatus === "down" ? "LIVE ▼ DOWN" : "LIVE —"; }
+    // Chip di samping countdown: HARGA LIVE + selisihnya dari LOCK dalam dolar (sama seperti
+    // header kolom dual di layar lebar). Menggantikan label "LIVE UP/DOWN".
+    if (stEl) {
+      const px = _sessionC, lock = _sessionO;
+      const hasPx = px != null && isFinite(px) && px > 0;
+      const dUsd = (hasPx && lock != null && isFinite(lock)) ? (px - lock) : null;
+      const dir = dUsd != null ? (dUsd > 0 ? "up" : dUsd < 0 ? "down" : "flat") : liveStatus;
+      const txt = hasPx ? `${fmtPrice(px)}${dUsd != null ? "  " + fmtUsdDelta(dUsd) : ""}` : "—";
+      if (stEl.textContent !== txt) stEl.textContent = txt;
+      const cls = "round-status " + dir;
+      if (stEl.className !== cls) stEl.className = cls;
+      const tip = hasPx ? `Harga live ${fmtPrice(px)}${lock != null ? ` · LOCK ${fmtPrice(lock)} · selisih ${fmtUsdDelta(dUsd)}` : ""}` : "";
+      if (stEl.title !== tip) stEl.title = tip;
+    }
     const rbf = document.getElementById("round-bar-fill");
     if (rbf) rbf.style.width = Math.min(100, (elapsed / total) * 100) + "%";
      requestAnimationFrame(updateTimerDisplay);

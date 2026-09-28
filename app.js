@@ -199,6 +199,8 @@ function rebuild5s(sym) {
 function aggregate5s(ones) {
   return aggregateInterval(ones, CANDLE_SEC);
 }
+let CHART_UTILS = null;   // diisi dari dalam IIFE: linreg/detectSwings/avg/stdev/clamp + window per-koin
+
 function sessionBounds(durMs, now) {
   const start = Math.floor(now / durMs) * durMs;
   return { start, end: start + durMs };
@@ -560,6 +562,21 @@ function applyType() {
     const n = ANALYSIS_CANDLES[state.interval] || 120;
     return five.slice(-n);
   }
+  // Ekspor ke scope modul -> dipakai buildOverlay() agar chart kolom DUAL (layar lebar)
+  // menggambar overlay yang IDENTIK dengan chart utama (proyeksi/tren/marker).
+  CHART_UTILS = {
+    linreg, detectSwings, avg, stdev, clamp,
+    analysisWindowFor: (asset) => {
+      const five = state.cache[asset]?.["5s"]?.candles || [];
+      const n = ANALYSIS_CANDLES[state.interval] || 120;
+      return five.slice(-n);
+    },
+    swingLookbackFor: (asset) => {
+      const five = state.cache[asset]?.["5s"]?.candles || [];
+      const want = Math.round((ANALYSIS_CANDLES[state.interval] || 120) * 0.3);
+      return Math.max(4, Math.min(want, Math.floor(five.length / 3)));
+    },
+  };
   // swing lookback = ~30% dari window analisis, dibatasi agar pivot tetap valid
   function swingLookback() {
     const five = state.cache[state.asset]["5s"].candles;
@@ -808,6 +825,7 @@ function applyType() {
       _renderTimer = null;
       chart.setData(activeCandles());
       updateProjection();
+      renderDual();          // layar lebar: kolom dual ikut real-time (throttle internal 250ms)
     }, 250);
   }
 
@@ -871,65 +889,14 @@ function applyType() {
 
     // auto trend line (reversal-aware) dihitung SETELAH peak terdeteksi — lihat blok di bawah
 
-    // ----- projection to settlement, capped so it can't be absurd -----
-    const remSec = Math.max(0, remaining / 1000);
-    const expMove = slope * remSec;
-    const cappedExp = clamp(expMove, -std * 3, std * 3);
-    const projectedClose = C + cappedExp;
-    const contDir = projectedClose > O ? "up" : projectedClose < O ? "down" : "flat";
+    // ----- proyeksi + tren + marker (SATU sumber bersama kolom dual: buildOverlay) -----
+    const ov = buildOverlay(win, { C, O, std, slope, nowSec, closeSec, remainingMs: remaining, swingLookback: swingLookback() });
+    const projectedClose = ov ? ov.projectedClose : C;
+    const contDir = ov ? ov.contDir : "flat";
+    let peak = ov ? ov.peak : null;
+    if (ov) { chart.setProjection(ov.projection); chart.setTrendFit(ov.trendFit); chart.setMarkers(ov.markers); }
 
-    chart.setProjection([
-      { time: nowSec, value: C },
-      { time: closeSec, value: projectedClose },
-    ]);
 
-    // ----- peak (titik balik) detection inside the decision window -----
-    const L = swingLookback();
-    const sw = detectSwings(win, L);
-    const lastH = sw.highs[sw.highs.length - 1];
-    const lastL = sw.lows[sw.lows.length - 1];
-    // most recent extreme = the peak we fade
-    let peak = null;
-    if (lastH && lastL) peak = (lastH.time >= lastL.time) ? { price: lastH.price, dir: "top", time: lastH.time } : { price: lastL.price, dir: "bot", time: lastL.time };
-    else if (lastH) peak = { price: lastH.price, dir: "top", time: lastH.time };
-    else if (lastL) peak = { price: lastL.price, dir: "bot", time: lastL.time };
-
-    // ----- auto trend line (reversal-aware): membelok di titik balik (peak) -----
-    // Bukan lagi 1 regresi rata-rata window, sehingga terlihat momentum reversal:
-    // naik ke puncak lalu turun (top) atau turun ke dasar lalu naik (bottom).
-    let trendFit = [];
-    if (peak) {
-      const idx = win.findIndex((c) => c.time === peak.time);
-      if (idx >= 0) {
-        const seg1 = win.slice(0, idx + 1);   // sebelum titik balik
-        const seg2 = win.slice(idx);          // sesudah titik balik
-        const r1 = linreg(seg1), r2 = linreg(seg2);
-        const pts = [];
-        if (r1 && seg1.length) pts.push({ time: seg1[0].time, value: r1.a + r1.b * seg1[0].time });
-        pts.push({ time: peak.time, value: peak.price });             // titik balik
-        if (r2 && seg2.length) pts.push({ time: nowSec, value: C });  // ujung = harga live saat ini
-        if (pts.length >= 2) trendFit = pts;
-      }
-    }
-    if (!trendFit.length && reg) {
-      // tidak ada peak terdeteksi → fallback garis regresi window (seperti semula)
-      const a = win[0], b = win[win.length - 1];
-      trendFit = [
-        { time: a.time, value: reg.a + reg.b * a.time },
-        { time: b.time, value: reg.a + reg.b * b.time },
-      ];
-    }
-    chart.setTrendFit(trendFit);
-
-    const markers = [];
-    if (lastH) markers.push({ time: lastH.time, value: lastH.price, color: "#f6465d", text: "▲P" });
-    if (lastL) markers.push({ time: lastL.time, value: lastL.price, color: "#0ecb81", below: true, text: "▼P" });
-    markers.push({
-      time: closeSec, value: projectedClose,
-      color: contDir === "up" ? "#0ecb81" : contDir === "down" ? "#f6465d" : "#848e9c",
-      text: (contDir === "up" ? "AKHIR ↑ " : contDir === "down" ? "AKHIR ↓ " : "AKHIR ") + fmtPrice(projectedClose),
-    });
-    chart.setMarkers(markers);
 
     // ----- signal components -----
     const momentum = reg ? (slope > 0 ? "BULLISH" : slope < 0 ? "BEARISH" : "FLAT") : "FLAT";
@@ -2951,11 +2918,58 @@ function fmtClock(t) { return t ? new Date(t).toLocaleTimeString([], { hour: "2-
 // versi pendek (tanpa detik) untuk chip — supaya ENTRY & EARLY CLOSE muat 1 baris di mobile
 function fmtClockShort(t) { return t ? new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""; }
 
+/* ===== OVERLAY CHART (proyeksi ke settlement + garis tren reversal-aware + marker puncak) =====
+   SATU sumber untuk chart utama (mobile) DAN chart kolom dual (layar lebar). Sebelumnya kolom
+   dual tidak menerima proyeksi/tren/marker sehingga tampilannya tidak selengkap mobile. */
+function buildOverlay(win, o) {
+  const U = CHART_UTILS;
+  if (!U || !win || win.length < 2) return null;
+  const { linreg, detectSwings } = U;
+  const C = o.C, O = o.O, std = o.std || 1;
+  const nowSec = o.nowSec, closeSec = o.closeSec;
+  const remSec = Math.max(0, (o.remainingMs || 0) / 1000);
+  const projectedClose = C + U.clamp((o.slope || 0) * remSec, -std * 3, std * 3);
+  const contDir = projectedClose > O ? "up" : projectedClose < O ? "down" : "flat";
+  const projection = [{ time: nowSec, value: C }, { time: closeSec, value: projectedClose }];
+  const sw = detectSwings(win, o.swingLookback || 4);
+  const lastH = sw.highs[sw.highs.length - 1], lastL = sw.lows[sw.lows.length - 1];
+  let peak = null;
+  if (lastH && lastL) peak = (lastH.time >= lastL.time) ? { price: lastH.price, dir: "top", time: lastH.time } : { price: lastL.price, dir: "bot", time: lastL.time };
+  else if (lastH) peak = { price: lastH.price, dir: "top", time: lastH.time };
+  else if (lastL) peak = { price: lastL.price, dir: "bot", time: lastL.time };
+  let trendFit = [];
+  if (peak) {
+    const idx = win.findIndex((c) => c.time === peak.time);
+    if (idx >= 0) {
+      const seg1 = win.slice(0, idx + 1), seg2 = win.slice(idx);
+      const r1 = linreg(seg1), r2 = linreg(seg2);
+      const pts = [];
+      if (r1 && seg1.length) pts.push({ time: seg1[0].time, value: r1.a + r1.b * seg1[0].time });
+      pts.push({ time: peak.time, value: peak.price });
+      if (r2 && seg2.length) pts.push({ time: nowSec, value: C });
+      if (pts.length >= 2) trendFit = pts;
+    }
+  }
+  if (!trendFit.length) {
+    const reg = linreg(win);
+    if (reg) { const a = win[0], b = win[win.length - 1]; trendFit = [{ time: a.time, value: reg.a + reg.b * a.time }, { time: b.time, value: reg.a + reg.b * b.time }]; }
+  }
+  const markers = [];
+  if (lastH) markers.push({ time: lastH.time, value: lastH.price, color: "#f6465d", text: "▲P" });
+  if (lastL) markers.push({ time: lastL.time, value: lastL.price, color: "#0ecb81", below: true, text: "▼P" });
+  markers.push({
+    time: closeSec, value: projectedClose,
+    color: contDir === "up" ? "#0ecb81" : contDir === "down" ? "#f6465d" : "#848e9c",
+    text: (contDir === "up" ? "AKHIR ↑ " : contDir === "down" ? "AKHIR ↓ " : "AKHIR ") + fmtPrice(projectedClose),
+  });
+  return { projection, trendFit, markers, peak, projectedClose, contDir };
+}
+
 function renderDual(force) {
   const el = document.getElementById("dual");
   if (!el) return;
   if (!force && typeof window.matchMedia === "function" && !window.matchMedia("(min-width: 1100px)").matches) return;
-  if (!force && Date.now() - _dualLastAt < 1000) return;
+  if (!force && Date.now() - _dualLastAt < 250) return;   // 250ms: setara dengan coalesce render mobile
   _dualLastAt = Date.now();
   if (!dualCharts) buildDual();
   const now = serverNow();
@@ -3032,6 +3046,18 @@ function renderDual(force) {
       ch.setDecision(m ? m.O : null);
       ch.setPrediction(graded ? dir : null, m ? m.O : null);
       ch.setCurrentPrice(px);
+      // OVERLAY LENGKAP seperti chart mobile: garis proyeksi ke settlement + garis tren
+      // reversal-aware + marker puncak/akhir. (Sebelumnya kolom dual tidak menerimanya.)
+      if (m && CHART_UTILS) {
+        const nowMs2 = serverNow();
+        const bnd = sessionBounds(INTERVAL_MS[tf], nowMs2);
+        const ov2 = buildOverlay(CHART_UTILS.analysisWindowFor(a), {
+          C: m.C, O: m.O, std: m.std, slope: m.slope,
+          nowSec: Math.floor(nowMs2 / 1000), closeSec: Math.floor(bnd.end / 1000),
+          remainingMs: bnd.end - nowMs2, swingLookback: CHART_UTILS.swingLookbackFor(a),
+        });
+        if (ov2) { ch.setProjection(ov2.projection); ch.setTrendFit(ov2.trendFit); ch.setMarkers(ov2.markers); }
+      }
     }
     const ob = state.orderbook[a];
     const obA = g("ask"), obB = g("bid");

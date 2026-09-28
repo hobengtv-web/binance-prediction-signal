@@ -3280,6 +3280,18 @@ function playSequence(notes, opts) {
       osc.type = n.type || "sine";
       const t0 = ctx.currentTime + n.t;
       osc.frequency.setValueAtTime(n.f, t0);
+      // Optional vibrato — gives a bell-like ringing character (used by the signal chime so
+      // it is unmistakably different from the trade-assistant sounds).
+      if (n.vib) {
+        const lfo = ctx.createOscillator();
+        const lfoGain = ctx.createGain();
+        lfo.frequency.value = n.vibRate || 6;
+        lfoGain.gain.value = n.vib;
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc.frequency);
+        lfo.start(t0);
+        lfo.stop(t0 + n.d + 0.06);
+      }
       const peak = n.vol != null ? n.vol : 0.22;
       const atk = 0.05, rel = Math.min(0.12, Math.max(0.06, n.d * 0.4));
       gain.gain.setValueAtTime(0.0001, t0);
@@ -3293,16 +3305,18 @@ function playSequence(notes, opts) {
     }
   } catch (e) { console.log("[SOUND] failed:", e.message); }
 }
-// Signal entry — soft two-note chime (was a harsh 440Hz square pulse). No square waves,
-// nothing above ~520Hz, low gain, filtered.
+// Signal entry — DISTINCTIVE bell chime: three quick ascending notes (E4-A4-C#5) with vibrato
+// and a long ringing tail. Deliberately different from the trade-assistant sounds:
+//   signal entry = bell arpeggio + vibrato, LOW register (330-554Hz)
+//   trade entry  = 2 notes ascending, triangle, no vibrato (523-659Hz)
+//   close/cut    = 3 notes descending, sine, no vibrato (659-392Hz)
 function playSoundAlert() {
   playSequence([
-    { f: 392, t: 0.00, d: 0.22, type: "sine", vol: 0.22 },   // G4
-    { f: 523, t: 0.26, d: 0.30, type: "sine", vol: 0.24 },   // C5
-    { f: 392, t: 0.72, d: 0.20, type: "sine", vol: 0.18 },   // G4
-    { f: 523, t: 0.96, d: 0.34, type: "sine", vol: 0.20 },   // C5
-  ], { vol: 0.55, cutoff: 1800 });
-  console.log("[SOUND] soft signal chime played");
+    { f: 330, t: 0.00, d: 0.14, type: "sine", vol: 0.20 },                          // E4
+    { f: 440, t: 0.16, d: 0.14, type: "sine", vol: 0.21 },                          // A4
+    { f: 554, t: 0.32, d: 0.60, type: "sine", vol: 0.20, vib: 7, vibRate: 6 },      // C#5 bell ring
+  ], { vol: 0.55, cutoff: 1600 });
+  console.log("[SOUND] bell signal chime played");
 }
 // TRADE ASSISTANT: entry / average -> gentle rising two-note chirp (twice), max 659Hz.
 function playTradeEntrySound() {

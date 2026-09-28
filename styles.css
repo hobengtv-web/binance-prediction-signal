@@ -173,6 +173,15 @@ body {
 .rec-status.ok { background: rgba(14,203,129,.15); color: var(--up); }
 .rec-status.warn { background: rgba(240,185,11,.18); color: #f0b90b; }
 .rec-status.bad { background: rgba(246,70,93,.18); color: var(--down); }
+.trade-plan { margin-top:10px; padding:8px; border-radius:8px; background: var(--panel-2); }
+.tp-head { font-size:11px; color: var(--muted); margin-bottom:4px; }
+.tp-action { font-size:15px; font-weight:800; letter-spacing:.03em; }
+.tp-action.entry { color: var(--up); }
+.tp-action.exit { color: var(--down); }
+.tp-action.wait { color: var(--muted); }
+.tp-levels { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; margin-top:6px; }
+.tp-levels b { color: var(--text); }
+.tp-meta { font-size:11px; color: var(--muted); margin-top:4px; }
 
 /* ---------- Mobile Prediction ---------- */
 .mobile-pred { padding: 10px 12px; background: var(--panel); border-top: 1px solid var(--border); }

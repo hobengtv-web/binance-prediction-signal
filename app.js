@@ -679,6 +679,34 @@ function applyType() {
       recStatusEl.textContent = o.recStatus || "";
       recStatusEl.className = "rec-status" + (o.recStatusClass ? " " + o.recStatusClass : "");
     }
+    // TRADE ASSISTANT panel (entry zone / averaging levels / hold / close)
+    const tpAction = document.getElementById("tp-action");
+    const tpLevels = document.getElementById("tp-levels");
+    const tpMeta = document.getElementById("tp-meta");
+    if (tpAction) {
+      const tp = o.tradePlan;
+      if (!tp) {
+        tpAction.textContent = "—"; tpAction.className = "tp-action wait";
+        if (tpLevels) tpLevels.textContent = "";
+        if (tpMeta) tpMeta.textContent = "";
+      } else {
+        tpAction.textContent = tp.action;
+        tpAction.className = "tp-action " + (tp.cls || "wait");
+        if (tpLevels) {
+          tpLevels.innerHTML = tp.levels
+            ? `<span>ENTRY L1 <b>${fmtPrice(tp.levels.l1)}</b></span>` +
+              `<span>L2 <b>${fmtPrice(tp.levels.l2)}</b></span>` +
+              `<span>L3 <b>${fmtPrice(tp.levels.l3)}</b></span>` +
+              `<span>TARGET <b>${fmtPrice(tp.levels.target)}</b></span>`
+            : "";
+        }
+        if (tpMeta) {
+          const ofiTxt = o.ofi != null ? `OFI ${(o.ofi * 100).toFixed(0)}%` : "OFI —";
+          const adv = tp.adverseStd != null ? `${tp.adverseStd >= 0 ? "-" : "+"}${Math.abs(tp.adverseStd).toFixed(2)}σ` : "—";
+          tpMeta.textContent = `Momentum ${tp.fs} · jarak lock ${adv} · ${ofiTxt}${tp.why.length ? " · " + tp.why.join(", ") : ""}`;
+        }
+      }
+    }
     
     // Trigger alarm otomatis ketika sinyal entry muncul (flat -> up/down transisi)
     const prevVerdict = lastSignalState ? lastSignalState.verdict : "flat";
@@ -1083,6 +1111,7 @@ function applyType() {
   const elapsedSec = Math.round((now - sessionStart) / 1000);
   // Signal HEALTH (multi-criteria) shown as a badge next to the recommendation.
   let recStatus = "", recStatusClass = "";
+  let tradePlan = null;
   if (uni) {
     const isUp = uni.verdict === "up";
     const st = computeLockStatus(uniKey, uni.verdict, O, C, now);
@@ -1111,6 +1140,26 @@ function applyType() {
     const dwell = (st && st.state === "AGAINST") ? ` ${Math.round((now - st.since) / 1000)}s` : "";
     recStatus = `${health.label}${health.score ? ` ${health.score}` : ""}${dwell}`;
     recStatusClass = healthClass(health.label);
+    // TRADE ASSISTANT plan (entry zone / averaging / hold / close) for the active combo.
+    const pk = _tradePeak[uniKey] || -Infinity;
+    const favorNow = isUp ? (C - O) : (O - C);
+    const peakFavor = Math.max(pk, favorNow);
+    _tradePeak[uniKey] = peakFavor;
+    const retreat = peakFavor > 0 && (peakFavor - favorNow) >= 0.25 * Math.max(std, 1e-9);
+    tradePlan = computeTradePlan(uni.verdict, {
+      lock: O, price: C, std, slope, slopeRecent, rsi, z,
+      ofi: uni.ofi, ofiShort, retreat, health,
+    });
+    tradePlan.levels.fmt = fmtPrice;
+    // Actionable alerts (once per state change) for entry / average / close.
+    if (tradePlan.state === "ENTRY" || tradePlan.state === "AVERAGE") {
+      const ak = `${uniKey}|${tradePlan.state}`;
+      if (!_tradeAlerted.has(ak)) {
+        _tradeAlerted.add(ak);
+        console.log(`[TRADE] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
+        flashTitle(`▶ ${tradePlan.action} ${state.asset}/${state.interval}`);
+      }
+    }
     // High-risk alert: notify once per session when the health score is critical.
     if (health.score >= 75 && !_warnedKeys.has(uniKey)) {
       _warnedKeys.add(uniKey);
@@ -1178,6 +1227,8 @@ function applyType() {
       reason: currentReason,
       highConf: !!gateInfo,
       gateWr: gateInfo ? gateInfo.wr : null,
+      ofi: liveSig ? liveSig.ofi : null,
+      tradePlan,
       calcStatus,
       recStatus,
       recStatusClass,
@@ -1796,6 +1847,7 @@ function computeLockStatus(key, dir, lock, price, now) {
    window), counter-direction volume, RSI/z stretch, opposite peak confirmation, higher-tf
    trend flip, and how long price has been against. Advisory only. */
 const _warnedKeys = new Set();   // one high-risk alert per combo per session
+const _tradeAlerted = new Set(); // one entry/average alert per combo per session per state
 function computeSignalHealth(dir, ctx) {
   if (dir !== "up" && dir !== "down") return { score: 0, label: "—", fired: [], confirmedReversal: false };
   const isUp = dir === "up";
@@ -1832,6 +1884,66 @@ function healthClass(label) {
   if (label === "MASIH SESUAI") return "ok";
   if (label === "AWAS MELEMAH") return "warn";
   return "bad";
+}
+
+/* TRADE ASSISTANT — built for a mean-reversion entry + momentum exit workflow:
+   take the session BIAS, wait for price to retrace against it (entry zone in sigma),
+   flag averaging levels, warn when the trend is really turning (do NOT average),
+   then after price recovers to the lock tell when to HOLD vs when to CLOSE. */
+const _tradePeak = {};   // key -> max favourable excursion (price) after recovery
+function computeTradePlan(bias, ctx) {
+  if (bias !== "up" && bias !== "down") {
+    return { state: "NO_SIGNAL", action: "Tidak ada sinyal — tunggu bias sesi", cls: "wait", levels: null, fs: 0, adverseStd: null, why: [] };
+  }
+  const isUp = bias === "up";
+  const sigma = Math.max(ctx.std || 0, 1e-9);
+  const adverse = isUp ? (ctx.lock - ctx.price) : (ctx.price - ctx.lock);   // >0 = against the bias
+  const adverseStd = adverse / sigma;
+  const favor = -adverse;                                                   // >0 = on the bias side
+  const levels = {
+    l1: isUp ? ctx.lock - 0.3 * sigma : ctx.lock + 0.3 * sigma,
+    l2: isUp ? ctx.lock - 0.6 * sigma : ctx.lock + 0.6 * sigma,
+    l3: isUp ? ctx.lock - 1.0 * sigma : ctx.lock + 1.0 * sigma,
+    target: ctx.lock,
+  };
+  const h = ctx.health || {};
+  const biasAtRisk = h.label === "HAMPIR PASTI BERBALIK" || h.label === "SUDAH BERBALIK";
+  const biasWeakening = h.label === "WASPADA BERBALIK ARAH";
+
+  // momentum in favour of the bias (drives HOLD vs CLOSE)
+  let fs = 0; const why = [];
+  const add = (c, w, l) => { if (c) { fs += w; why.push(l); } };
+  add(ctx.slope != null && (isUp ? ctx.slope > 0 : ctx.slope < 0), 25, "momentum searah");
+  add(ctx.slope != null && ctx.slopeRecent != null && (isUp ? (ctx.slopeRecent > 0 && ctx.slopeRecent >= ctx.slope) : (ctx.slopeRecent < 0 && ctx.slopeRecent <= ctx.slope)), 20, "momentum menguat");
+  add(ctx.ofi != null && (isUp ? ctx.ofi > 0.05 : ctx.ofi < -0.05), 20, "OFI searah");
+  add(ctx.ofiShort != null && (isUp ? ctx.ofiShort > 0.1 : ctx.ofiShort < -0.1), 10, "OFI pendek searah");
+  add(favor >= 0, 10, "harga sudah kembali ke lock");
+  add(!ctx.retreat, 10, "tidak mundur dari puncak");
+  add(ctx.rsi != null && !(isUp ? ctx.rsi >= 75 : ctx.rsi <= 25), 5, "RSI belum ekstrem");
+  fs = Math.min(100, fs);
+
+  let state, action, cls;
+  if (biasAtRisk) {
+    state = "STAND_DOWN"; cls = "exit";
+    action = `BATAL — sinyal ${bias.toUpperCase()} berisiko berbalik arah`;
+  } else if (favor >= 0) {
+    if (ctx.retreat || fs < 45) { state = "CLOSE"; cls = "exit"; action = "CLOSE SEKARANG — momentum searah melemah"; }
+    else if (fs < 65) { state = "CAUTION"; cls = "wait"; action = "SIAP CLOSE — momentum mulai melemah"; }
+    else { state = "HOLD"; cls = "entry"; action = "HOLD — momentum masih searah"; }
+  } else if (adverseStd >= 0.3) {
+    const lvl = adverseStd >= 1.0 ? "L3" : adverseStd >= 0.6 ? "L2" : "L1";
+    if (biasWeakening && adverseStd >= 0.6) {
+      state = "NO_AVERAGE"; cls = "exit";
+      action = "JANGAN AVERAGE — tren mulai melawan";
+    } else {
+      state = adverseStd >= 0.6 ? "AVERAGE" : "ENTRY"; cls = "entry";
+      action = `${adverseStd >= 0.6 ? "AVERAGE" : "ENTRY"} ${bias.toUpperCase()} ${lvl} (-${adverseStd.toFixed(1)} sigma)`;
+    }
+  } else {
+    state = "WAIT"; cls = "wait";
+    action = `TUNGGU — bias ${bias.toUpperCase()}, harga belum masuk zona entry (-0.3 sigma)`;
+  }
+  return { state, action, cls, levels, fs, adverseStd, favor, why, biasAtRisk, biasWeakening };
 }
 
 /* Signals locked during a running session are held here (persisted) and only written to
@@ -1995,6 +2107,15 @@ function updateProjectionUniversal() {
   for (const k of _alertedKeys) {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) _alertedKeys.delete(k);
+  }
+  for (const k in _tradePeak) {
+    const t = parseInt(k.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) delete _tradePeak[k];
+  }
+  for (const k of _tradeAlerted) {
+    const base = k.split("|")[0];                 // `${sym}_${tf}_${t0}`
+    const t = parseInt(base.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) _tradeAlerted.delete(k);
   }
   for (const k of _warnedKeys) {
     const t = parseInt(k.split("_")[2]);

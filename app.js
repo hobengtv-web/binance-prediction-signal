@@ -1168,7 +1168,7 @@ function applyType() {
     const dwellTurnMs = dw.turnSince ? now - dw.turnSince : 0;
     const dwellFadeMs = dw.fadeSince ? now - dw.fadeSince : 0;
     tradePlan = computeTradePlan(uni.verdict, {
-      lock: O, price: C, std, slope, slopeRecent, rsi, z,
+      tf: state.interval, lock: O, price: C, std, slope, slopeRecent, rsi, z,
       ofi: uni.ofi, ofiShort, retreat, health, entered: wasEntered,
       turn, fade, dwellTurnMs, dwellFadeMs, histTrend,
     });
@@ -2052,6 +2052,15 @@ function computeTradePlan(bias, ctx) {
   add(!ctx.retreat, 10, "tidak mundur dari puncak");
   add(ctx.rsi != null && !(isUp ? ctx.rsi >= 75 : ctx.rsi <= 25), 5, "RSI belum ekstrem");
   fs = Math.min(100, fs);
+  // Continuation potential: how much further price typically runs after reaching the lock,
+  // so the user can exit at the peak instead of straight away.
+  const histAligned = !!ctx.histTrend && ctx.histTrend.predictDir !== "flat" && ctx.histTrend.predictDir === bias && ctx.histTrend.strength >= 35;
+  const ofiShortAligned = ctx.ofiShort != null && (isUp ? ctx.ofiShort > 0.1 : ctx.ofiShort < -0.1);
+  const cp = Math.min(100, fs + (ofiShortAligned ? 10 : 0) + (histAligned ? 10 : 0));
+  const cont = favor >= 0 ? continuationOf(ctx.tf, cp, isUp, ctx.price) : null;
+  const contTxt = cont
+    ? ` · sisa potensi ~${cont.est.toFixed(2)}% (peluang ${(cont.prob * 100).toFixed(0)}%${cont.peakMin != null ? `, puncak ±mnt ${cont.peakMin}` : ""}) → target ${fmtPrice(cont.target)}`
+    : "";
 
   const entered = !!ctx.entered;
   let state, action, cls, nowEntered = entered;
@@ -2076,11 +2085,11 @@ function computeTradePlan(bias, ctx) {
       state = "STAND_DOWN"; cls = "exit";
       action = "CUT — sinyal berbalik terkonfirmasi, keluar";
     } else if (favor >= 0) {
-      if (ctx.retreat && fade.count >= 1) { state = "CLOSE"; cls = "exit"; action = "CLOSE SEKARANG — harga mundur dari puncak"; }
-      else if (closeReady) { state = "CLOSE"; cls = "exit"; action = `CLOSE — momentum melemah terkonfirmasi (${partList(fade.parts)})`; }
-      else if (fs < 45) { state = "CLOSE"; cls = "exit"; action = "CLOSE SEKARANG — momentum searah melemah"; }
-      else if (fs < 65 || (fade.count >= 2 && dwellFade >= DWELL_CLOSE_MS / 2)) { state = "CAUTION"; cls = "wait"; action = `SIAP CLOSE — ${fade.count}/4 bukti melemah · ${Math.round(dwellFade / 1000)}s/${DWELL_CLOSE_MS / 1000}s`; }
-      else { state = "HOLD"; cls = "entry"; action = "HOLD — momentum masih searah"; }
+      if (ctx.retreat && fade.count >= 1) { state = "CLOSE"; cls = "exit"; action = `CLOSE SEKARANG — harga mundur dari puncak${contTxt}`; }
+      else if (closeReady) { state = "CLOSE"; cls = "exit"; action = `CLOSE — momentum melemah terkonfirmasi (${partList(fade.parts)})${contTxt}`; }
+      else if (fs < 45) { state = "CLOSE"; cls = "exit"; action = `CLOSE SEKARANG — momentum searah melemah${contTxt}`; }
+      else if (fs < 65 || (fade.count >= 2 && dwellFade >= DWELL_CLOSE_MS / 2)) { state = "CAUTION"; cls = "wait"; action = `SIAP CLOSE — ${fade.count}/4 bukti melemah${contTxt}`; }
+      else { state = "HOLD"; cls = "entry"; action = `HOLD — momentum masih searah${contTxt}`; }
     } else if (inZone2 && avgReady) {
       state = "AVERAGE"; cls = "entry";
       action = `AVERAGE ${bias.toUpperCase()} di ${rNowTxt} — terkonfirmasi (${partList(turn.parts)})`;
@@ -2092,7 +2101,7 @@ function computeTradePlan(bias, ctx) {
       action = `TAHAN POSISI — harga ${rNowTxt} dari lock, tunggu pembalikan`;
     }
   }
-  return { state, action, cls, levels, fs, adverseStd, favor, why, entered: nowEntered, turn, fade, dwellTurnMs: dwellTurn, dwellFadeMs: dwellFade };
+  return { state, action, cls, levels, fs, cp, cont, adverseStd, favor, why, entered: nowEntered, turn, fade, dwellTurnMs: dwellTurn, dwellFadeMs: dwellFade };
 }
 
 /* Signals locked during a running session are held here (persisted) and only written to
@@ -2158,6 +2167,11 @@ async function loadTiers() {
       const r2 = await fetch("/backtest/out/tier_by_minute.json", { cache: "no-store" });
       if (r2.ok) { const j = await r2.json(); TIERS.byMinute = j.tiers || null; }
     } catch (_) {}
+    // Continuation potential: how much further price typically runs after touching the lock.
+    try {
+      const r3 = await fetch("/backtest/out/continuation.json", { cache: "no-store" });
+      if (r3.ok) { const j = await r3.json(); TIERS.continuation = j || null; }
+    } catch (_) {}
     TIER_STATUS = "ok";
     console.log(`[TIERS] early tiers loaded · ${TIERS.windowDays}d window · byMinute ${TIERS.byMinute ? "yes" : "no"}`);
   } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
@@ -2168,6 +2182,22 @@ function minuteWR(tf, minuteIn) {
   const t = TIERS.byMinute[tf];
   const o = t && t[String(minuteIn)];
   return o ? o.wr : null;
+}
+// Continuation potential after the price reaches the lock: how much further it typically runs
+// before reversing (measured on 90d). cp = continuation score (0-100).
+function continuationOf(tf, cp, isUp, price) {
+  const t = (TIERS && TIERS.continuation && TIERS.continuation.tiers) ? TIERS.continuation.tiers[tf] : null;
+  if (!t) return null;
+  const strong = cp >= 70, mid = cp >= 45;
+  const est = strong ? t.mfe.p75 : mid ? t.mfe.p50 : t.mfe.p25;
+  const prob = strong ? (t.probAligned ? t.probAligned.ge010 : t.prob.ge010) : t.prob.ge005;
+  const target = isUp ? price * (1 + est / 100) : price * (1 - est / 100);
+  return {
+    cp, est, prob,
+    peakMin: t.peakMin ? t.peakMin.p50 : null,
+    bucket: strong ? "lanjut kuat" : mid ? "lanjut sedang" : "mulai melemah",
+    target,
+  };
 }
 function gradeVariant(tf, grade) {
   if (grade === "STRONG") return "OFI strong+vol>=3";
@@ -2257,7 +2287,7 @@ function analyzeCoin(asset, tf, now) {
   const entered = !!(_tradeEntered[key] && _tradeEntered[key].entered);
   const plan = (sig && sig.verdict !== "flat")
     ? computeTradePlan(sig.verdict, {
-        lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
+        tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
         entered, turn, fade,
         dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,
         dwellFadeMs: dw.fadeSince ? now - dw.fadeSince : 0,

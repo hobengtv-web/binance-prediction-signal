@@ -4169,8 +4169,39 @@ window.addEventListener("error", (e) => {
   if (el) { el.hidden = false; el.textContent = "JS Error: " + (e.message || e.error) + (e.filename ? " @ " + e.filename + ":" + e.lineno : ""); }
 });
 
+// Pastikan panel learner ADA di DOM. Kalau HTML yang dimuat lebih lama dari app.js
+// (tab lama / cache), panel dibuat sendiri di sini sehingga fitur tetap terlihat tanpa
+// harus mengandalkan versi HTML terbaru.
+function ensureLearnerPanel() {
+  if (!document.getElementById("learn-status")) {
+    const d = document.createElement("details");
+    d.className = "learn-status"; d.id = "learn-status"; d.open = true;
+    d.innerHTML = `<summary>STATUS LEARNER · PROGRESS, PELAJARAN &amp; PENYESUAIAN ▾</summary>
+      <div class="lstat-hint">Panel ini menunjukkan apa yang sedang dipelajari sistem dari sinyal nyata dan
+      penyesuaian apa yang sudah/akan diterapkan. Model belajar hanya menggantikan tabel backtest bila
+      <b>menang pada jendela uji</b> (split berurutan waktu + Wilson bound). Sesi yang <b>ditolak</b> gate
+      tetap direkam supaya ambangnya bisa dipelajari dari data.</div>
+      <div id="lstat-body" class="lstat-body">memuat…</div>`;
+    const anchor = document.querySelector("details.help") || document.querySelector(".conf-debug");
+    if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(d, anchor); else document.body.appendChild(d);
+  }
+  if (!document.getElementById("lessons-body")) {
+    const d = document.createElement("details");
+    d.className = "lessons"; d.id = "lessons";
+    d.innerHTML = `<summary>PELAJARAN DARI SINYAL LALU · LEARNER 90d ▾</summary>
+      <div class="ls-hint">Konteks tervalidasi <b>walk-forward</b>: latih 70% data paling awal, uji 30%
+      paling akhir, dinilai Wilson bound. Hanya konteks yang lolos uji yang ditampilkan.</div>
+      <div id="lessons-body" class="ls-body"></div>
+      <div class="ls-foot"><span id="ls-status">—</span> · tahan sinyal pada konteks lemah: <code>window.setLearnBlock(true)</code></div>
+      <div class="ls-foot"><b>LEDGER BELAJAR</b> <span id="ls-ledger">memuat…</span></div>`;
+    const anchor = document.querySelector("details.help");
+    if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(d, anchor); else document.body.appendChild(d);
+  }
+}
+
 function start() {
   initChart();
+  ensureLearnerPanel();
   bindControls();
   restoreMobilePredSession();
   startData();

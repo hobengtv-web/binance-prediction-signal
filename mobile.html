@@ -355,6 +355,11 @@
       <button class="btn" style="margin-top:0.75rem; background:var(--danger); padding:0.75rem; font-size:0.875rem;" onclick="clearHistory()">Reset History</button>
     </div>
 
+    <div class="card" id="learnerCard">
+      <div class="signal-badge flat" style="margin-bottom:0.5rem;">STATUS LEARNER</div>
+      <div id="learnerBody" style="font-size:0.8125rem; line-height:1.55; color:var(--muted);">memuat…</div>
+    </div>
+
     <div class="status warn" id="status">
       <span class="dot"></span>
       <span id="statusText">Menghubungkan ke server lokal...</span>
@@ -370,7 +375,9 @@
   </div>
 
   <script>
-    const API_BASE = "http://localhost:8000";
+    // Bila halaman dibuka lewat server (produksi/daemon lokal), pakai origin yang sama.
+    // Bila dibuka dari file://, arahkan ke server lokal.
+    const API_BASE = (location.protocol === "file:") ? "http://localhost:8000" : "";
 
     const INTERVAL_MS = { "5m": 300000, "15m": 900000, "1h": 3600000 };
 
@@ -1121,6 +1128,33 @@
       });
     });
 
+    // ---- STATUS LEARNER (progress data belajar, ambang aktif, model, penyesuaian) ----
+    async function loadLearner() {
+      const el = document.getElementById("learnerBody");
+      if (!el) return;
+      try {
+        const r = await fetch(`${API_BASE}/api/learner`, { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const j = await r.json();
+        const L = j.ledger || {}, M = j.model || {}, G = j.gates || {}, C = j.capture || {};
+        const pct = Math.round((L.pct || 0) * 1000) / 10;
+        const learned = G.mode === "learned";
+        const badge = learned ? "AMBANG HASIL BELAJAR" : (G.mode === "strict" ? "AMBANG KONSERVATIF" : "BOOTSTRAP (DILONGGARKAN)");
+        const th = (G.thresholds && G.thresholds.length) ? G.thresholds.map((t) => `${t.f} ${t.op} ${t.t}`).join(" & ") : "belum ada (tier ladder saja)";
+        const T = G.tiers || {};
+        el.innerHTML = `
+          <div style="font-weight:800;color:var(--text);margin-bottom:0.25rem;">${badge}</div>
+          <div>progress: <b style="color:var(--text)">${L.canonicalWithRes || 0}/${L.target || 120}</b> sinyal kanonik berhasil (${pct}%)</div>
+          <div>data: ${L.total || 0} record · kanonik ${L.canonical || 0} · tengah sesi (dibuang) ${L.late || 0}</div>
+          <div>capture server: ${C.enabled ? `aktif — ${C.captured || 0} tersimpan · ${C.accepted || 0} lolos gate · ${C.rejected || 0} ditolak (tetap direkam)` : "mati"}</div>
+          <div>ambang aktif: ${th}</div>
+          <div>tier: STRONG≥${T.STRONG ? T.STRONG.volRel2 : "—"} · GOOD≥${T.GOOD ? T.GOOD.volRel2 : "—"} · FAIR≥${T.FAIR ? T.FAIR.volRel2 : "—"} · floor ×${G.liqFloorMul != null ? G.liqFloorMul : "—"} · telat ${G.lateFrac != null ? (G.lateFrac * 100).toFixed(0) + "%" : "—"}</div>
+          <div>model: ${learned ? `hasil belajar · versi ${String(M.version).slice(0, 19)}` : "default (backtest 90d) — belum ada model belajar"}</div>
+          ${G.metrics ? `<div>winrate uji ambang aktif: ${(G.metrics.takenWinrate * 100).toFixed(1)}% (cakupan ${(G.metrics.coverage * 100).toFixed(0)}%)</div>` : ""}
+        `;
+      } catch (e) { el.textContent = "status learner tidak tersedia (" + (e.message || "gagal") + ")"; }
+    }
+
     els.refreshBtn.addEventListener("click", refresh);
 
     els.lockPriceManual.addEventListener("input", () => {
@@ -1131,6 +1165,8 @@
     setInterval(refresh, 5000);
     setInterval(updateCountdown, 1000);
 
+    loadLearner();
+    setInterval(loadLearner, 60000);
     loadState();
     loadHistory();
     loadLocked();

@@ -3218,12 +3218,11 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   const mv2 = lockPrice > 0 ? (moveAbs / lockPrice) * 100 : 0;
   const surprise = sigma1s > 0 ? moveAbs / sigma1s : 0;
 
-  // TIER LADDER for the 2s signal (calibrated on 7d of 1s klines; see backtest/early2s_menu.js):
-  //   STRONG : volRel2 >= 3   & surprise >= 3  -> ~59.6% (lock-recapture 57%, ~50/day)
-  //   GOOD   : volRel2 >= 1.5 & surprise >= 2  -> ~59.6% (lock-recapture 58%, ~98/day)
-  //   FAIR   : volRel2 >= 0.9                  -> ~56.9% (lock-recapture 55%, ~166/day)
-  // NOTE: 90% accuracy is NOT reachable at 2s — the measured ceiling is ~57-62%.
-  const T = (GATES && GATES.tiers) || { STRONG: { volRel2: 3, surprise: 3 }, GOOD: { volRel2: 1.5, surprise: 2 }, FAIR: { volRel2: 0.9, surprise: 0 } };
+  // TIER LADDER sinyal 2 detik. AMBANGNYA TIDAK DITULIS DI SINI — dibaca dari profil gate
+  // aktif (/api/model/gates): bootstrap (longgar, fase kumpul data), learned (hasil uji
+  // learner), atau strict (konservatif). Lihat gates.js dan gatesSummary().
+  // NOTE: akurasi 90% TIDAK mungkin di 2 detik — plafon terukur ~57-62% untuk arah.
+  const T = (GATES && GATES.tiers) || { STRONG: { volRel2: 3, surprise: 3 }, GOOD: { volRel2: 1.5, surprise: 2 }, FAIR: { volRel2: 0.3, surprise: 0 } };
   const gapNow = lockPrice > 0 ? Math.abs((C - lockPrice) / lockPrice) * 100 : 0;
   let grade = null;
   if (verdict !== "flat") {

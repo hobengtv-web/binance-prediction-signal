@@ -1,0 +1,31 @@
+{
+  "generated": "2026-09-28T08:35:57.637Z",
+  "windowDays": 6.78,
+  "sessions": 2651,
+  "tiers": {
+    "STRONG": {
+      "n": 342,
+      "wr": 0.5965,
+      "testWR": 0.6348,
+      "recap": 0.5714,
+      "rule": "volRel2>=3 & surprise>=3",
+      "perDay": 50.5
+    },
+    "GOOD": {
+      "n": 663,
+      "wr": 0.5958,
+      "testWR": 0.6244,
+      "recap": 0.5833,
+      "rule": "volRel2>=1.5 & surprise>=2",
+      "perDay": 97.8
+    },
+    "FAIR": {
+      "n": 1128,
+      "wr": 0.5691,
+      "testWR": 0.5853,
+      "recap": 0.5501,
+      "rule": "volRel2>=0.9",
+      "perDay": 166.4
+    }
+  }
+}

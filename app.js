@@ -2186,9 +2186,20 @@ async function loadTiers() {
       const r3 = await fetch("/backtest/out/continuation.json", { cache: "no-store" });
       if (r3.ok) { const j = await r3.json(); TIERS.continuation = j || null; }
     } catch (_) {}
+    // 2-second signal tiers (7d of 1s klines).
+    try {
+      const r4 = await fetch("/backtest/out/early2s.json", { cache: "no-store" });
+      if (r4.ok) { const j = await r4.json(); TIERS.early2s = j || null; }
+    } catch (_) {}
     TIER_STATUS = "ok";
     console.log(`[TIERS] early tiers loaded · ${TIERS.windowDays}d window · byMinute ${TIERS.byMinute ? "yes" : "no"}`);
   } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
+}
+// Measured winrate for the 2-second tiers (backtest/out/early2s.json).
+function early2sWR(grade) {
+  if (!TIERS || !TIERS.early2s || !TIERS.early2s.tiers) return null;
+  const t = TIERS.early2s.tiers[grade];
+  return t ? t.wr : null;
 }
 // Measured winrate for the exact minute the entry appeared (falls back to the grade table).
 function minuteWR(tf, minuteIn) {
@@ -2659,9 +2670,12 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   }
   
   const elapsed = now - t0;
-  
-  // WARMUP filter - skip if too early
-  if (elapsed < 15000) {
+  const nowSecFloorW = Math.floor(now / 1000);
+  const sessionOnes = (state.cache[sym]?.["1s"]?.candles || []).filter((c) => c.time >= t0Sec && c.time < nowSecFloorW);
+
+  // WARMUP: the signal is evaluated in the FIRST 2 SECONDS of the session (per request), but we
+  // still need at least two completed 1s candles to form a move and a volume sample.
+  if (elapsed < 2000 || sessionOnes.length < 2) {
     return {
       roundStart: t0,
       asset: sym,
@@ -2714,31 +2728,47 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   const ofi = sessionOFI(sym, t0Sec, nowSecFloor);
   const ofiAgree = (ofi == null || verdict === "flat") ? null : ((ofi >= 0) === (verdict === "up"));
   const ofiStrong = ofi != null && Math.abs(ofi) >= 0.2;
-  // EARLY grade — the signal is produced at the start of the session. Only these grade
-  // produce an entry; everything else becomes "no entry".
-  //   STRONG = OFI strongly agrees + volume pace >= 3x          (~75% 5m / ~64% 15m)
-  //   GOOD   = OFI agrees + volume pace >= 3x                   (~74% / ~64%)
-  //   FAIR   = OFI agrees + volume pace >= 1.2x (5m) / 2.0x (15m) / 1.5x (1h)
-  //                                                            (~71% / ~67% / ~65%)
+  // ---- 2-SECOND features (the signal is formed from the first 2s of the session) ----
+  //  mv2      : the move so far vs the session open, in %
+  //  surprise : that move divided by the average 1s range of the previous 60s (a "surprise"
+  //             measure — how big the move is relative to recent tick noise)
+  //  volRel2  : the first-2s volume projected to a full session candle, vs the prior 25 candles
+  const secElapsed = Math.max(2, nowSecFloor - t0Sec);
+  const vol2sum = sessionOnes.reduce((a, c) => a + (c.vol || 0), 0);
+  const projSession = vol2sum * (tfSec / secElapsed);
+  const volRel2 = baseVol > 0 ? projSession / baseVol : 1;
+  const preOnes = (state.cache[sym]?.["1s"]?.candles || []).filter((c) => c.time < t0Sec).slice(-60);
+  const sigma1s = preOnes.length
+    ? preOnes.reduce((a, c) => a + Math.abs((c.high != null ? c.high : c.close) - (c.low != null ? c.low : c.close)), 0) / preOnes.length
+    : 0;
+  const moveAbs = Math.abs(C - lockPrice);
+  const mv2 = lockPrice > 0 ? (moveAbs / lockPrice) * 100 : 0;
+  const surprise = sigma1s > 0 ? moveAbs / sigma1s : 0;
+
+  // TIER LADDER for the 2s signal (calibrated on 7d of 1s klines; see backtest/early2s_menu.js):
+  //   STRONG : volRel2 >= 3   & surprise >= 3  -> ~59.6% (lock-recapture 57%, ~50/day)
+  //   GOOD   : volRel2 >= 1.5 & surprise >= 2  -> ~59.6% (lock-recapture 58%, ~98/day)
+  //   FAIR   : volRel2 >= 0.9                  -> ~56.9% (lock-recapture 55%, ~166/day)
+  // NOTE: 90% accuracy is NOT reachable at 2s — the measured ceiling is ~57-62%.
   let grade = null;
-  const FAIR_MIN = fairMinVol(tf);
-  if (verdict !== "flat" && ofiAgree !== false) {
-    if (volRel >= 3) grade = ofiStrong ? "STRONG" : "GOOD";
-    else if (volRel >= FAIR_MIN) grade = "FAIR";
+  if (verdict !== "flat") {
+    if (volRel2 >= 3 && surprise >= 3) grade = "STRONG";
+    else if (volRel2 >= 1.5 && surprise >= 2) grade = "GOOD";
+    else if (volRel2 >= 0.9) grade = "FAIR";
   }
   if (!grade) {
-    const why = ofiAgree === false ? "OFI contra" : (volRel < FAIR_MIN ? "LOWVOL" : "FILTERED");
     verdict = "flat";
-    mode = why;
+    mode = volRel2 < 0.9 ? "LOWVOL" : "FILTERED";
     conf = 0;
   }
+  const FAIR_MIN = 0.9;
   // LATE gate: after LATE_FRAC of the session the price is close to the lock, so the reward
   // is tiny even when accurate. Those entries are suppressed (user avoids them by choice).
   const late = elapsed >= LATE_FRAC * dur;
   if (late && grade) { grade = null; verdict = "flat"; mode = "LATE"; conf = 0; }
   // LIQUIDITY gate: never signal in a dead market, whatever the ratio says.
   if (liqLow && grade) { grade = null; verdict = "flat"; mode = "NO-LIQ"; conf = 0; }
-  const expectedGradeWR = grade ? gradeWR(tf, grade) : null;
+  const expectedGradeWR = grade ? (early2sWR(grade) != null ? early2sWR(grade) : gradeWR(tf, grade)) : null;
   const minuteIn = Math.floor(elapsed / 60000) + 1;                 // 1-based, matches the calibration
   const sessionMin = Math.round(dur / 60000);
   // Potential reward = distance from the current price to the lock (what is gained on a
@@ -2746,9 +2776,9 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   const rewardPct = Math.abs(lockPrice - C) / C * 100;
   const expectedWR = grade ? (minuteWR(tf, minuteIn) != null ? minuteWR(tf, minuteIn) : expectedGradeWR) : null;
   let reason = SignalCore.buildReason({
-    verdict: verdict === "flat" && mode === "OFI contra" ? "flat" : verdict,
-    mode: mode === "OFI contra" ? "FILTERED" : mode,
-    rsi, volRel, strength: histStr,
+    verdict,
+    mode,
+    rsi, volRel: volRel2, strength: histStr,
     momentum: histTrend?.momentum, elapsedSec: elapsed / 1000,
     tf, volMin: FAIR_MIN,
   });

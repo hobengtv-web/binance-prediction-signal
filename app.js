@@ -2191,9 +2191,27 @@ async function loadTiers() {
       const r4 = await fetch("/backtest/out/early2s.json", { cache: "no-store" });
       if (r4.ok) { const j = await r4.json(); TIERS.early2s = j || null; }
     } catch (_) {}
+    // LOCK-TOUCH strategy calibration (the ~90% winrate path).
+    try {
+      const r5 = await fetch("/backtest/out/locktouch.json", { cache: "no-store" });
+      if (r5.ok) { const j = await r5.json(); TIERS.locktouch = j || null; }
+    } catch (_) {}
     TIER_STATUS = "ok";
     console.log(`[TIERS] early tiers loaded · ${TIERS.windowDays}d window · byMinute ${TIERS.byMinute ? "yes" : "no"}`);
   } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
+}
+// LOCK-TOUCH: at 2s the price sits a small distance from the lock; historically it comes back
+// with this probability (5m: 92.8% within 0.005%, 82.6% 0.005-0.01%, 79.5% 0.01-0.02%, ...).
+function lockTouchOf(tf, dist, dir) {
+  const t = (TIERS && TIERS.locktouch && TIERS.locktouch.tiers) ? TIERS.locktouch.tiers[tf] : null;
+  if (!t || !t.buckets) return null;
+  for (const b of t.buckets) {
+    const hi = b.hi == null ? Infinity : b.hi;
+    if (dist >= b.lo && dist < hi) {
+      return { dir, dist, rate: b.rate, tMed: b.tMed, ddMed: b.ddMed, tooClose: dist < 0.005, total: t.total };
+    }
+  }
+  return null;
 }
 // Measured winrate for the 2-second tiers (backtest/out/early2s.json).
 function early2sWR(grade) {
@@ -2768,6 +2786,9 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   if (late && grade) { grade = null; verdict = "flat"; mode = "LATE"; conf = 0; }
   // LIQUIDITY gate: never signal in a dead market, whatever the ratio says.
   if (liqLow && grade) { grade = null; verdict = "flat"; mode = "NO-LIQ"; conf = 0; }
+  // LOCK-TOUCH strategy: the way back to the lock and the measured probability for this distance.
+  const d2 = lockPrice > 0 ? ((C - lockPrice) / lockPrice) * 100 : 0;
+  const touch = lockTouchOf(tf, Math.abs(d2), d2 < 0 ? "up" : "down");
   const expectedGradeWR = grade ? (early2sWR(grade) != null ? early2sWR(grade) : gradeWR(tf, grade)) : null;
   const minuteIn = Math.floor(elapsed / 60000) + 1;                 // 1-based, matches the calibration
   const sessionMin = Math.round(dur / 60000);
@@ -2785,6 +2806,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   if (mode === "OFI contra") reason = "No entry. Executed order flow is against this direction.";
   if (mode === "LATE") reason = `No entry. Late in the session (${Math.round((elapsed / dur) * 100)}% elapsed) — reward too small at this distance from the lock.`;
   if (mode === "NO-LIQ") reason = `No entry. Liquidity too thin — the market is quiet (volume ${(liqRatio * 100).toFixed(0)}% of typical, need above ${((liqFloor / (typ5m || 1)) * 100).toFixed(0)}%).`;
+  if (touch) reason += ` TOUCH LOCK: arah ${touch.dir.toUpperCase()} · jarak ${touch.dist.toFixed(3)}% dari lock · peluang historis ${(touch.rate * 100).toFixed(0)}% (median ${touch.tMed}s, dd ${touch.ddMed}%)${touch.tooClose ? " · PERINGATAN: terlalu dekat lock (sentuh hampir instan, reward ~0)" : ""}.`;
   
   return {
     roundStart: t0,
@@ -2802,6 +2824,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     minuteIn,
     late,
     rewardPct,
+    touch,
     liqLow,
     liqRatio,
     ofi,

@@ -161,6 +161,20 @@
      <div id="conf-debug-body" class="cd-body"></div>
    </section>
 
+  <!-- PHASE 1 LEARNER: pelajaran dari sinyal yang sudah berlalu (lihat backtest/learn.js) -->
+  <details class="lessons" id="lessons">
+    <summary>PELAJARAN DARI SINYAL LALU · LEARNER 90d ▾</summary>
+    <div class="ls-hint">
+      Tabel konteks tervalidasi <b>walk-forward</b>: dilatih pada 70% data paling awal, diuji pada 30% data
+      paling akhir, dinilai dengan <b>Wilson bound</b> — bukan winrate mentah. Hanya konteks yang lolos uji
+      ditampilkan. Angka di panel REASON (baris <b>BELAJAR 90d</b>) memakai tabel ini secara langsung.
+    </div>
+    <div id="lessons-body" class="ls-body"></div>
+    <div class="ls-foot">
+      <span id="ls-status">—</span> · tahan sinyal pada konteks lemah: <code>window.setLearnBlock(true)</code>
+    </div>
+  </details>
+
   <details class="help">
     <summary>HOW TO READ &amp; ACT ▾</summary>
     <div class="help-body">

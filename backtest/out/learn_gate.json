@@ -1,0 +1,2769 @@
+{
+ "generated": "2026-09-28T09:16:59.232Z",
+ "source": "signals.json",
+ "rows": 63291,
+ "days": 89.82,
+ "baseline": {
+  "train": 0.6891,
+  "test": 0.6875,
+  "testLB": 0.6809,
+  "nTrain": 44303,
+  "nTest": 18988
+ },
+ "minTrain": 150,
+ "minTest": 80,
+ "buckets": {
+  "interval": {
+   "5m": {
+    "n": 32309,
+    "wr": 0.6965,
+    "nTest": 13889,
+    "wrTest": 0.6966,
+    "lbTest": 0.6889,
+    "ubTest": 0.7042
+   },
+   "15m": {
+    "n": 9211,
+    "wr": 0.6911,
+    "nTest": 3896,
+    "wrTest": 0.6845,
+    "lbTest": 0.6698,
+    "ubTest": 0.699
+   },
+   "1h": {
+    "n": 2783,
+    "wr": 0.5954,
+    "nTest": 1203,
+    "wrTest": 0.5919,
+    "lbTest": 0.5638,
+    "ubTest": 0.6193
+   }
+  },
+  "symbol": {
+   "BTC": {
+    "n": 21910,
+    "wr": 0.691,
+    "nTest": 9481,
+    "wrTest": 0.684,
+    "lbTest": 0.6746,
+    "ubTest": 0.6933
+   },
+   "ETH": {
+    "n": 22393,
+    "wr": 0.6871,
+    "nTest": 9507,
+    "wrTest": 0.691,
+    "lbTest": 0.6816,
+    "ubTest": 0.7002
+   }
+  },
+  "minute": {
+   "1": {
+    "n": 30479,
+    "wr": 0.6541,
+    "nTest": 13088,
+    "wrTest": 0.6574,
+    "lbTest": 0.6492,
+    "ubTest": 0.6655
+   },
+   "2-3": {
+    "n": 7991,
+    "wr": 0.7237,
+    "nTest": 3426,
+    "wrTest": 0.7189,
+    "lbTest": 0.7036,
+    "ubTest": 0.7337
+   },
+   "4-6": {
+    "n": 3237,
+    "wr": 0.8458,
+    "nTest": 1302,
+    "wrTest": 0.8126,
+    "lbTest": 0.7905,
+    "ubTest": 0.8329
+   },
+   "7+": {
+    "n": 2596,
+    "wr": 0.7978,
+    "nTest": 1172,
+    "wrTest": 0.7927,
+    "lbTest": 0.7685,
+    "ubTest": 0.8149
+   }
+  },
+  "rsi": {
+   "40-60": {
+    "n": 20002,
+    "wr": 0.6921,
+    "nTest": 9043,
+    "wrTest": 0.6892,
+    "lbTest": 0.6795,
+    "ubTest": 0.6986
+   },
+   "<30": {
+    "n": 4446,
+    "wr": 0.6808,
+    "nTest": 1831,
+    "wrTest": 0.6789,
+    "lbTest": 0.6571,
+    "ubTest": 0.6999
+   },
+   "30-40": {
+    "n": 7080,
+    "wr": 0.6838,
+    "nTest": 2936,
+    "wrTest": 0.6911,
+    "lbTest": 0.6741,
+    "ubTest": 0.7075
+   },
+   "60-70": {
+    "n": 7467,
+    "wr": 0.6898,
+    "nTest": 2951,
+    "wrTest": 0.6906,
+    "lbTest": 0.6737,
+    "ubTest": 0.707
+   },
+   ">70": {
+    "n": 5308,
+    "wr": 0.6905,
+    "nTest": 2227,
+    "wrTest": 0.6789,
+    "lbTest": 0.6593,
+    "ubTest": 0.698
+   }
+  },
+  "vol": {
+   "<0.7": {
+    "n": 9858,
+    "wr": 0.7076,
+    "nTest": 4355,
+    "wrTest": 0.7111,
+    "lbTest": 0.6975,
+    "ubTest": 0.7244
+   },
+   "1-1.5": {
+    "n": 13303,
+    "wr": 0.682,
+    "nTest": 5859,
+    "wrTest": 0.6783,
+    "lbTest": 0.6662,
+    "ubTest": 0.6901
+   },
+   "0.7-1": {
+    "n": 7941,
+    "wr": 0.6842,
+    "nTest": 3620,
+    "wrTest": 0.6776,
+    "lbTest": 0.6622,
+    "ubTest": 0.6927
+   },
+   ">2.5": {
+    "n": 5210,
+    "wr": 0.6881,
+    "nTest": 1993,
+    "wrTest": 0.6919,
+    "lbTest": 0.6713,
+    "ubTest": 0.7118
+   },
+   "1.5-2.5": {
+    "n": 7991,
+    "wr": 0.6833,
+    "nTest": 3161,
+    "wrTest": 0.6805,
+    "lbTest": 0.664,
+    "ubTest": 0.6965
+   }
+  },
+  "trend": {
+   "bullish": {
+    "n": 22044,
+    "wr": 0.6924,
+    "nTest": 9473,
+    "wrTest": 0.6903,
+    "lbTest": 0.6809,
+    "ubTest": 0.6995
+   },
+   "bearish": {
+    "n": 21994,
+    "wr": 0.6853,
+    "nTest": 9448,
+    "wrTest": 0.6851,
+    "lbTest": 0.6757,
+    "ubTest": 0.6944
+   },
+   "flat": {
+    "n": 265,
+    "wr": 0.717,
+    "nTest": 67,
+    "wrTest": 0.6269,
+    "lbTest": 0.5072,
+    "ubTest": 0.7328
+   }
+  },
+  "hour": {
+   "4-7": {
+    "n": 7394,
+    "wr": 0.6835,
+    "nTest": 3120,
+    "wrTest": 0.6811,
+    "lbTest": 0.6645,
+    "ubTest": 0.6972
+   },
+   "8-11": {
+    "n": 7322,
+    "wr": 0.6965,
+    "nTest": 3079,
+    "wrTest": 0.6837,
+    "lbTest": 0.667,
+    "ubTest": 0.6999
+   },
+   "12-15": {
+    "n": 7469,
+    "wr": 0.6808,
+    "nTest": 3246,
+    "wrTest": 0.6892,
+    "lbTest": 0.673,
+    "ubTest": 0.7048
+   },
+   "16-19": {
+    "n": 7471,
+    "wr": 0.6871,
+    "nTest": 3258,
+    "wrTest": 0.6998,
+    "lbTest": 0.6838,
+    "ubTest": 0.7153
+   },
+   "20-23": {
+    "n": 7322,
+    "wr": 0.692,
+    "nTest": 3150,
+    "wrTest": 0.6895,
+    "lbTest": 0.6731,
+    "ubTest": 0.7054
+   },
+   "0-3": {
+    "n": 7325,
+    "wr": 0.6946,
+    "nTest": 3135,
+    "wrTest": 0.681,
+    "lbTest": 0.6645,
+    "ubTest": 0.6971
+   }
+  },
+  "hist": {
+   "<10": {
+    "n": 21501,
+    "wr": 0.6896,
+    "nTest": 9051,
+    "wrTest": 0.6924,
+    "lbTest": 0.6828,
+    "ubTest": 0.7018
+   },
+   "10-20": {
+    "n": 14788,
+    "wr": 0.6884,
+    "nTest": 6680,
+    "wrTest": 0.6807,
+    "lbTest": 0.6694,
+    "ubTest": 0.6918
+   },
+   ">20": {
+    "n": 8014,
+    "wr": 0.6888,
+    "nTest": 3257,
+    "wrTest": 0.6877,
+    "lbTest": 0.6716,
+    "ubTest": 0.7034
+   }
+  },
+  "mode": {
+   "TREND": {
+    "n": 41520,
+    "wr": 0.6953,
+    "nTest": 17785,
+    "wrTest": 0.694,
+    "lbTest": 0.6871,
+    "ubTest": 0.7007
+   },
+   "MOMENTUM": {
+    "n": 2783,
+    "wr": 0.5954,
+    "nTest": 1203,
+    "wrTest": 0.5919,
+    "lbTest": 0.5638,
+    "ubTest": 0.6193
+   }
+  }
+ },
+ "rules": [
+  {
+   "k": "minute=4-6&vol=<0.7",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 1189,
+   "wr": 0.9235,
+   "lb": 0.907,
+   "nTest": 486,
+   "wrTest": 0.9239,
+   "lbTest": 0.8968,
+   "ubTest": 0.9443,
+   "verdict": "boost",
+   "delta": 0.2364
+  },
+  {
+   "k": "interval=5m&minute=4-6",
+   "feats": [
+    "interval",
+    "minute"
+   ],
+   "n": 1934,
+   "wr": 0.9312,
+   "lb": 0.9191,
+   "nTest": 717,
+   "wrTest": 0.9149,
+   "lbTest": 0.8922,
+   "ubTest": 0.9332,
+   "verdict": "boost",
+   "delta": 0.2274
+  },
+  {
+   "k": "minute=4-6&vol=0.7-1",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 391,
+   "wr": 0.9284,
+   "lb": 0.8984,
+   "nTest": 153,
+   "wrTest": 0.8954,
+   "lbTest": 0.8369,
+   "ubTest": 0.9346,
+   "verdict": "boost",
+   "delta": 0.2079
+  },
+  {
+   "k": "interval=15m&minute=7+",
+   "feats": [
+    "interval",
+    "minute"
+   ],
+   "n": 1866,
+   "wr": 0.843,
+   "lb": 0.8258,
+   "nTest": 852,
+   "wrTest": 0.8369,
+   "lbTest": 0.8105,
+   "ubTest": 0.8601,
+   "verdict": "boost",
+   "delta": 0.1494
+  },
+  {
+   "k": "minute=4-6",
+   "feats": [
+    "minute"
+   ],
+   "n": 3237,
+   "wr": 0.8458,
+   "lb": 0.833,
+   "nTest": 1302,
+   "wrTest": 0.8126,
+   "lbTest": 0.7905,
+   "ubTest": 0.8329,
+   "verdict": "boost",
+   "delta": 0.1251
+  },
+  {
+   "k": "minute=7+",
+   "feats": [
+    "minute"
+   ],
+   "n": 2596,
+   "wr": 0.7978,
+   "lb": 0.7819,
+   "nTest": 1172,
+   "wrTest": 0.7927,
+   "lbTest": 0.7685,
+   "ubTest": 0.8149,
+   "verdict": "boost",
+   "delta": 0.1052
+  },
+  {
+   "k": "minute=7+&vol=1-1.5",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 1987,
+   "wr": 0.7921,
+   "lb": 0.7738,
+   "nTest": 963,
+   "wrTest": 0.7923,
+   "lbTest": 0.7656,
+   "ubTest": 0.8168,
+   "verdict": "boost",
+   "delta": 0.1048
+  },
+  {
+   "k": "minute=7+&vol=1.5-2.5",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 479,
+   "wr": 0.8225,
+   "lb": 0.7858,
+   "nTest": 173,
+   "wrTest": 0.7861,
+   "lbTest": 0.7192,
+   "ubTest": 0.8407,
+   "verdict": "boost",
+   "delta": 0.0986
+  },
+  {
+   "k": "minute=4-6&vol=1.5-2.5",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 345,
+   "wr": 0.7913,
+   "lb": 0.7453,
+   "nTest": 130,
+   "wrTest": 0.7538,
+   "lbTest": 0.6732,
+   "ubTest": 0.8199,
+   "verdict": "neutral",
+   "delta": 0.0663
+  },
+  {
+   "k": "minute=2-3&vol=<0.7",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 3066,
+   "wr": 0.7231,
+   "lb": 0.707,
+   "nTest": 1291,
+   "wrTest": 0.7537,
+   "lbTest": 0.7294,
+   "ubTest": 0.7764,
+   "verdict": "boost",
+   "delta": 0.0662
+  },
+  {
+   "k": "interval=5m&minute=2-3",
+   "feats": [
+    "interval",
+    "minute"
+   ],
+   "n": 5919,
+   "wr": 0.7427,
+   "lb": 0.7314,
+   "nTest": 2449,
+   "wrTest": 0.753,
+   "lbTest": 0.7355,
+   "ubTest": 0.7696,
+   "verdict": "boost",
+   "delta": 0.0655
+  },
+  {
+   "k": "minute=2-3&vol=0.7-1",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 1509,
+   "wr": 0.7522,
+   "lb": 0.7297,
+   "nTest": 651,
+   "wrTest": 0.7435,
+   "lbTest": 0.7086,
+   "ubTest": 0.7755,
+   "verdict": "boost",
+   "delta": 0.056
+  },
+  {
+   "k": "interval=5m&vol=>2.5",
+   "feats": [
+    "interval",
+    "vol"
+   ],
+   "n": 3183,
+   "wr": 0.7198,
+   "lb": 0.7039,
+   "nTest": 1257,
+   "wrTest": 0.7279,
+   "lbTest": 0.7027,
+   "ubTest": 0.7518,
+   "verdict": "boost",
+   "delta": 0.0404
+  },
+  {
+   "k": "minute=2-3",
+   "feats": [
+    "minute"
+   ],
+   "n": 7991,
+   "wr": 0.7237,
+   "lb": 0.7138,
+   "nTest": 3426,
+   "wrTest": 0.7189,
+   "lbTest": 0.7036,
+   "ubTest": 0.7337,
+   "verdict": "boost",
+   "delta": 0.0314
+  },
+  {
+   "k": "vol=<0.7&trend=bearish",
+   "feats": [
+    "vol",
+    "trend"
+   ],
+   "n": 4942,
+   "wr": 0.7056,
+   "lb": 0.6927,
+   "nTest": 2204,
+   "wrTest": 0.7119,
+   "lbTest": 0.6926,
+   "ubTest": 0.7304,
+   "verdict": "boost",
+   "delta": 0.0244
+  },
+  {
+   "k": "rsi=30-40&trend=bullish",
+   "feats": [
+    "rsi",
+    "trend"
+   ],
+   "n": 2352,
+   "wr": 0.6956,
+   "lb": 0.6767,
+   "nTest": 957,
+   "wrTest": 0.7116,
+   "lbTest": 0.6821,
+   "ubTest": 0.7394,
+   "verdict": "neutral",
+   "delta": 0.0241
+  },
+  {
+   "k": "vol=<0.7&trend=bullish",
+   "feats": [
+    "vol",
+    "trend"
+   ],
+   "n": 4864,
+   "wr": 0.7087,
+   "lb": 0.6957,
+   "nTest": 2133,
+   "wrTest": 0.7112,
+   "lbTest": 0.6916,
+   "ubTest": 0.73,
+   "verdict": "boost",
+   "delta": 0.0237
+  },
+  {
+   "k": "vol=<0.7",
+   "feats": [
+    "vol"
+   ],
+   "n": 9858,
+   "wr": 0.7076,
+   "lb": 0.6986,
+   "nTest": 4355,
+   "wrTest": 0.7111,
+   "lbTest": 0.6975,
+   "ubTest": 0.7244,
+   "verdict": "boost",
+   "delta": 0.0236
+  },
+  {
+   "k": "interval=5m&vol=<0.7",
+   "feats": [
+    "interval",
+    "vol"
+   ],
+   "n": 9858,
+   "wr": 0.7076,
+   "lb": 0.6986,
+   "nTest": 4355,
+   "wrTest": 0.7111,
+   "lbTest": 0.6975,
+   "ubTest": 0.7244,
+   "verdict": "boost",
+   "delta": 0.0236
+  },
+  {
+   "k": "symbol=ETH&hour=16-19",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3728,
+   "wr": 0.6883,
+   "lb": 0.6732,
+   "nTest": 1628,
+   "wrTest": 0.7107,
+   "lbTest": 0.6882,
+   "ubTest": 0.7322,
+   "verdict": "boost",
+   "delta": 0.0232
+  },
+  {
+   "k": "hour=12-15&interval=15m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 1542,
+   "wr": 0.6926,
+   "lb": 0.6691,
+   "nTest": 666,
+   "wrTest": 0.7102,
+   "lbTest": 0.6746,
+   "ubTest": 0.7434,
+   "verdict": "neutral",
+   "delta": 0.0227
+  },
+  {
+   "k": "hour=16-19&interval=5m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 5483,
+   "wr": 0.6956,
+   "lb": 0.6833,
+   "nTest": 2414,
+   "wrTest": 0.7084,
+   "lbTest": 0.6899,
+   "ubTest": 0.7262,
+   "verdict": "boost",
+   "delta": 0.0209
+  },
+  {
+   "k": "rsi=60-70&trend=bearish",
+   "feats": [
+    "rsi",
+    "trend"
+   ],
+   "n": 2624,
+   "wr": 0.6917,
+   "lb": 0.6738,
+   "nTest": 1039,
+   "wrTest": 0.7064,
+   "lbTest": 0.678,
+   "ubTest": 0.7333,
+   "verdict": "neutral",
+   "delta": 0.0189
+  },
+  {
+   "k": "hour=16-19&interval=15m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 1531,
+   "wr": 0.678,
+   "lb": 0.6542,
+   "nTest": 646,
+   "wrTest": 0.7043,
+   "lbTest": 0.668,
+   "ubTest": 0.7382,
+   "verdict": "neutral",
+   "delta": 0.0168
+  },
+  {
+   "k": "interval=15m&minute=4-6",
+   "feats": [
+    "interval",
+    "minute"
+   ],
+   "n": 1088,
+   "wr": 0.7325,
+   "lb": 0.7055,
+   "nTest": 479,
+   "wrTest": 0.7015,
+   "lbTest": 0.659,
+   "ubTest": 0.7407,
+   "verdict": "neutral",
+   "delta": 0.014
+  },
+  {
+   "k": "symbol=ETH&interval=5m",
+   "feats": [
+    "symbol",
+    "interval"
+   ],
+   "n": 16378,
+   "wr": 0.695,
+   "lb": 0.6879,
+   "nTest": 6949,
+   "wrTest": 0.7011,
+   "lbTest": 0.6902,
+   "ubTest": 0.7118,
+   "verdict": "boost",
+   "delta": 0.0136
+  },
+  {
+   "k": "minute=2-3&vol=1.5-2.5",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 880,
+   "wr": 0.7114,
+   "lb": 0.6806,
+   "nTest": 388,
+   "wrTest": 0.701,
+   "lbTest": 0.6537,
+   "ubTest": 0.7444,
+   "verdict": "neutral",
+   "delta": 0.0135
+  },
+  {
+   "k": "vol=>2.5&trend=bullish",
+   "feats": [
+    "vol",
+    "trend"
+   ],
+   "n": 2668,
+   "wr": 0.6908,
+   "lb": 0.673,
+   "nTest": 969,
+   "wrTest": 0.7007,
+   "lbTest": 0.6711,
+   "ubTest": 0.7287,
+   "verdict": "neutral",
+   "delta": 0.0132
+  },
+  {
+   "k": "hour=16-19",
+   "feats": [
+    "hour"
+   ],
+   "n": 7471,
+   "wr": 0.6871,
+   "lb": 0.6764,
+   "nTest": 3258,
+   "wrTest": 0.6998,
+   "lbTest": 0.6838,
+   "ubTest": 0.7153,
+   "verdict": "neutral",
+   "delta": 0.0123
+  },
+  {
+   "k": "interval=5m&vol=1.5-2.5",
+   "feats": [
+    "interval",
+    "vol"
+   ],
+   "n": 4664,
+   "wr": 0.7015,
+   "lb": 0.6882,
+   "nTest": 1845,
+   "wrTest": 0.6997,
+   "lbTest": 0.6784,
+   "ubTest": 0.7202,
+   "verdict": "neutral",
+   "delta": 0.0122
+  },
+  {
+   "k": "interval=5m&rsi=<30",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 3255,
+   "wr": 0.6928,
+   "lb": 0.6767,
+   "nTest": 1348,
+   "wrTest": 0.6996,
+   "lbTest": 0.6745,
+   "ubTest": 0.7234,
+   "verdict": "neutral",
+   "delta": 0.0121
+  },
+  {
+   "k": "interval=5m&rsi=30-40",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 5170,
+   "wr": 0.6936,
+   "lb": 0.6809,
+   "nTest": 2147,
+   "wrTest": 0.6996,
+   "lbTest": 0.6798,
+   "ubTest": 0.7186,
+   "verdict": "neutral",
+   "delta": 0.0121
+  },
+  {
+   "k": "interval=15m&trend=bullish",
+   "feats": [
+    "interval",
+    "trend"
+   ],
+   "n": 4615,
+   "wr": 0.6956,
+   "lb": 0.6821,
+   "nTest": 1947,
+   "wrTest": 0.6985,
+   "lbTest": 0.6778,
+   "ubTest": 0.7185,
+   "verdict": "neutral",
+   "delta": 0.011
+  },
+  {
+   "k": "interval=15m&rsi=60-70",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 1556,
+   "wr": 0.6877,
+   "lb": 0.6642,
+   "nTest": 607,
+   "wrTest": 0.6985,
+   "lbTest": 0.6609,
+   "ubTest": 0.7337,
+   "verdict": "neutral",
+   "delta": 0.011
+  },
+  {
+   "k": "hist=<10&trend=bullish",
+   "feats": [
+    "hist",
+    "trend"
+   ],
+   "n": 10680,
+   "wr": 0.6901,
+   "lb": 0.6812,
+   "nTest": 4479,
+   "wrTest": 0.6984,
+   "lbTest": 0.6848,
+   "ubTest": 0.7116,
+   "verdict": "neutral",
+   "delta": 0.0109
+  },
+  {
+   "k": "interval=5m&trend=bearish",
+   "feats": [
+    "interval",
+    "trend"
+   ],
+   "n": 16110,
+   "wr": 0.6936,
+   "lb": 0.6864,
+   "nTest": 6909,
+   "wrTest": 0.6982,
+   "lbTest": 0.6873,
+   "ubTest": 0.7089,
+   "verdict": "neutral",
+   "delta": 0.0107
+  },
+  {
+   "k": "hour=4-7&interval=5m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 5356,
+   "wr": 0.6897,
+   "lb": 0.6772,
+   "nTest": 2262,
+   "wrTest": 0.6981,
+   "lbTest": 0.6788,
+   "ubTest": 0.7166,
+   "verdict": "neutral",
+   "delta": 0.0106
+  },
+  {
+   "k": "hour=8-11&interval=5m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 5375,
+   "wr": 0.7085,
+   "lb": 0.6962,
+   "nTest": 2262,
+   "wrTest": 0.6981,
+   "lbTest": 0.6788,
+   "ubTest": 0.7166,
+   "verdict": "neutral",
+   "delta": 0.0106
+  },
+  {
+   "k": "vol=1.5-2.5&trend=bullish",
+   "feats": [
+    "vol",
+    "trend"
+   ],
+   "n": 3990,
+   "wr": 0.6812,
+   "lb": 0.6666,
+   "nTest": 1608,
+   "wrTest": 0.6978,
+   "lbTest": 0.6749,
+   "ubTest": 0.7197,
+   "verdict": "neutral",
+   "delta": 0.0103
+  },
+  {
+   "k": "interval=5m&rsi=40-60",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 14554,
+   "wr": 0.6976,
+   "lb": 0.6901,
+   "nTest": 6624,
+   "wrTest": 0.6976,
+   "lbTest": 0.6864,
+   "ubTest": 0.7086,
+   "verdict": "neutral",
+   "delta": 0.0101
+  },
+  {
+   "k": "minute=4-6&vol=1-1.5",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 1153,
+   "wr": 0.7615,
+   "lb": 0.736,
+   "nTest": 506,
+   "wrTest": 0.6976,
+   "lbTest": 0.6562,
+   "ubTest": 0.736,
+   "verdict": "neutral",
+   "delta": 0.0101
+  },
+  {
+   "k": "interval=5m",
+   "feats": [
+    "interval"
+   ],
+   "n": 32309,
+   "wr": 0.6965,
+   "lb": 0.6915,
+   "nTest": 13889,
+   "wrTest": 0.6966,
+   "lbTest": 0.6889,
+   "ubTest": 0.7042,
+   "verdict": "boost",
+   "delta": 0.0091
+  },
+  {
+   "k": "interval=5m&trend=bullish",
+   "feats": [
+    "interval",
+    "trend"
+   ],
+   "n": 15979,
+   "wr": 0.6989,
+   "lb": 0.6918,
+   "nTest": 6915,
+   "wrTest": 0.6957,
+   "lbTest": 0.6848,
+   "ubTest": 0.7065,
+   "verdict": "neutral",
+   "delta": 0.0082
+  },
+  {
+   "k": "hist=>20&trend=bullish",
+   "feats": [
+    "hist",
+    "trend"
+   ],
+   "n": 3907,
+   "wr": 0.6975,
+   "lb": 0.6829,
+   "nTest": 1649,
+   "wrTest": 0.6956,
+   "lbTest": 0.6729,
+   "ubTest": 0.7173,
+   "verdict": "neutral",
+   "delta": 0.0081
+  },
+  {
+   "k": "hour=20-23&interval=15m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 1533,
+   "wr": 0.7032,
+   "lb": 0.6798,
+   "nTest": 660,
+   "wrTest": 0.6955,
+   "lbTest": 0.6593,
+   "ubTest": 0.7294,
+   "verdict": "neutral",
+   "delta": 0.008
+  },
+  {
+   "k": "interval=15m&vol=1-1.5",
+   "feats": [
+    "interval",
+    "vol"
+   ],
+   "n": 5145,
+   "wr": 0.7073,
+   "lb": 0.6947,
+   "nTest": 2331,
+   "wrTest": 0.6954,
+   "lbTest": 0.6764,
+   "ubTest": 0.7138,
+   "verdict": "neutral",
+   "delta": 0.0079
+  },
+  {
+   "k": "hour=0-3&interval=5m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 5314,
+   "wr": 0.701,
+   "lb": 0.6885,
+   "nTest": 2289,
+   "wrTest": 0.6942,
+   "lbTest": 0.675,
+   "ubTest": 0.7127,
+   "verdict": "neutral",
+   "delta": 0.0067
+  },
+  {
+   "k": "mode=TREND",
+   "feats": [
+    "mode"
+   ],
+   "n": 41520,
+   "wr": 0.6953,
+   "lb": 0.6909,
+   "nTest": 17785,
+   "wrTest": 0.694,
+   "lbTest": 0.6871,
+   "ubTest": 0.7007,
+   "verdict": "neutral",
+   "delta": 0.0065
+  },
+  {
+   "k": "interval=5m&rsi=60-70",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 5449,
+   "wr": 0.697,
+   "lb": 0.6847,
+   "nTest": 2147,
+   "wrTest": 0.6935,
+   "lbTest": 0.6737,
+   "ubTest": 0.7127,
+   "verdict": "neutral",
+   "delta": 0.006
+  },
+  {
+   "k": "symbol=ETH&hour=8-11",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3697,
+   "wr": 0.6938,
+   "lb": 0.6788,
+   "nTest": 1543,
+   "wrTest": 0.6935,
+   "lbTest": 0.67,
+   "ubTest": 0.716,
+   "verdict": "neutral",
+   "delta": 0.006
+  },
+  {
+   "k": "rsi=40-60&trend=bullish",
+   "feats": [
+    "rsi",
+    "trend"
+   ],
+   "n": 9887,
+   "wr": 0.697,
+   "lb": 0.6878,
+   "nTest": 4487,
+   "wrTest": 0.6933,
+   "lbTest": 0.6797,
+   "ubTest": 0.7067,
+   "verdict": "neutral",
+   "delta": 0.0058
+  },
+  {
+   "k": "minute=1&vol=>2.5",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 4546,
+   "wr": 0.678,
+   "lb": 0.6642,
+   "nTest": 1774,
+   "wrTest": 0.6933,
+   "lbTest": 0.6715,
+   "ubTest": 0.7144,
+   "verdict": "neutral",
+   "delta": 0.0058
+  },
+  {
+   "k": "hour=20-23&interval=5m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 5321,
+   "wr": 0.6999,
+   "lb": 0.6874,
+   "nTest": 2283,
+   "wrTest": 0.6929,
+   "lbTest": 0.6737,
+   "ubTest": 0.7115,
+   "verdict": "neutral",
+   "delta": 0.0054
+  },
+  {
+   "k": "hist=<10",
+   "feats": [
+    "hist"
+   ],
+   "n": 21501,
+   "wr": 0.6896,
+   "lb": 0.6834,
+   "nTest": 9051,
+   "wrTest": 0.6924,
+   "lbTest": 0.6828,
+   "ubTest": 0.7018,
+   "verdict": "neutral",
+   "delta": 0.0049
+  },
+  {
+   "k": "symbol=ETH&hour=12-15",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3728,
+   "wr": 0.6789,
+   "lb": 0.6638,
+   "nTest": 1612,
+   "wrTest": 0.6923,
+   "lbTest": 0.6693,
+   "ubTest": 0.7144,
+   "verdict": "neutral",
+   "delta": 0.0048
+  },
+  {
+   "k": "symbol=BTC&interval=5m",
+   "feats": [
+    "symbol",
+    "interval"
+   ],
+   "n": 15931,
+   "wr": 0.6981,
+   "lb": 0.6909,
+   "nTest": 6940,
+   "wrTest": 0.6921,
+   "lbTest": 0.6811,
+   "ubTest": 0.7028,
+   "verdict": "neutral",
+   "delta": 0.0046
+  },
+  {
+   "k": "vol=>2.5",
+   "feats": [
+    "vol"
+   ],
+   "n": 5210,
+   "wr": 0.6881,
+   "lb": 0.6754,
+   "nTest": 1993,
+   "wrTest": 0.6919,
+   "lbTest": 0.6713,
+   "ubTest": 0.7118,
+   "verdict": "neutral",
+   "delta": 0.0044
+  },
+  {
+   "k": "rsi=30-40",
+   "feats": [
+    "rsi"
+   ],
+   "n": 7080,
+   "wr": 0.6838,
+   "lb": 0.6728,
+   "nTest": 2936,
+   "wrTest": 0.6911,
+   "lbTest": 0.6741,
+   "ubTest": 0.7075,
+   "verdict": "neutral",
+   "delta": 0.0036
+  },
+  {
+   "k": "symbol=ETH",
+   "feats": [
+    "symbol"
+   ],
+   "n": 22393,
+   "wr": 0.6871,
+   "lb": 0.681,
+   "nTest": 9507,
+   "wrTest": 0.691,
+   "lbTest": 0.6816,
+   "ubTest": 0.7002,
+   "verdict": "neutral",
+   "delta": 0.0035
+  },
+  {
+   "k": "rsi=60-70",
+   "feats": [
+    "rsi"
+   ],
+   "n": 7467,
+   "wr": 0.6898,
+   "lb": 0.6792,
+   "nTest": 2951,
+   "wrTest": 0.6906,
+   "lbTest": 0.6737,
+   "ubTest": 0.707,
+   "verdict": "neutral",
+   "delta": 0.0031
+  },
+  {
+   "k": "trend=bullish",
+   "feats": [
+    "trend"
+   ],
+   "n": 22044,
+   "wr": 0.6924,
+   "lb": 0.6863,
+   "nTest": 9473,
+   "wrTest": 0.6903,
+   "lbTest": 0.6809,
+   "ubTest": 0.6995,
+   "verdict": "neutral",
+   "delta": 0.0028
+  },
+  {
+   "k": "interval=5m&rsi=>70",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 3881,
+   "wr": 0.6988,
+   "lb": 0.6842,
+   "nTest": 1623,
+   "wrTest": 0.6901,
+   "lbTest": 0.6672,
+   "ubTest": 0.7121,
+   "verdict": "neutral",
+   "delta": 0.0026
+  },
+  {
+   "k": "symbol=BTC&hour=20-23",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3628,
+   "wr": 0.6965,
+   "lb": 0.6814,
+   "nTest": 1568,
+   "wrTest": 0.6901,
+   "lbTest": 0.6667,
+   "ubTest": 0.7125,
+   "verdict": "neutral",
+   "delta": 0.0026
+  },
+  {
+   "k": "interval=15m&rsi=40-60",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 4177,
+   "wr": 0.696,
+   "lb": 0.6818,
+   "nTest": 1863,
+   "wrTest": 0.6897,
+   "lbTest": 0.6684,
+   "ubTest": 0.7103,
+   "verdict": "neutral",
+   "delta": 0.0022
+  },
+  {
+   "k": "hour=20-23",
+   "feats": [
+    "hour"
+   ],
+   "n": 7322,
+   "wr": 0.692,
+   "lb": 0.6814,
+   "nTest": 3150,
+   "wrTest": 0.6895,
+   "lbTest": 0.6731,
+   "ubTest": 0.7054,
+   "verdict": "neutral",
+   "delta": 0.002
+  },
+  {
+   "k": "rsi=40-60",
+   "feats": [
+    "rsi"
+   ],
+   "n": 20002,
+   "wr": 0.6921,
+   "lb": 0.6856,
+   "nTest": 9043,
+   "wrTest": 0.6892,
+   "lbTest": 0.6795,
+   "ubTest": 0.6986,
+   "verdict": "neutral",
+   "delta": 0.0017
+  },
+  {
+   "k": "hour=12-15",
+   "feats": [
+    "hour"
+   ],
+   "n": 7469,
+   "wr": 0.6808,
+   "lb": 0.6702,
+   "nTest": 3246,
+   "wrTest": 0.6892,
+   "lbTest": 0.673,
+   "ubTest": 0.7048,
+   "verdict": "neutral",
+   "delta": 0.0017
+  },
+  {
+   "k": "symbol=BTC&hour=16-19",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3743,
+   "wr": 0.6858,
+   "lb": 0.6708,
+   "nTest": 1630,
+   "wrTest": 0.689,
+   "lbTest": 0.6661,
+   "ubTest": 0.711,
+   "verdict": "neutral",
+   "delta": 0.0015
+  },
+  {
+   "k": "symbol=ETH&hour=20-23",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3694,
+   "wr": 0.6876,
+   "lb": 0.6725,
+   "nTest": 1582,
+   "wrTest": 0.689,
+   "lbTest": 0.6658,
+   "ubTest": 0.7113,
+   "verdict": "neutral",
+   "delta": 0.0015
+  },
+  {
+   "k": "hist=>20",
+   "feats": [
+    "hist"
+   ],
+   "n": 8014,
+   "wr": 0.6888,
+   "lb": 0.6786,
+   "nTest": 3257,
+   "wrTest": 0.6877,
+   "lbTest": 0.6716,
+   "ubTest": 0.7034,
+   "verdict": "neutral",
+   "delta": 0.0002
+  },
+  {
+   "k": "hour=12-15&interval=5m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 5460,
+   "wr": 0.6848,
+   "lb": 0.6723,
+   "nTest": 2379,
+   "wrTest": 0.6877,
+   "lbTest": 0.6688,
+   "ubTest": 0.706,
+   "verdict": "neutral",
+   "delta": 0.0002
+  },
+  {
+   "k": "hist=<10&trend=bearish",
+   "feats": [
+    "hist",
+    "trend"
+   ],
+   "n": 10671,
+   "wr": 0.6891,
+   "lb": 0.6802,
+   "nTest": 4543,
+   "wrTest": 0.6874,
+   "lbTest": 0.6738,
+   "ubTest": 0.7007,
+   "verdict": "neutral",
+   "delta": -0.0001
+  },
+  {
+   "k": "interval=15m&rsi=30-40",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 1453,
+   "wr": 0.6896,
+   "lb": 0.6653,
+   "nTest": 601,
+   "wrTest": 0.6872,
+   "lbTest": 0.649,
+   "ubTest": 0.723,
+   "verdict": "neutral",
+   "delta": -0.0003
+  },
+  {
+   "k": "symbol=BTC&hour=0-3",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3563,
+   "wr": 0.698,
+   "lb": 0.6827,
+   "nTest": 1544,
+   "wrTest": 0.6865,
+   "lbTest": 0.6629,
+   "ubTest": 0.7092,
+   "verdict": "neutral",
+   "delta": -0.001
+  },
+  {
+   "k": "symbol=BTC&hour=12-15",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3741,
+   "wr": 0.6827,
+   "lb": 0.6676,
+   "nTest": 1634,
+   "wrTest": 0.686,
+   "lbTest": 0.6631,
+   "ubTest": 0.7081,
+   "verdict": "neutral",
+   "delta": -0.0015
+  },
+  {
+   "k": "vol=0.7-1&trend=bearish",
+   "feats": [
+    "vol",
+    "trend"
+   ],
+   "n": 3924,
+   "wr": 0.6751,
+   "lb": 0.6603,
+   "nTest": 1828,
+   "wrTest": 0.6854,
+   "lbTest": 0.6638,
+   "ubTest": 0.7063,
+   "verdict": "neutral",
+   "delta": -0.0021
+  },
+  {
+   "k": "symbol=BTC&interval=15m",
+   "feats": [
+    "symbol",
+    "interval"
+   ],
+   "n": 4594,
+   "wr": 0.6961,
+   "lb": 0.6827,
+   "nTest": 1941,
+   "wrTest": 0.6852,
+   "lbTest": 0.6642,
+   "ubTest": 0.7055,
+   "verdict": "neutral",
+   "delta": -0.0023
+  },
+  {
+   "k": "trend=bearish",
+   "feats": [
+    "trend"
+   ],
+   "n": 21994,
+   "wr": 0.6853,
+   "lb": 0.6792,
+   "nTest": 9448,
+   "wrTest": 0.6851,
+   "lbTest": 0.6757,
+   "ubTest": 0.6944,
+   "verdict": "neutral",
+   "delta": -0.0024
+  },
+  {
+   "k": "rsi=40-60&trend=bearish",
+   "feats": [
+    "rsi",
+    "trend"
+   ],
+   "n": 9985,
+   "wr": 0.6875,
+   "lb": 0.6784,
+   "nTest": 4522,
+   "wrTest": 0.6851,
+   "lbTest": 0.6714,
+   "ubTest": 0.6985,
+   "verdict": "neutral",
+   "delta": -0.0024
+  },
+  {
+   "k": "interval=15m",
+   "feats": [
+    "interval"
+   ],
+   "n": 9211,
+   "wr": 0.6911,
+   "lb": 0.6816,
+   "nTest": 3896,
+   "wrTest": 0.6845,
+   "lbTest": 0.6698,
+   "ubTest": 0.699,
+   "verdict": "neutral",
+   "delta": -0.003
+  },
+  {
+   "k": "hist=10-20&trend=bearish",
+   "feats": [
+    "hist",
+    "trend"
+   ],
+   "n": 7249,
+   "wr": 0.6827,
+   "lb": 0.6719,
+   "nTest": 3310,
+   "wrTest": 0.6843,
+   "lbTest": 0.6682,
+   "ubTest": 0.6999,
+   "verdict": "neutral",
+   "delta": -0.0032
+  },
+  {
+   "k": "symbol=ETH&hour=4-7",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3784,
+   "wr": 0.6829,
+   "lb": 0.6679,
+   "nTest": 1551,
+   "wrTest": 0.6841,
+   "lbTest": 0.6605,
+   "ubTest": 0.7067,
+   "verdict": "neutral",
+   "delta": -0.0034
+  },
+  {
+   "k": "symbol=BTC",
+   "feats": [
+    "symbol"
+   ],
+   "n": 21910,
+   "wr": 0.691,
+   "lb": 0.6849,
+   "nTest": 9481,
+   "wrTest": 0.684,
+   "lbTest": 0.6746,
+   "ubTest": 0.6933,
+   "verdict": "neutral",
+   "delta": -0.0035
+  },
+  {
+   "k": "rsi=<30&trend=bullish",
+   "feats": [
+    "rsi",
+    "trend"
+   ],
+   "n": 897,
+   "wr": 0.6923,
+   "lb": 0.6613,
+   "nTest": 405,
+   "wrTest": 0.684,
+   "lbTest": 0.6371,
+   "ubTest": 0.7273,
+   "verdict": "neutral",
+   "delta": -0.0035
+  },
+  {
+   "k": "symbol=ETH&interval=15m",
+   "feats": [
+    "symbol",
+    "interval"
+   ],
+   "n": 4617,
+   "wr": 0.6862,
+   "lb": 0.6726,
+   "nTest": 1955,
+   "wrTest": 0.6839,
+   "lbTest": 0.6629,
+   "ubTest": 0.7041,
+   "verdict": "neutral",
+   "delta": -0.0036
+  },
+  {
+   "k": "hour=8-11",
+   "feats": [
+    "hour"
+   ],
+   "n": 7322,
+   "wr": 0.6965,
+   "lb": 0.6859,
+   "nTest": 3079,
+   "wrTest": 0.6837,
+   "lbTest": 0.667,
+   "ubTest": 0.6999,
+   "verdict": "neutral",
+   "delta": -0.0038
+  },
+  {
+   "k": "vol=>2.5&trend=bearish",
+   "feats": [
+    "vol",
+    "trend"
+   ],
+   "n": 2509,
+   "wr": 0.6835,
+   "lb": 0.6651,
+   "nTest": 1017,
+   "wrTest": 0.6834,
+   "lbTest": 0.6541,
+   "ubTest": 0.7112,
+   "verdict": "neutral",
+   "delta": -0.0041
+  },
+  {
+   "k": "rsi=30-40&trend=bearish",
+   "feats": [
+    "rsi",
+    "trend"
+   ],
+   "n": 4689,
+   "wr": 0.6773,
+   "lb": 0.6638,
+   "nTest": 1967,
+   "wrTest": 0.6828,
+   "lbTest": 0.6619,
+   "ubTest": 0.703,
+   "verdict": "neutral",
+   "delta": -0.0047
+  },
+  {
+   "k": "rsi=60-70&trend=bullish",
+   "feats": [
+    "rsi",
+    "trend"
+   ],
+   "n": 4810,
+   "wr": 0.6881,
+   "lb": 0.6749,
+   "nTest": 1899,
+   "wrTest": 0.6825,
+   "lbTest": 0.6612,
+   "ubTest": 0.703,
+   "verdict": "neutral",
+   "delta": -0.005
+  },
+  {
+   "k": "interval=5m&vol=1-1.5",
+   "feats": [
+    "interval",
+    "vol"
+   ],
+   "n": 6663,
+   "wr": 0.6802,
+   "lb": 0.6689,
+   "nTest": 2812,
+   "wrTest": 0.6824,
+   "lbTest": 0.665,
+   "ubTest": 0.6994,
+   "verdict": "neutral",
+   "delta": -0.0051
+  },
+  {
+   "k": "hour=4-7",
+   "feats": [
+    "hour"
+   ],
+   "n": 7394,
+   "wr": 0.6835,
+   "lb": 0.6728,
+   "nTest": 3120,
+   "wrTest": 0.6811,
+   "lbTest": 0.6645,
+   "ubTest": 0.6972,
+   "verdict": "neutral",
+   "delta": -0.0064
+  },
+  {
+   "k": "hour=0-3",
+   "feats": [
+    "hour"
+   ],
+   "n": 7325,
+   "wr": 0.6946,
+   "lb": 0.684,
+   "nTest": 3135,
+   "wrTest": 0.681,
+   "lbTest": 0.6645,
+   "ubTest": 0.6971,
+   "verdict": "neutral",
+   "delta": -0.0065
+  },
+  {
+   "k": "hist=10-20",
+   "feats": [
+    "hist"
+   ],
+   "n": 14788,
+   "wr": 0.6884,
+   "lb": 0.6809,
+   "nTest": 6680,
+   "wrTest": 0.6807,
+   "lbTest": 0.6694,
+   "ubTest": 0.6918,
+   "verdict": "neutral",
+   "delta": -0.0068
+  },
+  {
+   "k": "rsi=>70&trend=bullish",
+   "feats": [
+    "rsi",
+    "trend"
+   ],
+   "n": 4098,
+   "wr": 0.6847,
+   "lb": 0.6703,
+   "nTest": 1725,
+   "wrTest": 0.6806,
+   "lbTest": 0.6582,
+   "ubTest": 0.7022,
+   "verdict": "neutral",
+   "delta": -0.0069
+  },
+  {
+   "k": "vol=1.5-2.5",
+   "feats": [
+    "vol"
+   ],
+   "n": 7991,
+   "wr": 0.6833,
+   "lb": 0.673,
+   "nTest": 3161,
+   "wrTest": 0.6805,
+   "lbTest": 0.664,
+   "ubTest": 0.6965,
+   "verdict": "neutral",
+   "delta": -0.007
+  },
+  {
+   "k": "hist=>20&trend=bearish",
+   "feats": [
+    "hist",
+    "trend"
+   ],
+   "n": 4074,
+   "wr": 0.6802,
+   "lb": 0.6657,
+   "nTest": 1595,
+   "wrTest": 0.6803,
+   "lbTest": 0.657,
+   "ubTest": 0.7027,
+   "verdict": "neutral",
+   "delta": -0.0072
+  },
+  {
+   "k": "rsi=<30",
+   "feats": [
+    "rsi"
+   ],
+   "n": 4446,
+   "wr": 0.6808,
+   "lb": 0.667,
+   "nTest": 1831,
+   "wrTest": 0.6789,
+   "lbTest": 0.6571,
+   "ubTest": 0.6999,
+   "verdict": "neutral",
+   "delta": -0.0086
+  },
+  {
+   "k": "rsi=>70",
+   "feats": [
+    "rsi"
+   ],
+   "n": 5308,
+   "wr": 0.6905,
+   "lb": 0.6779,
+   "nTest": 2227,
+   "wrTest": 0.6789,
+   "lbTest": 0.6593,
+   "ubTest": 0.698,
+   "verdict": "neutral",
+   "delta": -0.0086
+  },
+  {
+   "k": "vol=1-1.5&trend=bullish",
+   "feats": [
+    "vol",
+    "trend"
+   ],
+   "n": 6566,
+   "wr": 0.6878,
+   "lb": 0.6765,
+   "nTest": 2987,
+   "wrTest": 0.6789,
+   "lbTest": 0.662,
+   "ubTest": 0.6954,
+   "verdict": "neutral",
+   "delta": -0.0086
+  },
+  {
+   "k": "vol=1-1.5",
+   "feats": [
+    "vol"
+   ],
+   "n": 13303,
+   "wr": 0.682,
+   "lb": 0.6741,
+   "nTest": 5859,
+   "wrTest": 0.6783,
+   "lbTest": 0.6662,
+   "ubTest": 0.6901,
+   "verdict": "neutral",
+   "delta": -0.0092
+  },
+  {
+   "k": "symbol=BTC&hour=4-7",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3610,
+   "wr": 0.6842,
+   "lb": 0.6689,
+   "nTest": 1569,
+   "wrTest": 0.6781,
+   "lbTest": 0.6546,
+   "ubTest": 0.7008,
+   "verdict": "neutral",
+   "delta": -0.0094
+  },
+  {
+   "k": "vol=0.7-1",
+   "feats": [
+    "vol"
+   ],
+   "n": 7941,
+   "wr": 0.6842,
+   "lb": 0.6739,
+   "nTest": 3620,
+   "wrTest": 0.6776,
+   "lbTest": 0.6622,
+   "ubTest": 0.6927,
+   "verdict": "neutral",
+   "delta": -0.0099
+  },
+  {
+   "k": "interval=5m&vol=0.7-1",
+   "feats": [
+    "interval",
+    "vol"
+   ],
+   "n": 7941,
+   "wr": 0.6842,
+   "lb": 0.6739,
+   "nTest": 3620,
+   "wrTest": 0.6776,
+   "lbTest": 0.6622,
+   "ubTest": 0.6927,
+   "verdict": "neutral",
+   "delta": -0.0099
+  },
+  {
+   "k": "rsi=<30&trend=bearish",
+   "feats": [
+    "rsi",
+    "trend"
+   ],
+   "n": 3516,
+   "wr": 0.6783,
+   "lb": 0.6627,
+   "nTest": 1422,
+   "wrTest": 0.6772,
+   "lbTest": 0.6525,
+   "ubTest": 0.701,
+   "verdict": "neutral",
+   "delta": -0.0103
+  },
+  {
+   "k": "vol=1-1.5&trend=bearish",
+   "feats": [
+    "vol",
+    "trend"
+   ],
+   "n": 6667,
+   "wr": 0.6766,
+   "lb": 0.6653,
+   "nTest": 2859,
+   "wrTest": 0.6772,
+   "lbTest": 0.6598,
+   "ubTest": 0.6941,
+   "verdict": "neutral",
+   "delta": -0.0103
+  },
+  {
+   "k": "hist=10-20&trend=bullish",
+   "feats": [
+    "hist",
+    "trend"
+   ],
+   "n": 7457,
+   "wr": 0.6932,
+   "lb": 0.6826,
+   "nTest": 3345,
+   "wrTest": 0.6768,
+   "lbTest": 0.6608,
+   "ubTest": 0.6925,
+   "verdict": "neutral",
+   "delta": -0.0107
+  },
+  {
+   "k": "minute=2-3&vol=1-1.5",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 2161,
+   "wr": 0.7085,
+   "lb": 0.689,
+   "nTest": 940,
+   "wrTest": 0.6766,
+   "lbTest": 0.646,
+   "ubTest": 0.7057,
+   "verdict": "neutral",
+   "delta": -0.0109
+  },
+  {
+   "k": "symbol=ETH&hour=0-3",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3762,
+   "wr": 0.6914,
+   "lb": 0.6764,
+   "nTest": 1591,
+   "wrTest": 0.6757,
+   "lbTest": 0.6523,
+   "ubTest": 0.6982,
+   "verdict": "neutral",
+   "delta": -0.0118
+  },
+  {
+   "k": "interval=15m&vol=1.5-2.5",
+   "feats": [
+    "interval",
+    "vol"
+   ],
+   "n": 2525,
+   "wr": 0.6784,
+   "lb": 0.6599,
+   "nTest": 1013,
+   "wrTest": 0.6752,
+   "lbTest": 0.6458,
+   "ubTest": 0.7034,
+   "verdict": "neutral",
+   "delta": -0.0123
+  },
+  {
+   "k": "interval=1h&minute=7+",
+   "feats": [
+    "interval",
+    "minute"
+   ],
+   "n": 730,
+   "wr": 0.6822,
+   "lb": 0.6475,
+   "nTest": 320,
+   "wrTest": 0.675,
+   "lbTest": 0.6219,
+   "ubTest": 0.724,
+   "verdict": "neutral",
+   "delta": -0.0125
+  },
+  {
+   "k": "symbol=BTC&hour=8-11",
+   "feats": [
+    "symbol",
+    "hour"
+   ],
+   "n": 3625,
+   "wr": 0.6993,
+   "lb": 0.6842,
+   "nTest": 1536,
+   "wrTest": 0.6738,
+   "lbTest": 0.65,
+   "ubTest": 0.6968,
+   "verdict": "neutral",
+   "delta": -0.0137
+  },
+  {
+   "k": "hour=8-11&interval=15m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 1499,
+   "wr": 0.6891,
+   "lb": 0.6652,
+   "nTest": 624,
+   "wrTest": 0.6731,
+   "lbTest": 0.6353,
+   "ubTest": 0.7087,
+   "verdict": "neutral",
+   "delta": -0.0144
+  },
+  {
+   "k": "rsi=>70&trend=bearish",
+   "feats": [
+    "rsi",
+    "trend"
+   ],
+   "n": 1180,
+   "wr": 0.7051,
+   "lb": 0.6784,
+   "nTest": 498,
+   "wrTest": 0.6727,
+   "lbTest": 0.6303,
+   "ubTest": 0.7124,
+   "verdict": "neutral",
+   "delta": -0.0148
+  },
+  {
+   "k": "vol=0.7-1&trend=bullish",
+   "feats": [
+    "vol",
+    "trend"
+   ],
+   "n": 3956,
+   "wr": 0.6926,
+   "lb": 0.6781,
+   "nTest": 1776,
+   "wrTest": 0.6717,
+   "lbTest": 0.6495,
+   "ubTest": 0.6932,
+   "verdict": "neutral",
+   "delta": -0.0158
+  },
+  {
+   "k": "interval=15m&trend=bearish",
+   "feats": [
+    "interval",
+    "trend"
+   ],
+   "n": 4559,
+   "wr": 0.687,
+   "lb": 0.6734,
+   "nTest": 1947,
+   "wrTest": 0.6703,
+   "lbTest": 0.6491,
+   "ubTest": 0.6908,
+   "verdict": "neutral",
+   "delta": -0.0172
+  },
+  {
+   "k": "interval=15m&rsi=>70",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 1108,
+   "wr": 0.6922,
+   "lb": 0.6644,
+   "nTest": 460,
+   "wrTest": 0.6696,
+   "lbTest": 0.6253,
+   "ubTest": 0.711,
+   "verdict": "neutral",
+   "delta": -0.0179
+  },
+  {
+   "k": "interval=5m&minute=1",
+   "feats": [
+    "interval",
+    "minute"
+   ],
+   "n": 24456,
+   "wr": 0.6668,
+   "lb": 0.6609,
+   "nTest": 10723,
+   "wrTest": 0.6691,
+   "lbTest": 0.6602,
+   "ubTest": 0.678,
+   "verdict": "suppress",
+   "delta": -0.0184
+  },
+  {
+   "k": "minute=1&vol=1.5-2.5",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 6287,
+   "wr": 0.6628,
+   "lb": 0.651,
+   "nTest": 2470,
+   "wrTest": 0.666,
+   "lbTest": 0.6471,
+   "ubTest": 0.6843,
+   "verdict": "suppress",
+   "delta": -0.0215
+  },
+  {
+   "k": "hour=0-3&interval=15m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 1543,
+   "wr": 0.696,
+   "lb": 0.6726,
+   "nTest": 639,
+   "wrTest": 0.6651,
+   "lbTest": 0.6276,
+   "ubTest": 0.7006,
+   "verdict": "neutral",
+   "delta": -0.0224
+  },
+  {
+   "k": "vol=1.5-2.5&trend=bearish",
+   "feats": [
+    "vol",
+    "trend"
+   ],
+   "n": 3952,
+   "wr": 0.686,
+   "lb": 0.6713,
+   "nTest": 1540,
+   "wrTest": 0.6623,
+   "lbTest": 0.6383,
+   "ubTest": 0.6855,
+   "verdict": "suppress",
+   "delta": -0.0252
+  },
+  {
+   "k": "hour=4-7&interval=15m",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 1563,
+   "wr": 0.6878,
+   "lb": 0.6644,
+   "nTest": 661,
+   "wrTest": 0.6581,
+   "lbTest": 0.6211,
+   "ubTest": 0.6932,
+   "verdict": "neutral",
+   "delta": -0.0294
+  },
+  {
+   "k": "minute=1",
+   "feats": [
+    "minute"
+   ],
+   "n": 30479,
+   "wr": 0.6541,
+   "lb": 0.6487,
+   "nTest": 13088,
+   "wrTest": 0.6574,
+   "lbTest": 0.6492,
+   "ubTest": 0.6655,
+   "verdict": "suppress",
+   "delta": -0.0301
+  },
+  {
+   "k": "interval=15m&minute=2-3",
+   "feats": [
+    "interval",
+    "minute"
+   ],
+   "n": 1659,
+   "wr": 0.6872,
+   "lb": 0.6644,
+   "nTest": 772,
+   "wrTest": 0.6567,
+   "lbTest": 0.6225,
+   "ubTest": 0.6894,
+   "verdict": "neutral",
+   "delta": -0.0308
+  },
+  {
+   "k": "interval=15m&vol=>2.5",
+   "feats": [
+    "interval",
+    "vol"
+   ],
+   "n": 1541,
+   "wr": 0.658,
+   "lb": 0.634,
+   "nTest": 552,
+   "wrTest": 0.6558,
+   "lbTest": 0.6152,
+   "ubTest": 0.6942,
+   "verdict": "neutral",
+   "delta": -0.0317
+  },
+  {
+   "k": "minute=1&vol=0.7-1",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 6041,
+   "wr": 0.6514,
+   "lb": 0.6393,
+   "nTest": 2816,
+   "wrTest": 0.6506,
+   "lbTest": 0.6328,
+   "ubTest": 0.668,
+   "verdict": "suppress",
+   "delta": -0.0369
+  },
+  {
+   "k": "minute=1&vol=<0.7",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 5603,
+   "wr": 0.6534,
+   "lb": 0.6408,
+   "nTest": 2578,
+   "wrTest": 0.6497,
+   "lbTest": 0.6311,
+   "ubTest": 0.6679,
+   "verdict": "suppress",
+   "delta": -0.0378
+  },
+  {
+   "k": "interval=15m&rsi=<30",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 917,
+   "wr": 0.6761,
+   "lb": 0.6451,
+   "nTest": 365,
+   "wrTest": 0.6493,
+   "lbTest": 0.599,
+   "ubTest": 0.6965,
+   "verdict": "neutral",
+   "delta": -0.0382
+  },
+  {
+   "k": "minute=1&vol=1-1.5",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 8002,
+   "wr": 0.6361,
+   "lb": 0.6255,
+   "nTest": 3450,
+   "wrTest": 0.6441,
+   "lbTest": 0.6279,
+   "ubTest": 0.6599,
+   "verdict": "suppress",
+   "delta": -0.0434
+  },
+  {
+   "k": "hour=12-15&interval=1h",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 467,
+   "wr": 0.5953,
+   "lb": 0.5502,
+   "nTest": 201,
+   "wrTest": 0.6368,
+   "lbTest": 0.5683,
+   "ubTest": 0.7002,
+   "verdict": "neutral",
+   "delta": -0.0507
+  },
+  {
+   "k": "interval=1h&rsi=60-70",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 462,
+   "wr": 0.6126,
+   "lb": 0.5674,
+   "nTest": 197,
+   "wrTest": 0.6345,
+   "lbTest": 0.5653,
+   "ubTest": 0.6986,
+   "verdict": "neutral",
+   "delta": -0.053
+  },
+  {
+   "k": "hour=20-23&interval=1h",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 468,
+   "wr": 0.5662,
+   "lb": 0.521,
+   "nTest": 207,
+   "wrTest": 0.6329,
+   "lbTest": 0.5653,
+   "ubTest": 0.6955,
+   "verdict": "neutral",
+   "delta": -0.0546
+  },
+  {
+   "k": "minute=2-3&vol=>2.5",
+   "feats": [
+    "minute",
+    "vol"
+   ],
+   "n": 375,
+   "wr": 0.7307,
+   "lb": 0.6836,
+   "nTest": 156,
+   "wrTest": 0.6282,
+   "lbTest": 0.5501,
+   "ubTest": 0.7001,
+   "verdict": "neutral",
+   "delta": -0.0593
+  },
+  {
+   "k": "interval=1h&minute=4-6",
+   "feats": [
+    "interval",
+    "minute"
+   ],
+   "n": 215,
+   "wr": 0.6512,
+   "lb": 0.5853,
+   "nTest": 106,
+   "wrTest": 0.6226,
+   "lbTest": 0.5276,
+   "ubTest": 0.7091,
+   "verdict": "neutral",
+   "delta": -0.0649
+  },
+  {
+   "k": "interval=15m&minute=1",
+   "feats": [
+    "interval",
+    "minute"
+   ],
+   "n": 4598,
+   "wr": 0.6211,
+   "lb": 0.607,
+   "nTest": 1793,
+   "wrTest": 0.6196,
+   "lbTest": 0.5969,
+   "ubTest": 0.6418,
+   "verdict": "suppress",
+   "delta": -0.0679
+  },
+  {
+   "k": "interval=1h&rsi=30-40",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 457,
+   "wr": 0.5536,
+   "lb": 0.5078,
+   "nTest": 188,
+   "wrTest": 0.6064,
+   "lbTest": 0.5351,
+   "ubTest": 0.6734,
+   "verdict": "suppress",
+   "delta": -0.0811
+  },
+  {
+   "k": "interval=1h&vol=1-1.5",
+   "feats": [
+    "interval",
+    "vol"
+   ],
+   "n": 1495,
+   "wr": 0.6033,
+   "lb": 0.5783,
+   "nTest": 716,
+   "wrTest": 0.6061,
+   "lbTest": 0.5699,
+   "ubTest": 0.6413,
+   "verdict": "suppress",
+   "delta": -0.0814
+  },
+  {
+   "k": "interval=1h&trend=bullish",
+   "feats": [
+    "interval",
+    "trend"
+   ],
+   "n": 1450,
+   "wr": 0.611,
+   "lb": 0.5857,
+   "nTest": 611,
+   "wrTest": 0.6023,
+   "lbTest": 0.563,
+   "ubTest": 0.6403,
+   "verdict": "suppress",
+   "delta": -0.0852
+  },
+  {
+   "k": "symbol=ETH&interval=1h",
+   "feats": [
+    "symbol",
+    "interval"
+   ],
+   "n": 1398,
+   "wr": 0.598,
+   "lb": 0.5721,
+   "nTest": 603,
+   "wrTest": 0.597,
+   "lbTest": 0.5574,
+   "ubTest": 0.6354,
+   "verdict": "suppress",
+   "delta": -0.0905
+  },
+  {
+   "k": "interval=1h",
+   "feats": [
+    "interval"
+   ],
+   "n": 2783,
+   "wr": 0.5954,
+   "lb": 0.577,
+   "nTest": 1203,
+   "wrTest": 0.5919,
+   "lbTest": 0.5638,
+   "ubTest": 0.6193,
+   "verdict": "suppress",
+   "delta": -0.0956
+  },
+  {
+   "k": "mode=MOMENTUM",
+   "feats": [
+    "mode"
+   ],
+   "n": 2783,
+   "wr": 0.5954,
+   "lb": 0.577,
+   "nTest": 1203,
+   "wrTest": 0.5919,
+   "lbTest": 0.5638,
+   "ubTest": 0.6193,
+   "verdict": "suppress",
+   "delta": -0.0956
+  },
+  {
+   "k": "symbol=BTC&interval=1h",
+   "feats": [
+    "symbol",
+    "interval"
+   ],
+   "n": 1385,
+   "wr": 0.5928,
+   "lb": 0.5667,
+   "nTest": 600,
+   "wrTest": 0.5867,
+   "lbTest": 0.5468,
+   "ubTest": 0.6254,
+   "verdict": "suppress",
+   "delta": -0.1008
+  },
+  {
+   "k": "interval=1h&rsi=40-60",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 1271,
+   "wr": 0.6161,
+   "lb": 0.589,
+   "nTest": 556,
+   "wrTest": 0.5863,
+   "lbTest": 0.5449,
+   "ubTest": 0.6265,
+   "verdict": "suppress",
+   "delta": -0.1012
+  },
+  {
+   "k": "hour=0-3&interval=1h",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 468,
+   "wr": 0.6175,
+   "lb": 0.5727,
+   "nTest": 207,
+   "wrTest": 0.5845,
+   "lbTest": 0.5165,
+   "ubTest": 0.6495,
+   "verdict": "suppress",
+   "delta": -0.103
+  },
+  {
+   "k": "interval=1h&rsi=>70",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 319,
+   "wr": 0.5831,
+   "lb": 0.5283,
+   "nTest": 144,
+   "wrTest": 0.5833,
+   "lbTest": 0.5017,
+   "ubTest": 0.6607,
+   "verdict": "suppress",
+   "delta": -0.1042
+  },
+  {
+   "k": "interval=1h&trend=bearish",
+   "feats": [
+    "interval",
+    "trend"
+   ],
+   "n": 1325,
+   "wr": 0.5789,
+   "lb": 0.5521,
+   "nTest": 592,
+   "wrTest": 0.5811,
+   "lbTest": 0.5409,
+   "ubTest": 0.6202,
+   "verdict": "suppress",
+   "delta": -0.1064
+  },
+  {
+   "k": "interval=1h&vol=1.5-2.5",
+   "feats": [
+    "interval",
+    "vol"
+   ],
+   "n": 802,
+   "wr": 0.5923,
+   "lb": 0.5579,
+   "nTest": 303,
+   "wrTest": 0.5809,
+   "lbTest": 0.5246,
+   "ubTest": 0.6351,
+   "verdict": "suppress",
+   "delta": -0.1066
+  },
+  {
+   "k": "hour=16-19&interval=1h",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 457,
+   "wr": 0.6149,
+   "lb": 0.5695,
+   "nTest": 198,
+   "wrTest": 0.5808,
+   "lbTest": 0.5112,
+   "ubTest": 0.6474,
+   "verdict": "suppress",
+   "delta": -0.1067
+  },
+  {
+   "k": "hour=4-7&interval=1h",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 475,
+   "wr": 0.6,
+   "lb": 0.5553,
+   "nTest": 197,
+   "wrTest": 0.5635,
+   "lbTest": 0.4936,
+   "ubTest": 0.6308,
+   "verdict": "suppress",
+   "delta": -0.124
+  },
+  {
+   "k": "interval=1h&minute=1",
+   "feats": [
+    "interval",
+    "minute"
+   ],
+   "n": 1425,
+   "wr": 0.5418,
+   "lb": 0.5158,
+   "nTest": 572,
+   "wrTest": 0.5559,
+   "lbTest": 0.515,
+   "ubTest": 0.5962,
+   "verdict": "suppress",
+   "delta": -0.1316
+  },
+  {
+   "k": "interval=1h&vol=>2.5",
+   "feats": [
+    "interval",
+    "vol"
+   ],
+   "n": 486,
+   "wr": 0.5761,
+   "lb": 0.5318,
+   "nTest": 184,
+   "wrTest": 0.5543,
+   "lbTest": 0.4821,
+   "ubTest": 0.6243,
+   "verdict": "suppress",
+   "delta": -0.1332
+  },
+  {
+   "k": "hour=8-11&interval=1h",
+   "feats": [
+    "hour",
+    "interval"
+   ],
+   "n": 448,
+   "wr": 0.5781,
+   "lb": 0.5319,
+   "nTest": 193,
+   "wrTest": 0.5492,
+   "lbTest": 0.4787,
+   "ubTest": 0.6178,
+   "verdict": "suppress",
+   "delta": -0.1383
+  },
+  {
+   "k": "interval=1h&minute=2-3",
+   "feats": [
+    "interval",
+    "minute"
+   ],
+   "n": 413,
+   "wr": 0.5981,
+   "lb": 0.5501,
+   "nTest": 205,
+   "wrTest": 0.5463,
+   "lbTest": 0.478,
+   "ubTest": 0.613,
+   "verdict": "suppress",
+   "delta": -0.1412
+  },
+  {
+   "k": "interval=1h&rsi=<30",
+   "feats": [
+    "interval",
+    "rsi"
+   ],
+   "n": 274,
+   "wr": 0.5547,
+   "lb": 0.4955,
+   "nTest": 118,
+   "wrTest": 0.5339,
+   "lbTest": 0.4442,
+   "ubTest": 0.6214,
+   "verdict": "suppress",
+   "delta": -0.1536
+  }
+ ],
+ "suppress": [
+  "interval=5m&minute=1",
+  "minute=1&vol=1.5-2.5",
+  "vol=1.5-2.5&trend=bearish",
+  "minute=1",
+  "minute=1&vol=0.7-1",
+  "minute=1&vol=<0.7",
+  "minute=1&vol=1-1.5",
+  "interval=15m&minute=1",
+  "interval=1h&rsi=30-40",
+  "interval=1h&vol=1-1.5",
+  "interval=1h&trend=bullish",
+  "symbol=ETH&interval=1h",
+  "interval=1h",
+  "mode=MOMENTUM",
+  "symbol=BTC&interval=1h",
+  "interval=1h&rsi=40-60",
+  "hour=0-3&interval=1h",
+  "interval=1h&rsi=>70",
+  "interval=1h&trend=bearish",
+  "interval=1h&vol=1.5-2.5",
+  "hour=16-19&interval=1h",
+  "hour=4-7&interval=1h",
+  "interval=1h&minute=1",
+  "interval=1h&vol=>2.5",
+  "hour=8-11&interval=1h",
+  "interval=1h&minute=2-3",
+  "interval=1h&rsi=<30"
+ ],
+ "boost": [
+  "minute=4-6&vol=<0.7",
+  "interval=5m&minute=4-6",
+  "minute=4-6&vol=0.7-1",
+  "interval=15m&minute=7+",
+  "minute=4-6",
+  "minute=7+",
+  "minute=7+&vol=1-1.5",
+  "minute=7+&vol=1.5-2.5",
+  "minute=2-3&vol=<0.7",
+  "interval=5m&minute=2-3",
+  "minute=2-3&vol=0.7-1",
+  "interval=5m&vol=>2.5",
+  "minute=2-3",
+  "vol=<0.7&trend=bearish",
+  "vol=<0.7&trend=bullish",
+  "vol=<0.7",
+  "interval=5m&vol=<0.7",
+  "symbol=ETH&hour=16-19",
+  "hour=16-19&interval=5m",
+  "symbol=ETH&interval=5m",
+  "interval=5m"
+ ]
+}

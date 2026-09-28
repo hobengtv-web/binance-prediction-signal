@@ -1,0 +1,481 @@
+{
+ "generated": "2026-09-28T09:16:59.235Z",
+ "baseline": {
+  "train": 0.6891,
+  "test": 0.6875
+ },
+ "lessons": [
+  {
+   "type": "boost",
+   "rule": "minute=4-6&vol=<0.7",
+   "nTest": 486,
+   "wrTest": 0.9239,
+   "lbTest": 0.8968,
+   "text": "konteks minute=4-6&vol=<0.7: winrate uji 92.4% (LB 89.7%, n=486) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "interval=5m&minute=4-6",
+   "nTest": 717,
+   "wrTest": 0.9149,
+   "lbTest": 0.8922,
+   "text": "konteks interval=5m&minute=4-6: winrate uji 91.5% (LB 89.2%, n=717) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "minute=4-6&vol=0.7-1",
+   "nTest": 153,
+   "wrTest": 0.8954,
+   "lbTest": 0.8369,
+   "text": "konteks minute=4-6&vol=0.7-1: winrate uji 89.5% (LB 83.7%, n=153) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "interval=15m&minute=7+",
+   "nTest": 852,
+   "wrTest": 0.8369,
+   "lbTest": 0.8105,
+   "text": "konteks interval=15m&minute=7+: winrate uji 83.7% (LB 81.0%, n=852) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "minute=4-6",
+   "nTest": 1302,
+   "wrTest": 0.8126,
+   "lbTest": 0.7905,
+   "text": "konteks minute=4-6: winrate uji 81.3% (LB 79.0%, n=1302) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "minute=7+",
+   "nTest": 1172,
+   "wrTest": 0.7927,
+   "lbTest": 0.7685,
+   "text": "konteks minute=7+: winrate uji 79.3% (LB 76.8%, n=1172) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "minute=7+&vol=1-1.5",
+   "nTest": 963,
+   "wrTest": 0.7923,
+   "lbTest": 0.7656,
+   "text": "konteks minute=7+&vol=1-1.5: winrate uji 79.2% (LB 76.6%, n=963) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "minute=7+&vol=1.5-2.5",
+   "nTest": 173,
+   "wrTest": 0.7861,
+   "lbTest": 0.7192,
+   "text": "konteks minute=7+&vol=1.5-2.5: winrate uji 78.6% (LB 71.9%, n=173) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "minute=2-3&vol=<0.7",
+   "nTest": 1291,
+   "wrTest": 0.7537,
+   "lbTest": 0.7294,
+   "text": "konteks minute=2-3&vol=<0.7: winrate uji 75.4% (LB 72.9%, n=1291) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "interval=5m&minute=2-3",
+   "nTest": 2449,
+   "wrTest": 0.753,
+   "lbTest": 0.7355,
+   "text": "konteks interval=5m&minute=2-3: winrate uji 75.3% (LB 73.6%, n=2449) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "minute=2-3&vol=0.7-1",
+   "nTest": 651,
+   "wrTest": 0.7435,
+   "lbTest": 0.7086,
+   "text": "konteks minute=2-3&vol=0.7-1: winrate uji 74.4% (LB 70.9%, n=651) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "interval=5m&vol=>2.5",
+   "nTest": 1257,
+   "wrTest": 0.7279,
+   "lbTest": 0.7027,
+   "text": "konteks interval=5m&vol=>2.5: winrate uji 72.8% (LB 70.3%, n=1257) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "minute=2-3",
+   "nTest": 3426,
+   "wrTest": 0.7189,
+   "lbTest": 0.7036,
+   "text": "konteks minute=2-3: winrate uji 71.9% (LB 70.4%, n=3426) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "vol=<0.7&trend=bearish",
+   "nTest": 2204,
+   "wrTest": 0.7119,
+   "lbTest": 0.6926,
+   "text": "konteks vol=<0.7&trend=bearish: winrate uji 71.2% (LB 69.3%, n=2204) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "vol=<0.7&trend=bullish",
+   "nTest": 2133,
+   "wrTest": 0.7112,
+   "lbTest": 0.6916,
+   "text": "konteks vol=<0.7&trend=bullish: winrate uji 71.1% (LB 69.2%, n=2133) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "vol=<0.7",
+   "nTest": 4355,
+   "wrTest": 0.7111,
+   "lbTest": 0.6975,
+   "text": "konteks vol=<0.7: winrate uji 71.1% (LB 69.8%, n=4355) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "interval=5m&vol=<0.7",
+   "nTest": 4355,
+   "wrTest": 0.7111,
+   "lbTest": 0.6975,
+   "text": "konteks interval=5m&vol=<0.7: winrate uji 71.1% (LB 69.8%, n=4355) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "symbol=ETH&hour=16-19",
+   "nTest": 1628,
+   "wrTest": 0.7107,
+   "lbTest": 0.6882,
+   "text": "konteks symbol=ETH&hour=16-19: winrate uji 71.1% (LB 68.8%, n=1628) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "hour=16-19&interval=5m",
+   "nTest": 2414,
+   "wrTest": 0.7084,
+   "lbTest": 0.6899,
+   "text": "konteks hour=16-19&interval=5m: winrate uji 70.8% (LB 69.0%, n=2414) — di atas baseline 68.7%"
+  },
+  {
+   "type": "boost",
+   "rule": "symbol=ETH&interval=5m",
+   "nTest": 6949,
+   "wrTest": 0.7011,
+   "lbTest": 0.6902,
+   "text": "konteks symbol=ETH&interval=5m: winrate uji 70.1% (LB 69.0%, n=6949) — di atas baseline 68.7%"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=5m&minute=1",
+   "nTest": 10723,
+   "wrTest": 0.6691,
+   "ubTest": 0.678,
+   "text": "konteks interval=5m&minute=1: winrate uji 66.9% (UB 67.8%, n=10723) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "minute=1&vol=1.5-2.5",
+   "nTest": 2470,
+   "wrTest": 0.666,
+   "ubTest": 0.6843,
+   "text": "konteks minute=1&vol=1.5-2.5: winrate uji 66.6% (UB 68.4%, n=2470) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "vol=1.5-2.5&trend=bearish",
+   "nTest": 1540,
+   "wrTest": 0.6623,
+   "ubTest": 0.6855,
+   "text": "konteks vol=1.5-2.5&trend=bearish: winrate uji 66.2% (UB 68.5%, n=1540) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "minute=1",
+   "nTest": 13088,
+   "wrTest": 0.6574,
+   "ubTest": 0.6655,
+   "text": "konteks minute=1: winrate uji 65.7% (UB 66.5%, n=13088) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "minute=1&vol=0.7-1",
+   "nTest": 2816,
+   "wrTest": 0.6506,
+   "ubTest": 0.668,
+   "text": "konteks minute=1&vol=0.7-1: winrate uji 65.1% (UB 66.8%, n=2816) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "minute=1&vol=<0.7",
+   "nTest": 2578,
+   "wrTest": 0.6497,
+   "ubTest": 0.6679,
+   "text": "konteks minute=1&vol=<0.7: winrate uji 65.0% (UB 66.8%, n=2578) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "minute=1&vol=1-1.5",
+   "nTest": 3450,
+   "wrTest": 0.6441,
+   "ubTest": 0.6599,
+   "text": "konteks minute=1&vol=1-1.5: winrate uji 64.4% (UB 66.0%, n=3450) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=15m&minute=1",
+   "nTest": 1793,
+   "wrTest": 0.6196,
+   "ubTest": 0.6418,
+   "text": "konteks interval=15m&minute=1: winrate uji 62.0% (UB 64.2%, n=1793) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h&rsi=30-40",
+   "nTest": 188,
+   "wrTest": 0.6064,
+   "ubTest": 0.6734,
+   "text": "konteks interval=1h&rsi=30-40: winrate uji 60.6% (UB 67.3%, n=188) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h&vol=1-1.5",
+   "nTest": 716,
+   "wrTest": 0.6061,
+   "ubTest": 0.6413,
+   "text": "konteks interval=1h&vol=1-1.5: winrate uji 60.6% (UB 64.1%, n=716) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h&trend=bullish",
+   "nTest": 611,
+   "wrTest": 0.6023,
+   "ubTest": 0.6403,
+   "text": "konteks interval=1h&trend=bullish: winrate uji 60.2% (UB 64.0%, n=611) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "symbol=ETH&interval=1h",
+   "nTest": 603,
+   "wrTest": 0.597,
+   "ubTest": 0.6354,
+   "text": "konteks symbol=ETH&interval=1h: winrate uji 59.7% (UB 63.5%, n=603) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h",
+   "nTest": 1203,
+   "wrTest": 0.5919,
+   "ubTest": 0.6193,
+   "text": "konteks interval=1h: winrate uji 59.2% (UB 61.9%, n=1203) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "mode=MOMENTUM",
+   "nTest": 1203,
+   "wrTest": 0.5919,
+   "ubTest": 0.6193,
+   "text": "konteks mode=MOMENTUM: winrate uji 59.2% (UB 61.9%, n=1203) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "symbol=BTC&interval=1h",
+   "nTest": 600,
+   "wrTest": 0.5867,
+   "ubTest": 0.6254,
+   "text": "konteks symbol=BTC&interval=1h: winrate uji 58.7% (UB 62.5%, n=600) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h&rsi=40-60",
+   "nTest": 556,
+   "wrTest": 0.5863,
+   "ubTest": 0.6265,
+   "text": "konteks interval=1h&rsi=40-60: winrate uji 58.6% (UB 62.6%, n=556) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "hour=0-3&interval=1h",
+   "nTest": 207,
+   "wrTest": 0.5845,
+   "ubTest": 0.6495,
+   "text": "konteks hour=0-3&interval=1h: winrate uji 58.5% (UB 65.0%, n=207) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h&rsi=>70",
+   "nTest": 144,
+   "wrTest": 0.5833,
+   "ubTest": 0.6607,
+   "text": "konteks interval=1h&rsi=>70: winrate uji 58.3% (UB 66.1%, n=144) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h&trend=bearish",
+   "nTest": 592,
+   "wrTest": 0.5811,
+   "ubTest": 0.6202,
+   "text": "konteks interval=1h&trend=bearish: winrate uji 58.1% (UB 62.0%, n=592) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h&vol=1.5-2.5",
+   "nTest": 303,
+   "wrTest": 0.5809,
+   "ubTest": 0.6351,
+   "text": "konteks interval=1h&vol=1.5-2.5: winrate uji 58.1% (UB 63.5%, n=303) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "hour=16-19&interval=1h",
+   "nTest": 198,
+   "wrTest": 0.5808,
+   "ubTest": 0.6474,
+   "text": "konteks hour=16-19&interval=1h: winrate uji 58.1% (UB 64.7%, n=198) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "hour=4-7&interval=1h",
+   "nTest": 197,
+   "wrTest": 0.5635,
+   "ubTest": 0.6308,
+   "text": "konteks hour=4-7&interval=1h: winrate uji 56.4% (UB 63.1%, n=197) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h&minute=1",
+   "nTest": 572,
+   "wrTest": 0.5559,
+   "ubTest": 0.5962,
+   "text": "konteks interval=1h&minute=1: winrate uji 55.6% (UB 59.6%, n=572) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h&vol=>2.5",
+   "nTest": 184,
+   "wrTest": 0.5543,
+   "ubTest": 0.6243,
+   "text": "konteks interval=1h&vol=>2.5: winrate uji 55.4% (UB 62.4%, n=184) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "hour=8-11&interval=1h",
+   "nTest": 193,
+   "wrTest": 0.5492,
+   "ubTest": 0.6178,
+   "text": "konteks hour=8-11&interval=1h: winrate uji 54.9% (UB 61.8%, n=193) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h&minute=2-3",
+   "nTest": 205,
+   "wrTest": 0.5463,
+   "ubTest": 0.613,
+   "text": "konteks interval=1h&minute=2-3: winrate uji 54.6% (UB 61.3%, n=205) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "suppress",
+   "rule": "interval=1h&rsi=<30",
+   "nTest": 118,
+   "wrTest": 0.5339,
+   "ubTest": 0.6214,
+   "text": "konteks interval=1h&rsi=<30: winrate uji 53.4% (UB 62.1%, n=118) — di bawah baseline 68.7%, hindari"
+  },
+  {
+   "type": "cause",
+   "feature": "minute",
+   "bucket": "1",
+   "pLose": 0.7625,
+   "pWin": 0.6548,
+   "text": "faktor \"minute=1\" lebih sering muncul pada sinyal SALAH (76.2%) daripada benar (65.5%)"
+  },
+  {
+   "type": "cause",
+   "feature": "interval",
+   "bucket": "1h",
+   "pLose": 0.082,
+   "pWin": 0.0544,
+   "text": "faktor \"interval=1h\" lebih sering muncul pada sinyal SALAH (8.2%) daripada benar (5.4%)"
+  },
+  {
+   "type": "cause",
+   "feature": "mode",
+   "bucket": "MOMENTUM",
+   "pLose": 0.082,
+   "pWin": 0.0544,
+   "text": "faktor \"mode=MOMENTUM\" lebih sering muncul pada sinyal SALAH (8.2%) daripada benar (5.4%)"
+  },
+  {
+   "type": "cause",
+   "feature": "vol",
+   "bucket": "1-1.5",
+   "pLose": 0.3102,
+   "pWin": 0.2994,
+   "text": "faktor \"vol=1-1.5\" lebih sering muncul pada sinyal SALAH (31.0%) daripada benar (29.9%)"
+  },
+  {
+   "type": "cause",
+   "feature": "trend",
+   "bucket": "bearish",
+   "pLose": 0.5021,
+   "pWin": 0.4944,
+   "text": "faktor \"trend=bearish\" lebih sering muncul pada sinyal SALAH (50.2%) daripada benar (49.4%)"
+  },
+  {
+   "type": "cause",
+   "feature": "vol",
+   "bucket": "0.7-1",
+   "pLose": 0.1865,
+   "pWin": 0.181,
+   "text": "faktor \"vol=0.7-1\" lebih sering muncul pada sinyal SALAH (18.6%) daripada benar (18.1%)"
+  },
+  {
+   "type": "cause",
+   "feature": "vol",
+   "bucket": "1.5-2.5",
+   "pLose": 0.1797,
+   "pWin": 0.1746,
+   "text": "faktor \"vol=1.5-2.5\" lebih sering muncul pada sinyal SALAH (18.0%) daripada benar (17.5%)"
+  },
+  {
+   "type": "cause",
+   "feature": "hour",
+   "bucket": "4-7",
+   "pLose": 0.1692,
+   "pWin": 0.1647,
+   "text": "faktor \"hour=4-7\" lebih sering muncul pada sinyal SALAH (16.9%) daripada benar (16.5%)"
+  },
+  {
+   "type": "cause",
+   "feature": "hour",
+   "bucket": "12-15",
+   "pLose": 0.1721,
+   "pWin": 0.168,
+   "text": "faktor \"hour=12-15\" lebih sering muncul pada sinyal SALAH (17.2%) daripada benar (16.8%)"
+  },
+  {
+   "type": "cause",
+   "feature": "hist",
+   "bucket": "10-20",
+   "pLose": 0.342,
+   "pWin": 0.3379,
+   "text": "faktor \"hist=10-20\" lebih sering muncul pada sinyal SALAH (34.2%) daripada benar (33.8%)"
+  },
+  {
+   "type": "cause",
+   "feature": "rsi",
+   "bucket": "<30",
+   "pLose": 0.1018,
+   "pWin": 0.098,
+   "text": "faktor \"rsi=<30\" lebih sering muncul pada sinyal SALAH (10.2%) daripada benar (9.8%)"
+  },
+  {
+   "type": "cause",
+   "feature": "rsi",
+   "bucket": "30-40",
+   "pLose": 0.1596,
+   "pWin": 0.1576,
+   "text": "faktor \"rsi=30-40\" lebih sering muncul pada sinyal SALAH (16.0%) daripada benar (15.8%)"
+  }
+ ]
+}

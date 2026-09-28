@@ -344,3 +344,23 @@ body {
 }
 .donate-copy:hover { background: var(--accent); color: var(--panel); }
 .donate-qr { display: block; width: 340px; height: auto; margin: 16px auto; border: 1px solid var(--border); border-radius: 10px; }
+
+/* ===== PHASE 1 LEARNER: pelajaran dari sinyal yang sudah berlalu ===== */
+.lessons { margin: 10px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.lessons summary { cursor: pointer; padding: 10px 12px; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--accent); list-style: none; }
+.lessons summary::-webkit-details-marker { display: none; }
+.ls-hint { padding: 0 12px 8px; font-size: 10.5px; line-height: 1.5; color: var(--muted); }
+.ls-hint b { color: var(--text); }
+.ls-body { padding: 0 12px 8px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.ls-sec { margin-bottom: 8px; }
+.ls-sec b { display: block; margin-bottom: 4px; font-size: 10.5px; letter-spacing: .04em; }
+.ls-sec.c-boost b { color: var(--up); }
+.ls-sec.c-sup b { color: var(--down); }
+.ls-sec.c-cause b { color: var(--accent); }
+.ls-row { display: grid; grid-template-columns: minmax(0,1.1fr) minmax(0,1fr); gap: 8px; padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+.ls-k { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-v { text-align: right; color: var(--muted); }
+.ls-boost .ls-k { color: var(--up); }
+.ls-sup .ls-k { color: var(--down); }
+.ls-foot { padding: 6px 12px 10px; font-size: 10px; color: var(--muted); border-top: 1px solid var(--border); }
+.ls-foot code { color: var(--accent); background: var(--panel-2); padding: 1px 4px; border-radius: 4px; }

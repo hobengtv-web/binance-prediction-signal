@@ -1,0 +1,560 @@
+{
+ "generated": "2026-09-28T09:17:26.684Z",
+ "rows": 1128,
+ "baseline": {
+  "touchTrain": 0.8086,
+  "touchTest": 0.7434,
+  "winTrain": 0.7351,
+  "winTest": 0.6401,
+  "winLbTest": 0.5877,
+  "nTest": 339
+ },
+ "buckets": {
+  "symbol": {
+   "BTC": {
+    "n": 393,
+    "touch": 0.7913,
+    "ladderWin": 0.6921,
+    "nTest": 153,
+    "touchTest": 0.7255,
+    "touchLbTest": 0.6499,
+    "ladderWinTest": 0.5752
+   },
+   "ETH": {
+    "n": 396,
+    "touch": 0.8258,
+    "ladderWin": 0.7778,
+    "nTest": 186,
+    "touchTest": 0.7581,
+    "touchLbTest": 0.6917,
+    "ladderWinTest": 0.6935
+   }
+  },
+  "tier": {
+   "FAIR": {
+    "n": 347,
+    "touch": 0.8559,
+    "ladderWin": 0.7781,
+    "nTest": 118,
+    "touchTest": 0.8898,
+    "touchLbTest": 0.8206,
+    "ladderWinTest": 0.6949
+   },
+   "STRONG": {
+    "n": 222,
+    "touch": 0.7703,
+    "ladderWin": 0.7207,
+    "nTest": 120,
+    "touchTest": 0.5833,
+    "touchLbTest": 0.4939,
+    "ladderWinTest": 0.5417
+   },
+   "GOOD": {
+    "n": 220,
+    "touch": 0.7727,
+    "ladderWin": 0.6818,
+    "nTest": 101,
+    "touchTest": 0.7624,
+    "touchLbTest": 0.6707,
+    "ladderWinTest": 0.6931
+   }
+  },
+  "gap": {
+   "0.01-0.02": {
+    "n": 238,
+    "touch": 0.7731,
+    "ladderWin": 0.7017,
+    "nTest": 81,
+    "touchTest": 0.7531,
+    "touchLbTest": 0.6492,
+    "ladderWinTest": 0.7284
+   },
+   "0.02-0.035": {
+    "n": 164,
+    "touch": 0.7927,
+    "ladderWin": 0.7622,
+    "nTest": 49,
+    "touchTest": 0.6327,
+    "touchLbTest": 0.4927,
+    "ladderWinTest": 0.5918
+   },
+   ">0.035": {
+    "n": 55,
+    "touch": 0.7091,
+    "ladderWin": 0.7091,
+    "nTest": 9,
+    "touchTest": 0.5556,
+    "touchLbTest": 0.2666,
+    "ladderWinTest": 0.6667
+   },
+   "<0.005": {
+    "n": 162,
+    "touch": 0.8951,
+    "ladderWin": 0.7778,
+    "nTest": 109,
+    "touchTest": 0.7982,
+    "touchLbTest": 0.7133,
+    "ladderWinTest": 0.5688
+   },
+   "0.005-0.01": {
+    "n": 170,
+    "touch": 0.8235,
+    "ladderWin": 0.7235,
+    "nTest": 91,
+    "touchTest": 0.7473,
+    "touchLbTest": 0.6492,
+    "ladderWinTest": 0.6703
+   }
+  },
+  "vol2": {
+   ">3": {
+    "n": 288,
+    "touch": 0.809,
+    "ladderWin": 0.7604,
+    "nTest": 152,
+    "touchTest": 0.6579,
+    "touchLbTest": 0.5794,
+    "ladderWinTest": 0.5855
+   },
+   "0.9-1.5": {
+    "n": 234,
+    "touch": 0.812,
+    "ladderWin": 0.7393,
+    "nTest": 78,
+    "touchTest": 0.8462,
+    "touchLbTest": 0.7501,
+    "ladderWinTest": 0.7179
+   },
+   "1.5-3": {
+    "n": 267,
+    "touch": 0.8052,
+    "ladderWin": 0.7041,
+    "nTest": 109,
+    "touchTest": 0.789,
+    "touchLbTest": 0.7032,
+    "ladderWinTest": 0.6606
+   }
+  },
+  "surp": {
+   "1-2": {
+    "n": 74,
+    "touch": 0.9054,
+    "ladderWin": 0.8243,
+    "nTest": 26,
+    "touchTest": 0.9615,
+    "touchLbTest": 0.8111,
+    "ladderWinTest": 0.6923
+   },
+   "<1": {
+    "n": 110,
+    "touch": 0.9636,
+    "ladderWin": 0.8818,
+    "nTest": 39,
+    "touchTest": 0.9487,
+    "touchLbTest": 0.8311,
+    "ladderWinTest": 0.6667
+   },
+   ">3": {
+    "n": 552,
+    "touch": 0.7591,
+    "ladderWin": 0.6848,
+    "nTest": 249,
+    "touchTest": 0.6827,
+    "touchLbTest": 0.6225,
+    "ladderWinTest": 0.6185
+   },
+   "2-3": {
+    "n": 53,
+    "touch": 0.8679,
+    "ladderWin": 0.8302,
+    "nTest": 25,
+    "touchTest": 0.8,
+    "touchLbTest": 0.6087,
+    "ladderWinTest": 0.76
+   }
+  },
+  "hour": {
+   "8-11": {
+    "n": 153,
+    "touch": 0.8039,
+    "ladderWin": 0.7255,
+    "nTest": 41,
+    "touchTest": 0.8293,
+    "touchLbTest": 0.6874,
+    "ladderWinTest": 0.6829
+   },
+   "12-15": {
+    "n": 155,
+    "touch": 0.8323,
+    "ladderWin": 0.7613,
+    "nTest": 70,
+    "touchTest": 0.8,
+    "touchLbTest": 0.6918,
+    "ladderWinTest": 0.7
+   },
+   "16-19": {
+    "n": 110,
+    "touch": 0.8182,
+    "ladderWin": 0.7818,
+    "nTest": 59,
+    "touchTest": 0.7119,
+    "touchLbTest": 0.5862,
+    "ladderWinTest": 0.6102
+   },
+   "20-23": {
+    "n": 124,
+    "touch": 0.7581,
+    "ladderWin": 0.6452,
+    "nTest": 73,
+    "touchTest": 0.7671,
+    "touchLbTest": 0.6583,
+    "ladderWinTest": 0.6301
+   },
+   "0-3": {
+    "n": 127,
+    "touch": 0.811,
+    "ladderWin": 0.748,
+    "nTest": 65,
+    "touchTest": 0.7846,
+    "touchLbTest": 0.6703,
+    "ladderWinTest": 0.7077
+   },
+   "4-7": {
+    "n": 120,
+    "touch": 0.825,
+    "ladderWin": 0.75,
+    "nTest": 31,
+    "touchTest": 0.4194,
+    "touchLbTest": 0.2642,
+    "ladderWinTest": 0.3871
+   }
+  }
+ },
+ "rules": [
+  {
+   "k": "symbol=ETH&gap=0.01-0.02",
+   "n": 118,
+   "win": 0.7119,
+   "nTest": 45,
+   "winTest": 0.7556,
+   "lbTest": 0.6133,
+   "ubTest": 0.8576,
+   "delta": 0.1154,
+   "verdict": "neutral"
+  },
+  {
+   "k": "gap=0.01-0.02",
+   "n": 238,
+   "win": 0.7017,
+   "nTest": 81,
+   "winTest": 0.7284,
+   "lbTest": 0.6228,
+   "ubTest": 0.8133,
+   "delta": 0.0883,
+   "verdict": "neutral"
+  },
+  {
+   "k": "vol2=0.9-1.5",
+   "n": 234,
+   "win": 0.7393,
+   "nTest": 78,
+   "winTest": 0.7179,
+   "lbTest": 0.6097,
+   "ubTest": 0.8057,
+   "delta": 0.0778,
+   "verdict": "neutral"
+  },
+  {
+   "k": "tier=FAIR&vol2=0.9-1.5",
+   "n": 234,
+   "win": 0.7393,
+   "nTest": 78,
+   "winTest": 0.7179,
+   "lbTest": 0.6097,
+   "ubTest": 0.8057,
+   "delta": 0.0778,
+   "verdict": "neutral"
+  },
+  {
+   "k": "hour=0-3",
+   "n": 127,
+   "win": 0.748,
+   "nTest": 65,
+   "winTest": 0.7077,
+   "lbTest": 0.588,
+   "ubTest": 0.8042,
+   "delta": 0.0676,
+   "verdict": "neutral"
+  },
+  {
+   "k": "symbol=ETH&gap=0.005-0.01",
+   "n": 72,
+   "win": 0.8056,
+   "nTest": 54,
+   "winTest": 0.7037,
+   "lbTest": 0.5717,
+   "ubTest": 0.8086,
+   "delta": 0.0636,
+   "verdict": "neutral"
+  },
+  {
+   "k": "hour=12-15",
+   "n": 155,
+   "win": 0.7613,
+   "nTest": 70,
+   "winTest": 0.7,
+   "lbTest": 0.5846,
+   "ubTest": 0.7946,
+   "delta": 0.0599,
+   "verdict": "neutral"
+  },
+  {
+   "k": "tier=FAIR",
+   "n": 347,
+   "win": 0.7781,
+   "nTest": 118,
+   "winTest": 0.6949,
+   "lbTest": 0.6068,
+   "ubTest": 0.7708,
+   "delta": 0.0548,
+   "verdict": "neutral"
+  },
+  {
+   "k": "symbol=ETH",
+   "n": 396,
+   "win": 0.7778,
+   "nTest": 186,
+   "winTest": 0.6935,
+   "lbTest": 0.6239,
+   "ubTest": 0.7553,
+   "delta": 0.0534,
+   "verdict": "neutral"
+  },
+  {
+   "k": "tier=GOOD",
+   "n": 220,
+   "win": 0.6818,
+   "nTest": 101,
+   "winTest": 0.6931,
+   "lbTest": 0.5974,
+   "ubTest": 0.7746,
+   "delta": 0.053,
+   "verdict": "neutral"
+  },
+  {
+   "k": "surp=>3&gap=0.01-0.02",
+   "n": 205,
+   "win": 0.6878,
+   "nTest": 70,
+   "winTest": 0.6857,
+   "lbTest": 0.5697,
+   "ubTest": 0.7824,
+   "delta": 0.0456,
+   "verdict": "neutral"
+  },
+  {
+   "k": "tier=GOOD&vol2=1.5-3",
+   "n": 208,
+   "win": 0.6731,
+   "nTest": 92,
+   "winTest": 0.6848,
+   "lbTest": 0.5841,
+   "ubTest": 0.7707,
+   "delta": 0.0447,
+   "verdict": "neutral"
+  },
+  {
+   "k": "hour=8-11",
+   "n": 153,
+   "win": 0.7255,
+   "nTest": 41,
+   "winTest": 0.6829,
+   "lbTest": 0.5302,
+   "ubTest": 0.8044,
+   "delta": 0.0428,
+   "verdict": "neutral"
+  },
+  {
+   "k": "symbol=ETH&gap=<0.005",
+   "n": 70,
+   "win": 0.8857,
+   "nTest": 50,
+   "winTest": 0.68,
+   "lbTest": 0.5419,
+   "ubTest": 0.7924,
+   "delta": 0.0399,
+   "verdict": "neutral"
+  },
+  {
+   "k": "gap=0.005-0.01",
+   "n": 170,
+   "win": 0.7235,
+   "nTest": 91,
+   "winTest": 0.6703,
+   "lbTest": 0.5686,
+   "ubTest": 0.7583,
+   "delta": 0.0302,
+   "verdict": "neutral"
+  },
+  {
+   "k": "vol2=1.5-3",
+   "n": 267,
+   "win": 0.7041,
+   "nTest": 109,
+   "winTest": 0.6606,
+   "lbTest": 0.5675,
+   "ubTest": 0.7426,
+   "delta": 0.0204,
+   "verdict": "neutral"
+  },
+  {
+   "k": "surp=>3&gap=0.005-0.01",
+   "n": 113,
+   "win": 0.6549,
+   "nTest": 76,
+   "winTest": 0.6316,
+   "lbTest": 0.5192,
+   "ubTest": 0.7312,
+   "delta": -0.0085,
+   "verdict": "neutral"
+  },
+  {
+   "k": "hour=20-23",
+   "n": 124,
+   "win": 0.6452,
+   "nTest": 73,
+   "winTest": 0.6301,
+   "lbTest": 0.5155,
+   "ubTest": 0.7318,
+   "delta": -0.01,
+   "verdict": "neutral"
+  },
+  {
+   "k": "surp=>3",
+   "n": 552,
+   "win": 0.6848,
+   "nTest": 249,
+   "winTest": 0.6185,
+   "lbTest": 0.5568,
+   "ubTest": 0.6766,
+   "delta": -0.0216,
+   "verdict": "neutral"
+  },
+  {
+   "k": "hour=16-19",
+   "n": 110,
+   "win": 0.7818,
+   "nTest": 59,
+   "winTest": 0.6102,
+   "lbTest": 0.4827,
+   "ubTest": 0.7242,
+   "delta": -0.0299,
+   "verdict": "neutral"
+  },
+  {
+   "k": "surp=>3&gap=0.02-0.035",
+   "n": 146,
+   "win": 0.7397,
+   "nTest": 43,
+   "winTest": 0.6047,
+   "lbTest": 0.4558,
+   "ubTest": 0.7363,
+   "delta": -0.0355,
+   "verdict": "neutral"
+  },
+  {
+   "k": "tier=FAIR&gap=<0.005",
+   "n": 125,
+   "win": 0.824,
+   "nTest": 67,
+   "winTest": 0.597,
+   "lbTest": 0.4774,
+   "ubTest": 0.7061,
+   "delta": -0.0431,
+   "verdict": "neutral"
+  },
+  {
+   "k": "gap=0.02-0.035",
+   "n": 164,
+   "win": 0.7622,
+   "nTest": 49,
+   "winTest": 0.5918,
+   "lbTest": 0.4525,
+   "ubTest": 0.7178,
+   "delta": -0.0483,
+   "verdict": "neutral"
+  },
+  {
+   "k": "vol2=>3",
+   "n": 288,
+   "win": 0.7604,
+   "nTest": 152,
+   "winTest": 0.5855,
+   "lbTest": 0.506,
+   "ubTest": 0.6608,
+   "delta": -0.0546,
+   "verdict": "neutral"
+  },
+  {
+   "k": "symbol=BTC",
+   "n": 393,
+   "win": 0.6921,
+   "nTest": 153,
+   "winTest": 0.5752,
+   "lbTest": 0.4959,
+   "ubTest": 0.6507,
+   "delta": -0.065,
+   "verdict": "neutral"
+  },
+  {
+   "k": "gap=<0.005",
+   "n": 162,
+   "win": 0.7778,
+   "nTest": 109,
+   "winTest": 0.5688,
+   "lbTest": 0.4751,
+   "ubTest": 0.6579,
+   "delta": -0.0713,
+   "verdict": "neutral"
+  },
+  {
+   "k": "tier=STRONG",
+   "n": 222,
+   "win": 0.7207,
+   "nTest": 120,
+   "winTest": 0.5417,
+   "lbTest": 0.4526,
+   "ubTest": 0.6281,
+   "delta": -0.0985,
+   "verdict": "suppress"
+  },
+  {
+   "k": "tier=STRONG&vol2=>3",
+   "n": 222,
+   "win": 0.7207,
+   "nTest": 120,
+   "winTest": 0.5417,
+   "lbTest": 0.4526,
+   "ubTest": 0.6281,
+   "delta": -0.0985,
+   "verdict": "suppress"
+  },
+  {
+   "k": "symbol=BTC&gap=<0.005",
+   "n": 92,
+   "win": 0.6957,
+   "nTest": 59,
+   "winTest": 0.4746,
+   "lbTest": 0.3527,
+   "ubTest": 0.5996,
+   "delta": -0.1655,
+   "verdict": "suppress"
+  }
+ ],
+ "suppress": [
+  "tier=STRONG",
+  "tier=STRONG&vol2=>3",
+  "symbol=BTC&gap=<0.005"
+ ],
+ "boost": []
+}

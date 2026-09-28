@@ -2219,6 +2219,106 @@ async function loadTiers() {
   } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
 }
 
+/* ===== PHASE 1 LEARNER — "belajar dari sinyal yang sudah berlalu" =====
+   Tabel konteks tervalidasi walk-forward: dilatih pada 70% data paling awal, diuji pada
+   30% data paling akhir (bukan random split), dinilai dengan Wilson lower/upper bound —
+   lihat backtest/learn.js (arah, 90d), learn_touch90.js (peluang kembali ke lock, 90d),
+   dan lessons.json (ringkasan "kenapa sinyal salah").
+   Dipakai untuk: (a) menampilkan winrate jujur per konteks, (b) memperingatkan konteks
+   yang historis lemah, (c) opsional menahan sinyal pada konteks tersebut (LEARN_BLOCK). */
+let LEARN = { gate: null, touch: null, lessons: null, status: "loading" };
+let LEARN_BLOCK = false;   // default MATI — tidak mengubah sinyal sampai diaktifkan
+// fitur yang maknanya identik antara backtest dan live (vol dikecualikan: definisinya beda)
+const LEARN_SAFE = new Set(["interval", "symbol", "mode", "minute", "rsi", "hour", "hist", "trend", "gap", "dir"]);
+async function loadLearn() {
+  const get = (u) => fetch(u, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  try {
+    const [g, t, l] = await Promise.all([
+      get("/backtest/out/learn_gate.json"),
+      get("/backtest/out/learn_touch90.json"),
+      get("/backtest/out/lessons.json"),
+    ]);
+    LEARN.gate = g; LEARN.touch = t; LEARN.lessons = l;
+    LEARN.status = g ? "ok" : "missing";
+    console.log(`[LEARN] gate ${g ? "ok" : "-"} · touch90 ${t ? "ok" : "-"} · lessons ${l ? "ok" : "-"}`);
+    renderLessons();
+  } catch (e) { LEARN.status = "error"; console.warn("[LEARN] load failed:", e.message); }
+}
+// Bucket HARUS identik dengan backtest/learn.js & learn_touch90.js — jangan diubah sendiri.
+function learnBuckets(o) {
+  const vr = (o.volRel == null) ? NaN : o.volRel;
+  const h = o.hour == null ? 0 : o.hour;
+  return {
+    interval: String(o.tf), symbol: String(o.symbol), mode: String(o.mode || ""),
+    minute: o.minutesIn <= 1 ? "1" : o.minutesIn <= 3 ? "2-3" : o.minutesIn <= 6 ? "4-6" : "7+",
+    rsi: o.rsi == null ? "na" : o.rsi < 30 ? "<30" : o.rsi < 40 ? "30-40" : o.rsi < 60 ? "40-60" : o.rsi < 70 ? "60-70" : ">70",
+    vol: !isFinite(vr) ? "na" : vr < 0.7 ? "<0.7" : vr < 1.0 ? "0.7-1" : vr < 1.5 ? "1-1.5" : vr < 2.5 ? "1.5-2.5" : ">2.5",
+    hour: h < 4 ? "0-3" : h < 8 ? "4-7" : h < 12 ? "8-11" : h < 16 ? "12-15" : h < 20 ? "16-19" : "20-23",
+    hist: o.histStrength == null ? "na" : o.histStrength < 10 ? "<10" : o.histStrength < 20 ? "10-20" : ">20",
+    trend: String(o.trend), dir: String(o.dir),
+    gap: o.gapPct < 0.005 ? "<0.005" : o.gapPct < 0.01 ? "0.005-0.01" : o.gapPct < 0.02 ? "0.01-0.02" : o.gapPct < 0.035 ? "0.02-0.035" : ">0.035",
+  };
+}
+function learnMatch(key, ctx) {
+  return key.split("&").every((p) => {
+    const i = p.indexOf("="), f = p.slice(0, i), v = p.slice(i + 1);
+    return LEARN_SAFE.has(f) && ctx[f] === v;
+  });
+}
+function learnLookup(o) {
+  const ctx = learnBuckets(o);
+  const res = { ctx, dirWR: null, dirLb: null, dirN: 0, intervalWR: null, touch: null, touchLb: null, touchN: 0, weak: [], strong: [], blockable: [], label: "NETRAL" };
+  const G = LEARN.gate, T = LEARN.touch;
+  if (G && G.buckets) {
+    const mi = G.buckets.minute && G.buckets.minute[ctx.minute];
+    if (mi && mi.nTest >= 500) { res.dirWR = mi.wrTest; res.dirLb = mi.lbTest; res.dirN = mi.nTest; }
+    const iv = G.buckets.interval && G.buckets.interval[ctx.interval];
+    if (iv && iv.nTest >= 500) res.intervalWR = { wr: iv.wrTest, lb: iv.lbTest, n: iv.nTest };
+    // hanya aturan interval TUNGGAL (mis. "interval=1h") yang boleh menahan sinyal —
+    // aturan gabungan seperti "interval=5m&minute=1" terlalu umum (semua sinyal 2s cocok).
+    for (const k of G.suppress || []) if (k.indexOf("interval=") === 0 && k.indexOf("&") === -1 && learnMatch(k, ctx)) res.blockable.push(k);
+  }
+  if (T && T.buckets) {
+    const gb = T.buckets.gap && T.buckets.gap[ctx.gap];
+    if (gb && gb.nTest >= 500) { res.touch = gb.touchTest; res.touchLb = gb.lbTest; res.touchN = gb.nTest; }
+    // gap = faktor dominan play reversion; hanya aturan gap TUNGGAL yang boleh menahan sinyal
+    for (const k of T.suppress || []) if (k.indexOf("gap=") === 0 && k.indexOf("&") === -1 && learnMatch(k, ctx)) res.blockable.push(k);
+  }
+  if (res.intervalWR && res.intervalWR.wr < 0.66) res.weak.push(`interval ${ctx.interval} historis ${(res.intervalWR.wr * 100).toFixed(0)}%`);
+  if (res.touch != null && res.touch < 0.62) res.weak.push(`kembali-ke-lock ${(res.touch * 100).toFixed(0)}% (gap ${ctx.gap})`);
+  if (res.touch != null && res.touch >= 0.72) res.strong.push(`kembali-ke-lock ${(res.touch * 100).toFixed(0)}%`);
+  if (res.dirWR != null && res.dirWR >= 0.70) res.strong.push(`arah-close ${(res.dirWR * 100).toFixed(0)}%`);
+  res.label = res.weak.length && !res.strong.length ? "LEMAH" : res.strong.length && !res.weak.length ? "KUAT" : res.weak.length ? "CAMPURAN" : "NETRAL";
+  return res;
+}
+function learnNote(L) {
+  if (!L) return "";
+  const p = [];
+  if (L.intervalWR) p.push(`${L.ctx.interval} arah-close ${(L.intervalWR.wr * 100).toFixed(0)}% (n=${L.intervalWR.n})`);
+  if (L.dirWR != null) p.push(`entri ${L.ctx.minute === "1" ? "menit-1" : "menit " + L.ctx.minute} arah-close ${(L.dirWR * 100).toFixed(0)}% (n=${L.dirN})`);
+  if (L.touch != null) p.push(`kembali-ke-lock ${(L.touch * 100).toFixed(0)}% (gap ${L.ctx.gap}, n=${L.touchN})`);
+  if (!p.length) return "";
+  const tag = L.label === "KUAT" ? " · konteks KUAT ✔" : L.label === "LEMAH" ? " · ⚠ konteks LEMAH" : L.label === "CAMPURAN" ? " · konteks CAMPURAN" : "";
+  return `BELAJAR 90d (uji): ${p.join(" · ")}${tag}.`;
+}
+function renderLessons() {
+  const el = document.getElementById("lessons-body"); if (!el) return;
+  const st = document.getElementById("ls-status");
+  if (st && LEARN.gate) st.textContent = `${LEARN.gate.rules.length} aturan arah · ${LEARN.touch ? LEARN.touch.rules.length : 0} aturan lock-touch · baseline uji ${(LEARN.gate.baseline.test * 100).toFixed(1)}% (${LEARN.gate.rows} sinyal)`;
+  const l = LEARN.lessons;
+  if (!l || !l.lessons || !l.lessons.length) { el.innerHTML = '<div class="cd-empty">belum ada data pelajaran</div>'; return; }
+  const row = (x) => x.type === "cause"
+    ? `<div class="ls-row ls-cause"><span class="ls-k">${x.feature}=${x.bucket}</span><span class="ls-v">muncul ${(x.pLose * 100).toFixed(1)}% di sinyal SALAH vs ${(x.pWin * 100).toFixed(1)}% benar</span></div>`
+    : `<div class="ls-row ${x.type === "boost" ? "ls-boost" : "ls-sup"}"><span class="ls-k">${x.rule}</span><span class="ls-v">${(x.wrTest * 100).toFixed(1)}% (n=${x.nTest})</span></div>`;
+  const sec = (t, arr, cls) => arr.length ? `<div class="ls-sec ${cls}"><b>${t}</b>${arr.slice(0, 6).map(row).join("")}</div>` : "";
+  el.innerHTML =
+    sec("✔ Konteks kuat (lolos uji)", l.lessons.filter((x) => x.type === "boost"), "c-boost") +
+    sec("⚠ Konteks lemah — hindari", l.lessons.filter((x) => x.type === "suppress"), "c-sup") +
+    sec("🔎 Penyebab sinyal salah", l.lessons.filter((x) => x.type === "cause"), "c-cause");
+}
+window.setLearnBlock = (v) => { LEARN_BLOCK = !!v; console.log("[LEARN] tahan konteks lemah =", LEARN_BLOCK); return LEARN_BLOCK; };
+window.learnStatus = () => ({ status: LEARN.status, block: LEARN_BLOCK, gateRules: LEARN.gate ? LEARN.gate.rules.length : 0, touchRules: LEARN.touch ? LEARN.touch.rules.length : 0 });
+
 // TRAIL on a 15s-smoothed price (1s klines). Backtest (BTC+ETH, n=2651): trailing the smoothed
 // price by 0.01% after the lock turns the expectancy POSITIVE (+0.014%/trade, win 64%), while a
 // raw 1s trailing stop is whipsawed by noise. This is the practical way to capture more than the lock.
@@ -2846,7 +2946,28 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   if (mode === "LATE") reason = `No entry. Late in the session (${Math.round((elapsed / dur) * 100)}% elapsed) — reward too small at this distance from the lock.`;
   if (mode === "NO-LIQ") reason = `No entry. Liquidity too thin — the market is quiet (volume ${(liqRatio * 100).toFixed(0)}% of typical, need above ${((liqFloor / (typ5m || 1)) * 100).toFixed(0)}%).`;
   if (touch) reason += ` TOUCH LOCK: arah ${touch.dir.toUpperCase()} · jarak ${touch.dist.toFixed(3)}% dari lock · peluang historis ${(touch.rate * 100).toFixed(0)}% (median ${touch.tMed}s, dd ${touch.ddMed}%)${touch.tooClose ? " · PERINGATAN: terlalu dekat lock (sentuh hampir instan, reward ~0)" : ""}.`;
-  
+
+  // ---- LEARNER (Phase 1): konteks yang sudah tervalidasi 90 hari (walk-forward) ----
+  // Dibungkus try/catch: kegagalan apa pun di modul pembelajaran TIDAK boleh mengganggu sinyal.
+  let learn = null;
+  try {
+    const learnTrend = SignalCore.sessionTrend(((state.cache[sym]?.[tf]?.candles) || []).filter((c) => c.time < nowSecFloor), 3);
+    learn = learnLookup({
+      tf, symbol: sym, mode, minutesIn: minuteIn, rsi, volRel,
+      histStrength: histStr, trend: learnTrend, hour: new Date(t0Sec * 1000).getUTCHours(),
+      dir: currentDir, gapPct: Math.abs(d2),
+    });
+    const lNote = learnNote(learn);
+    if (lNote && verdict !== "flat") reason += ` ${lNote}`;
+    // Opsional (default MATI): tahan sinyal pada konteks yang historis lemah dan tervalidasi.
+    if (LEARN_BLOCK && grade && learn.blockable.length) {
+      mode = "LEARN-BLOCK"; conf = 0;
+      reason = `No entry. Pelajaran 90d: konteks ini historis lemah (${learn.blockable[0]})` +
+        (learn.touch != null ? ` · peluang kembali ke lock hanya ${(learn.touch * 100).toFixed(0)}%` : "") + ".";
+      grade = null; verdict = "flat";
+    }
+  } catch (e) { console.warn("[LEARN] lookup failed:", e && e.message); }
+
   return {
     roundStart: t0,
     asset: sym,
@@ -2868,6 +2989,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     liqRatio,
     ofi,
     ofiAgree,
+    learn,
   };
 }
 
@@ -3728,8 +3850,10 @@ function start() {
   renderConfidenceReport();
   loadGate();
   loadTiers();
+  loadLearn();
   setInterval(loadGate, 10 * 60 * 1000);
   setInterval(loadTiers, 10 * 60 * 1000);
+  setInterval(loadLearn, 30 * 60 * 1000);   // pelajaran di-refresh tiap 30 menit
   setTimeout(rescoreAll, 8000);        // after history candles are loaded
   setTimeout(rescoreAll, 25000);
   // timers — use rAF for smooth timer, updateProjection only on data events

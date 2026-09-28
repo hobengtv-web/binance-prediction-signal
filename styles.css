@@ -226,12 +226,38 @@ body {
 
 @media (min-width: 1100px) {
   #asset-seg { display: none; }
-  .monitors {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
-    padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg);
+  .monitors { display: none; }                     /* superseded by the full dual view */
+  .dual {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    padding: 8px 12px 14px; align-items: start;
   }
+  /* the single-coin detail is replaced by the dual columns on wide screens */
+  main.chart-wrap, section.round, section.confidence, section.mobile-pred { display: none; }
   body { max-width: none; }
 }
+
+/* ---------- Dual detail columns (wide screens) ---------- */
+.dual { display: none; }
+.dual-col {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0;
+}
+.dc-head { display: flex; align-items: baseline; gap: 8px; }
+.dc-coin { font-weight: 800; font-size: 16px; letter-spacing: .04em; }
+.dc-price { font-weight: 700; font-variant-numeric: tabular-nums; }
+.dc-chg { font-size: 12px; font-weight: 700; }
+.dc-chart { height: 190px; }
+.dc-recrow { display: flex; gap: 8px; align-items: center; }
+.dc-rec { flex: 1; font-size: 14px; font-weight: 800; letter-spacing: .02em; }
+.dc-rec.up { color: var(--up); } .dc-rec.down { color: var(--down); } .dc-rec.flat { color: var(--muted); }
+.dc-act {
+  padding: 6px 8px; border-radius: 7px; background: var(--panel-2);
+  font-size: 12px; font-weight: 800; letter-spacing: .02em;
+}
+.dc-act.entry { color: var(--up); } .dc-act.exit { color: var(--down); } .dc-act.wait { color: var(--muted); }
+.dc-levels, .dc-grid, .dc-pred, .dc-reason { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.dc-levels b, .dc-grid b, .dc-pred b { color: var(--text); }
+.dc-reason { border-top: 1px solid var(--border); padding-top: 6px; }
 
 /* ---------- Mobile Prediction ---------- */
 .mobile-pred { padding: 10px 12px; background: var(--panel); border-top: 1px solid var(--border); }

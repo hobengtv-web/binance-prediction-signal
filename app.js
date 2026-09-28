@@ -2295,7 +2295,7 @@ function analyzeCoin(asset, tf, now) {
         histTrend,
       })
     : null;
-  return { key, C, O, std, sig, health, plan, ofi };
+  return { key, C, O, std, slope, slopeRecent, rsi, z, sig, health, plan, ofi, ofiShort, histTrend };
 }
 
 function switchAsset(asset) {
@@ -2347,6 +2347,125 @@ function renderMonitors(force) {
     _monLastHtml = html;
     el.innerHTML = html;
     el.querySelectorAll("[data-mon]").forEach((c) => { c.onclick = () => switchAsset(c.dataset.mon); });
+  }
+}
+
+/* ===== Wide-screen DUAL DETAIL: the full per-coin detail for BOTH coins, side by side.
+   Everything below the controls (chart, recommendation, trade assistant, levels, volume,
+   orderbook, reason) is rendered once per coin so both can be monitored at the same time. */
+let dualCharts = null, _dualLastAt = 0;
+function candlesFor(asset) {
+  const c = state.cache[asset] && state.cache[asset][state.chartInterval];
+  return c ? c.candles : [];
+}
+function buildDual() {
+  const el = document.getElementById("dual");
+  if (!el || dualCharts) return;
+  el.innerHTML = ["BTC", "ETH"].map((a) => `
+    <div class="dual-col">
+      <div class="dc-head"><span class="dc-coin">${a}</span><span class="dc-price" id="dc-${a}-price">—</span><span class="dc-chg" id="dc-${a}-chg"></span></div>
+      <div class="dc-chart" id="dc-${a}-chart"></div>
+      <div class="dc-recrow"><span class="dc-rec" id="dc-${a}-rec">—</span><span class="rec-status" id="dc-${a}-badge"></span></div>
+      <div class="dc-act" id="dc-${a}-act">—</div>
+      <div class="dc-levels" id="dc-${a}-levels"></div>
+      <div class="dc-grid" id="dc-${a}-grid"></div>
+      <div class="dc-grid" id="dc-${a}-rows"></div>
+      <div class="dc-pred" id="dc-${a}-pred"></div>
+      <div class="dc-ob">
+        <div class="ob-bg"><div class="ob-ask" id="dc-${a}-ask"></div><div class="ob-bid" id="dc-${a}-bid"></div></div>
+        <div class="ob-label"><span class="ob-sell-pct" id="dc-${a}-askp">—</span><span class="ob-buy-pct" id="dc-${a}-bidp">—</span></div>
+      </div>
+      <div class="dc-reason" id="dc-${a}-reason">—</div>
+    </div>`).join("");
+  dualCharts = {};
+  for (const a of ["BTC", "ETH"]) {
+    dualCharts[a] = new CanvasChart(document.getElementById(`dc-${a}-chart`));
+    dualCharts[a].setType(state.type);
+    dualCharts[a].fit();
+  }
+}
+function renderDual(force) {
+  const el = document.getElementById("dual");
+  if (!el) return;
+  if (!force && typeof window.matchMedia === "function" && !window.matchMedia("(min-width: 1100px)").matches) return;
+  if (!force && Date.now() - _dualLastAt < 1000) return;
+  _dualLastAt = Date.now();
+  if (!dualCharts) buildDual();
+  const now = serverNow();
+  const tf = state.interval;
+  const dur = INTERVAL_MS[tf];
+  for (const a of ["BTC", "ETH"]) {
+    const m = analyzeCoin(a, tf, now);
+    const tick = state.ticker[a] || {};
+    const px = m ? m.C : (tick.last || 0);
+    const chg = (tick.chg != null && isFinite(tick.chg)) ? +tick.chg : null;
+    const g = (id) => document.getElementById(`dc-${a}-${id}`);
+    const sig = m && m.sig;
+    const graded = !!(sig && sig.verdict !== "flat");
+    const dir = graded ? sig.verdict : "flat";
+    const plan = m && m.plan;
+
+    const pEl = g("price"); if (pEl) pEl.textContent = fmtPrice(px);
+    const cEl = g("chg");
+    if (cEl) { cEl.textContent = chg != null ? `${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%` : ""; cEl.className = "dc-chg " + (chg != null ? (chg >= 0 ? "up" : "down") : ""); }
+    const rEl = g("rec");
+    if (rEl) {
+      rEl.textContent = graded
+        ? `Recommendation: ${dir.toUpperCase()}${sig.grade ? ` · ${sig.grade}${sig.expectedWR != null ? " " + (sig.expectedWR * 100).toFixed(0) + "%" : ""}` : ""}${sig.minuteIn ? ` · min ${sig.minuteIn}` : ""}`
+        : (sig && sig.mode ? `No entry · ${sig.mode}` : "Menunggu…");
+      rEl.className = "dc-rec " + (graded ? dir : "flat");
+    }
+    const bEl = g("badge");
+    if (bEl) { const hl = m && m.health ? m.health.label : ""; bEl.textContent = hl; bEl.className = "rec-status " + (m && m.health ? healthClass(m.health.label) : ""); }
+    const aEl = g("act"); if (aEl) { aEl.textContent = plan ? plan.action : "—"; aEl.className = "dc-act " + (plan ? plan.cls : "wait"); }
+    const lvEl = g("levels");
+    if (lvEl) lvEl.innerHTML = (plan && plan.levels)
+      ? `ENTRY L1 <b>${fmtPrice(plan.levels.l1)}</b> (+${plan.levels.r1.toFixed(2)}%) · L2 <b>${fmtPrice(plan.levels.l2)}</b> (+${plan.levels.r2.toFixed(2)}%) · L3 <b>${fmtPrice(plan.levels.l3)}</b> (+${plan.levels.r3.toFixed(2)}%) · TARGET <b>${fmtPrice(plan.levels.target)}</b>`
+      : "";
+    const grEl = g("grid");
+    if (grEl) {
+      const liq = sig && sig.liqRatio != null ? (sig.liqRatio * 100).toFixed(0) + "%" : "—";
+      const v5m = sig && sig.volRel != null ? (sig.volRel >= 10 ? "≥10×" : sig.volRel.toFixed(1) + "×") : "—";
+      const ofi = sig && sig.ofi != null ? (sig.ofi * 100).toFixed(0) + "%" : "—";
+      const rw = plan && plan.levels ? plan.levels.rNow.toFixed(2) + "%" : "—";
+      grEl.innerHTML = `LIQUIDITY <b>${liq}</b> · VOL(5m) <b>${v5m}</b> · OFI <b>${ofi}</b> · REWARD <b>${rw}</b>`;
+    }
+    const rwEl = g("rows");
+    if (rwEl && m) {
+      const mom = m.slope > 0 ? "BULLISH" : m.slope < 0 ? "BEARISH" : "FLAT";
+      const momCls = m.slope > 0 ? "up" : m.slope < 0 ? "down" : "";
+      const dev = m.std > 0 ? (m.C - m.O) / m.std : 0;
+      rwEl.innerHTML = `MOMENTUM <b class="${momCls}">${mom}</b> · RSI <b>${m.rsi != null ? m.rsi.toFixed(1) : "—"}</b> · JARAK LOCK <b>${dev >= 0 ? "+" : ""}${dev.toFixed(2)}σ</b>`;
+    }
+    const prEl = g("pred");
+    if (prEl && m) {
+      const delta = m.O > 0 ? (m.C - m.O) / m.O * 100 : 0;
+      prEl.innerHTML = `LOCK <b>${fmtPrice(m.O)}</b> · PREDIKSI <b>${graded ? dir.toUpperCase() : "—"}</b> · CONF <b>${sig && sig.conf != null ? sig.conf : "—"}</b> · MODE <b>${sig ? sig.mode : "—"}</b> · DELTA <b>${delta >= 0 ? "+" : ""}${delta.toFixed(3)}%</b>`;
+    }
+    const ch = dualCharts[a];
+    if (ch) {
+      ch.setSessionDuration(dur);
+      ch.setType(state.type);
+      ch.setData(candlesFor(a));
+      ch.setDecision(m ? m.O : null);
+      ch.setPrediction(graded ? dir : null, m ? m.O : null);
+      ch.setCurrentPrice(px);
+    }
+    const ob = state.orderbook[a];
+    const obA = g("ask"), obB = g("bid");
+    if (ob && ob.bids && ob.asks && obA && obB) {
+      const bidVol = ob.bids.reduce((x, l) => x + +l[0] * +l[1], 0);
+      const askVol = ob.asks.reduce((x, l) => x + +l[0] * +l[1], 0);
+      const tot = bidVol + askVol;
+      const askPct = tot > 0 ? askVol / tot * 100 : 50;
+      obA.style.width = askPct + "%";
+      obB.style.width = (100 - askPct) + "%";
+      const ap = g("askp"), bp = g("bidp");
+      if (ap) ap.textContent = askPct.toFixed(0) + "%";
+      if (bp) bp.textContent = (100 - askPct).toFixed(0) + "%";
+    }
+    const rsEl = g("reason");
+    if (rsEl) rsEl.textContent = (sig && sig.reason) ? sig.reason : "—";
   }
 }
 
@@ -2493,7 +2612,8 @@ function updateProjectionUniversal() {
       }
     }
   }
-  renderMonitors();   // wide screens: refresh the BTC/ETH monitor cards (throttled, no-op on mobile)
+  renderMonitors();   // wide screens: compact BTC/ETH cards (throttled, no-op on mobile)
+  renderDual();       // wide screens: full per-coin detail for both coins side by side
 }
 
 // Calculate signal untuk coin/interval spesifik (dipakai universal)
@@ -3514,7 +3634,8 @@ function start() {
    }, 3000);
    startOrderbookPoll();  // real-time orderbook (200ms browser fetch)
   renderMonitors(true);  // wide screens: draw both coin cards immediately
-  window.addEventListener("resize", () => renderMonitors(true));
+  renderDual();          // wide screens only: builds/draws the dual detail columns
+  window.addEventListener("resize", () => { renderMonitors(true); renderDual(true); });
 
    // Active visitor tracking
   let visitorId = localStorage.getItem("bps_vid") || null;

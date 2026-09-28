@@ -3275,14 +3275,26 @@ function playSequence(notes, opts) {
     lp.Q.value = 0.7;
     master.connect(lp);
     lp.connect(ctx.destination);
+    // Optional echo — gives the sonar/control-room feel (delay + feedback, damped).
+    let echoIn = null;
+    if (opts && opts.echo) {
+      const e = opts.echo;
+      const wet = ctx.createGain(); wet.gain.value = e.wet != null ? e.wet : 0.3;
+      const dl = ctx.createDelay(1.0); dl.delayTime.value = e.delay || 0.2;
+      const fb = ctx.createGain(); fb.gain.value = e.feedback != null ? e.feedback : 0.3;
+      const damp = ctx.createBiquadFilter(); damp.type = "lowpass"; damp.frequency.value = 1700;
+      wet.connect(dl); dl.connect(damp); damp.connect(fb); fb.connect(dl); dl.connect(lp);
+      echoIn = wet;
+    }
     for (const n of notes) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = n.type || "sine";
       const t0 = ctx.currentTime + n.t;
       osc.frequency.setValueAtTime(n.f, t0);
-      // Optional vibrato — gives a bell-like ringing character (used by the signal chime so
-      // it is unmistakably different from the trade-assistant sounds).
+      // Sonar glide: sweep the pitch to n.f2 across the note.
+      if (n.f2) osc.frequency.exponentialRampToValueAtTime(Math.max(1, n.f2), t0 + n.d);
+      // Optional vibrato — gives a bell-like ringing character.
       if (n.vib) {
         const lfo = ctx.createOscillator();
         const lfoGain = ctx.createGain();
@@ -3294,47 +3306,43 @@ function playSequence(notes, opts) {
         lfo.stop(t0 + n.d + 0.06);
       }
       const peak = n.vol != null ? n.vol : 0.22;
-      const atk = 0.05, rel = Math.min(0.12, Math.max(0.06, n.d * 0.4));
+      // Sonar ping: very fast attack + long exponential decay (n.ping). Otherwise soft envelope.
+      const atk = n.ping ? 0.008 : 0.05;
+      const rel = Math.min(0.12, Math.max(0.06, n.d * 0.4));
       gain.gain.setValueAtTime(0.0001, t0);
-      gain.gain.exponentialRampToValueAtTime(peak, t0 + atk);          // soft attack (no click)
-      gain.gain.setValueAtTime(peak, t0 + Math.max(atk, n.d - rel));
-      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.d);        // soft release
+      gain.gain.exponentialRampToValueAtTime(peak, t0 + atk);
+      if (!n.ping) gain.gain.setValueAtTime(peak, t0 + Math.max(atk, n.d - rel));
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.d);
       osc.connect(gain);
       gain.connect(master);
+      if (echoIn) gain.connect(echoIn);
       osc.start(t0);
       osc.stop(t0 + n.d + 0.06);
     }
   } catch (e) { console.log("[SOUND] failed:", e.message); }
 }
-// Signal entry — DISTINCTIVE bell chime: three quick ascending notes (E4-A4-C#5) with vibrato
-// and a long ringing tail. Deliberately different from the trade-assistant sounds:
-//   signal entry = bell arpeggio + vibrato, LOW register (330-554Hz)
-//   trade entry  = 2 notes ascending, triangle, no vibrato (523-659Hz)
-//   close/cut    = 3 notes descending, sine, no vibrato (659-392Hz)
+// SIGNAL ENTRY — submarine SONAR PING: a pure sine ping with a slight downward glide, a long
+// decaying tail and a delayed echo (as if the return bounces back).
 function playSoundAlert() {
   playSequence([
-    { f: 330, t: 0.00, d: 0.14, type: "sine", vol: 0.20 },                          // E4
-    { f: 440, t: 0.16, d: 0.14, type: "sine", vol: 0.21 },                          // A4
-    { f: 554, t: 0.32, d: 0.60, type: "sine", vol: 0.20, vib: 7, vibRate: 6 },      // C#5 bell ring
-  ], { vol: 0.55, cutoff: 1600 });
-  console.log("[SOUND] bell signal chime played");
+    { f: 950, f2: 860, t: 0.00, d: 1.10, type: "sine", vol: 0.26, ping: true },
+    { f: 950, f2: 860, t: 0.44, d: 0.70, type: "sine", vol: 0.10, ping: true },  // faint return
+  ], { vol: 0.5, cutoff: 2400, echo: { delay: 0.22, feedback: 0.30, wet: 0.30 } });
+  console.log("[SOUND] sonar ping (signal) played");
 }
-// TRADE ASSISTANT: entry / average -> gentle rising two-note chirp (twice), max 659Hz.
+// TRADE ASSISTANT entry/average — CONTACT CONFIRMED: a rising sonar sweep then a short ping.
 function playTradeEntrySound() {
   playSequence([
-    { f: 523, t: 0.00, d: 0.18, type: "triangle", vol: 0.24 },
-    { f: 659, t: 0.20, d: 0.26, type: "triangle", vol: 0.26 },
-    { f: 523, t: 0.52, d: 0.16, type: "triangle", vol: 0.20 },
-    { f: 659, t: 0.70, d: 0.30, type: "triangle", vol: 0.22 },
-  ], { vol: 0.5, cutoff: 2000 });
+    { f: 520, f2: 1040, t: 0.00, d: 0.30, type: "sine", vol: 0.24 },
+    { f: 1040, t: 0.34, d: 0.24, type: "sine", vol: 0.18, ping: true },
+  ], { vol: 0.5, cutoff: 2600, echo: { delay: 0.14, feedback: 0.22, wet: 0.22 } });
 }
-// TRADE ASSISTANT: close / cut -> soft descending three-note chime, max 659Hz.
+// TRADE ASSISTANT close/cut — SURFACE / ALL CLEAR: a two-step descending sweep.
 function playCloseSound() {
   playSequence([
-    { f: 659, t: 0.00, d: 0.20, type: "sine", vol: 0.24 },
-    { f: 523, t: 0.24, d: 0.24, type: "sine", vol: 0.22 },
-    { f: 392, t: 0.52, d: 0.36, type: "sine", vol: 0.20 },
-  ], { vol: 0.5, cutoff: 1800 });
+    { f: 900, f2: 620, t: 0.00, d: 0.42, type: "sine", vol: 0.24 },
+    { f: 620, f2: 430, t: 0.48, d: 0.60, type: "sine", vol: 0.22 },
+  ], { vol: 0.5, cutoff: 2200, echo: { delay: 0.26, feedback: 0.28, wet: 0.26 } });
 }
 
 // Preload audio context on first user interaction
@@ -3533,14 +3541,14 @@ function start() {
   if (audioTestBtn) {
     audioTestBtn.addEventListener("click", () => {
       try {
-        playSoundAlert();                          // 1) signal entry (soft chime)
-        setTimeout(playTradeEntrySound, 2200);     // 2) trade entry/average (rising)
-        setTimeout(playCloseSound, 3800);          // 3) close/cut (descending)
+        playSoundAlert();                          // 1) sonar ping (signal entry)
+        setTimeout(playTradeEntrySound, 1800);     // 2) rising sweep (contact confirmed)
+        setTimeout(playCloseSound, 3200);          // 3) descending sweep (surface / all clear)
         audioTestBtn.textContent = "✓ 3 sounds";
       } catch (e) {
         audioTestBtn.textContent = "❌";
       }
-      setTimeout(() => { audioTestBtn.textContent = "🔊"; }, 4500);
+      setTimeout(() => { audioTestBtn.textContent = "🔊"; }, 4200);
     });
   }
 

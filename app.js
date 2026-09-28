@@ -649,12 +649,15 @@ function applyType() {
         rec.className = "signal-rec flat";
       } else {
         const dirWord = o.verdict === "up" ? "UP" : "DOWN";
-        const tier = o.highConf
-          ? `HIGH CONFIDENCE, backtested winrate ${(o.gateWr * 100).toFixed(0)} percent`
-          : "watchlist only, not filtered for high winrate";
-        rec.textContent = `Recommendation: ${dirWord}. Mode ${o.mode}. ${tier}.`;
+        rec.textContent = `Recommendation: ${dirWord}`;
         rec.className = "signal-rec " + (o.verdict === "up" ? "up" : o.verdict === "down" ? "down" : "flat");
       }
+    }
+    // Alert badge next to the recommendation (Masih Sesuai / Awas Melemah / Waspada / Sudah Berbalik)
+    const recStatusEl = document.getElementById("rec-status");
+    if (recStatusEl) {
+      recStatusEl.textContent = o.recStatus || "";
+      recStatusEl.className = "rec-status" + (o.recStatusClass ? " " + o.recStatusClass : "");
     }
     
     // Trigger alarm otomatis ketika sinyal entry muncul (flat -> up/down transisi)
@@ -1060,12 +1063,13 @@ function applyType() {
   const elapsedSec = Math.round((now - sessionStart) / 1000);
   // Live validity of the LOCKED signal (display only — the locked direction never changes).
   // Includes a LEADING early-warning using several reversal precursors.
-  let lockSuffix = "";
-  let riskInfo = null;
+  // Shown as a compact badge next to the recommendation ("Masih Sesuai" / "Waspada" / ...).
+  let recStatus = "", recStatusClass = "";
   if (uni) {
     const st = computeLockStatus(uniKey, uni.verdict, O, C, now);
     if (st && st.state === "AGAINST") {
-      lockSuffix = ` · ${lockStatusText(st, now)}`;
+      recStatus = `Sudah Berbalik ${Math.round((now - st.since) / 1000)}s`;
+      recStatusClass = "bad";
     } else {
       const isUp = uni.verdict === "up";
       const scale = Math.max(tol, std * 0.5, 1e-9);
@@ -1073,7 +1077,7 @@ function applyType() {
       const seg = win.slice(-Math.max(3, Math.ceil(winLen / 3)));
       const regRecent = seg.length >= 3 ? linreg(seg) : null;
       const slopeRecent = regRecent ? regRecent.b : slope;
-      riskInfo = reversalRisk(uni.verdict, {
+      const riskInfo = reversalRisk(uni.verdict, {
         nearLock: margin <= scale,
         momentumAgainst: isUp ? slope < 0 : slope > 0,
         decel: isUp ? (slopeRecent < 0 && slopeRecent < slope) : (slopeRecent > 0 && slopeRecent > slope),
@@ -1083,7 +1087,9 @@ function applyType() {
         z: z,
         histTrend: histTrend,
       });
-      lockSuffix = ` · ${riskLabel(riskInfo.risk)}${riskInfo.risk >= 45 ? ` (risk ${riskInfo.risk})` : ""}`;
+      if (riskInfo.risk >= 70) { recStatus = `Waspada Berbalik (${riskInfo.risk})`; recStatusClass = "bad"; }
+      else if (riskInfo.risk >= 45) { recStatus = `Awas Melemah (${riskInfo.risk})`; recStatusClass = "warn"; }
+      else { recStatus = "Masih Sesuai"; recStatusClass = "ok"; }
       // Early-warning alert: notify once per session when risk becomes high (before the flip).
       if (riskInfo.risk >= 70 && !_warnedKeys.has(uniKey)) {
         _warnedKeys.add(uniKey);
@@ -1100,9 +1106,9 @@ function applyType() {
       }
     }
   }
-  const calcStatus = (uni
+  const calcStatus = uni
     ? `Signal locked ${elapsedSec - Math.round((now - uni.lockedAt) / 1000)}s after session open · mode ${uni.mode}`
-    : `Evaluating session, open +${elapsedSec}s · ${liveSig ? liveSig.mode : "collecting data"}`) + lockSuffix;
+    : `Evaluating session, open +${elapsedSec}s · ${liveSig ? liveSig.mode : "collecting data"}`;
   // Still analyzing until a signal locks OR the warmup window has passed with a verdict.
   const analyzing = !uni && (
     elapsedSec < 15 ||
@@ -1135,6 +1141,12 @@ function applyType() {
         momentum: histTrend?.momentum, elapsedSec: elapsed / 1000,
       });
     }
+    // Keep the quality tier visible in the reason (it no longer fits in the short recommendation).
+    if (finalVerdict !== "flat") {
+      currentReason = (gateInfo
+        ? `High confidence, backtested winrate ${(gateInfo.wr * 100).toFixed(0)} percent. `
+        : "Watchlist, not filtered for high winrate. ") + currentReason;
+    }
     
     updateSignal({
       zone, momentum, rsi, verdict: finalVerdict, mode, trendBias, aligned, conf,
@@ -1146,6 +1158,8 @@ function applyType() {
       highConf: !!gateInfo,
       gateWr: gateInfo ? gateInfo.wr : null,
       calcStatus,
+      recStatus,
+      recStatusClass,
       analyzing,
     });
 

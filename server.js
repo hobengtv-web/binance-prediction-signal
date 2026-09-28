@@ -9,6 +9,56 @@ const { getSnapshot, getKlines } = require("./snapshot");
 const PORT = process.env.PORT || 8000;
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json" };
 
+/* ===== PHASE 2: SIGNAL LEDGER =====
+   Menyimpan setiap sinyal + vektor fitur lengkap + hasilnya, supaya learner punya data
+   jangka panjang (Binance hanya menyediakan 1s klines 7 hari, jadi fitur skala detik
+   harus dikumpulkan sendiri dari sekarang).
+   Penyimpanan: JSONL append-only. Di Railway ditulis ke volume (mount /data) supaya
+   bertahan antar deploy; secara lokal ke ./ledger. */
+const LEDGER_DIR = process.env.LEDGER_DIR || (fs.existsSync("/data") ? "/data/ledger" : path.join(__dirname, "ledger"));
+const LEDGER_FILE = path.join(LEDGER_DIR, "signals.jsonl");
+let ledger = new Map();      // k -> record
+let ledgerDirty = 0;
+const CORS = { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" };
+function loadLedger() {
+  try {
+    fs.mkdirSync(LEDGER_DIR, { recursive: true });
+    if (!fs.existsSync(LEDGER_FILE)) { console.log(`[LEDGER] new ledger at ${LEDGER_FILE}`); return; }
+    const lines = fs.readFileSync(LEDGER_FILE, "utf8").split("\n");
+    for (const l of lines) {
+      if (!l.trim()) continue;
+      try { const r = JSON.parse(l); if (r && r.k) ledger.set(r.k, r); } catch (_) {}
+    }
+    console.log(`[LEDGER] loaded ${ledger.size} records from ${LEDGER_FILE}`);
+  } catch (e) { console.warn("[LEDGER] load failed:", e.message); }
+}
+function appendLedger(rec) {
+  try { fs.appendFileSync(LEDGER_FILE, JSON.stringify(rec) + "\n"); } catch (e) { console.warn("[LEDGER] append failed:", e.message); }
+}
+function compactLedger() {   // satu baris per key (versi terakhir menang)
+  try { fs.writeFileSync(LEDGER_FILE, [...ledger.values()].map((r) => JSON.stringify(r)).join("\n") + "\n"); }
+  catch (e) { console.warn("[LEDGER] compact failed:", e.message); }
+}
+function ledgerStats() {
+  const byKey = {};
+  let withRes = 0, won = 0, touch = 0, touchN = 0;
+  for (const r of ledger.values()) {
+    const kk = `${r.asset}_${r.interval}`;
+    (byKey[kk] = byKey[kk] || { n: 0, withRes: 0, won: 0 });
+    byKey[kk].n++;
+    if (r.res) { withRes++; byKey[kk].withRes++; if (r.res.won === 1) { won++; byKey[kk].won++; } if (r.res.touch != null) { touchN++; touch += r.res.touch; } }
+  }
+  return {
+    total: ledger.size, withRes,
+    winrate: withRes ? +(won / withRes).toFixed(4) : null,
+    touchRate: touchN ? +(touch / touchN).toFixed(4) : null,
+    byKey, dir: LEDGER_DIR, file: LEDGER_FILE,
+    persistent: LEDGER_DIR.startsWith("/data"),
+  };
+}
+loadLedger();
+setInterval(() => { if (ledgerDirty > 0) { compactLedger(); ledgerDirty = 0; } }, 60000);
+
 const clients = new Set();
 let bnWs = null, bnPollTimer = null, bnHostIdx = 0;
 
@@ -180,6 +230,46 @@ http.createServer(async (req, res) => {
     } catch (e) {
       res.writeHead(502, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: String(e) }));
+    }
+    return;
+  }
+
+  if (u.pathname === "/api/ledger") {
+    if (req.method === "OPTIONS") { res.writeHead(204, CORS); res.end(); return; }
+    if (req.method === "POST") {
+      let body = "", tooBig = false;
+      req.on("data", (ch) => { body += ch; if (body.length > 4e6) { tooBig = true; req.destroy(); } });
+      req.on("end", () => {
+        if (tooBig) { res.writeHead(413, CORS); res.end('{"error":"too big"}'); return; }
+        let saved = 0;
+        try {
+          const j = JSON.parse(body || "{}");
+          const recs = Array.isArray(j.records) ? j.records : (j.record ? [j.record] : []);
+          for (const r of recs) {
+            if (!r || typeof r.k !== "string") continue;
+            const prev = ledger.get(r.k) || { k: r.k };
+            const merged = Object.assign({}, prev, r);
+            // jangan menimpa hasil yang sudah tercatat dengan record sinyal yang lebih baru
+            if (prev.res && !r.res) merged.res = prev.res;
+            if (prev.sig && !r.sig) merged.sig = prev.sig;
+            merged.upd = Date.now();
+            ledger.set(r.k, merged);
+            appendLedger(merged);
+            saved++;
+          }
+          if (saved) ledgerDirty += saved;
+        } catch (e) { console.warn("[LEDGER] bad POST:", e.message); }
+        res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+        res.end(JSON.stringify({ saved, total: ledger.size }));
+      });
+      return;
+    }
+    const st = ledgerStats();
+    res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+    if (u.searchParams.get("dump") === "1") {
+      res.end(JSON.stringify({ stats: st, records: [...ledger.values()] }));
+    } else {
+      res.end(JSON.stringify(st));
     }
     return;
   }

@@ -5,3 +5,6 @@ node_modules/
 # Backtest artifacts: raw klines and the full signal dump are large and regenerable.
 backtest/data/
 backtest/out/signals.json
+
+# Phase 2 ledger (data lokal, bukan artefak repo)
+ledger/

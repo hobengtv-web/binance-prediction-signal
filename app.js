@@ -2319,6 +2319,104 @@ function renderLessons() {
 window.setLearnBlock = (v) => { LEARN_BLOCK = !!v; console.log("[LEARN] tahan konteks lemah =", LEARN_BLOCK); return LEARN_BLOCK; };
 window.learnStatus = () => ({ status: LEARN.status, block: LEARN_BLOCK, gateRules: LEARN.gate ? LEARN.gate.rules.length : 0, touchRules: LEARN.touch ? LEARN.touch.rules.length : 0 });
 
+/* ===== PHASE 2 LEDGER — catat setiap sinyal + vektor fitur lengkap + hasilnya =====
+   Learner butuh data jangka panjang: Binance hanya menyediakan 1s klines 7 hari, jadi
+   fitur skala detik (volRel2, surprise, gap, tier, MFE/MAE, waktu-ke-lock) harus
+   dikumpulkan sendiri mulai sekarang.
+   Alur: addSignal() saat sinyal terkunci -> resolve() saat ronde berakhir (dengan jalur
+   harga) -> dikirim ke /api/ledger, server menulisnya ke volume persisten.
+   Salinan lokal di localStorage supaya tahan tutup browser & bisa re-sync nanti. */
+const LEDGER = (() => {
+  const LS_KEY = "bps_ledger_v1";
+  const MAX = 6000;                       // batas salinan lokal (server = sumber utama)
+  let map = new Map();
+  try { const raw = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); for (const r of raw) if (r && r.k) map.set(r.k, r); } catch (_) {}
+  let sending = false, uploaded = 0, failed = 0, serverTotal = null, lastAt = null;
+  const save = () => { try { localStorage.setItem(LS_KEY, JSON.stringify([...map.values()].slice(-MAX))); } catch (_) {} };
+  const keyOf = (asset, interval, t0Sec) => `${asset}_${interval}_${t0Sec}`;
+  function upsert(k, part) {
+    const prev = map.get(k) || { k, v: 1 };
+    const merged = Object.assign({}, prev, part);
+    if (prev.sig && !part.sig) merged.sig = prev.sig;
+    if (prev.res && !part.res) merged.res = prev.res;
+    merged.upd = Date.now();
+    if (part.sig) merged.sigSync = false;
+    if (part.res) merged.resSync = false;
+    map.set(k, merged); save();
+    return merged;
+  }
+  const pending = () => [...map.values()].filter((r) => !r.sigSync || (r.res && !r.resSync));
+  async function flush() {
+    if (sending) return;
+    const list = pending().slice(0, 150);
+    if (!list.length) return;
+    sending = true;
+    try {
+      const res = await fetch("/api/ledger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ records: list }) });
+      const j = await res.json();
+      if (j && typeof j.saved === "number") {
+        for (const r of list) { r.sigSync = true; if (r.res) r.resSync = true; }
+        save(); uploaded += list.length; serverTotal = j.total; lastAt = Date.now();
+      }
+    } catch (_) { failed++; } finally { sending = false; }
+  }
+  return {
+    addSignal(rec) { if (!rec || !rec.asset) return; const k = keyOf(rec.asset, rec.interval, rec.t0); upsert(k, { asset: rec.asset, interval: rec.interval, t0: rec.t0, sig: rec }); flush(); },
+    resolve(asset, interval, t0Sec, res) { if (!asset) return; const k = keyOf(asset, interval, t0Sec); upsert(k, { asset, interval, t0: t0Sec, res }); flush(); },
+    flush,
+    status: () => ({ local: map.size, pending: pending().length, uploaded, failed, serverTotal, lastAt }),
+    _map: map,
+  };
+})();
+// Kirim ulang saat tab kembali aktif / koneksi pulih (jangan menunggu timer).
+try {
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) LEDGER.flush(); });
+  window.addEventListener("online", () => LEDGER.flush());
+} catch (_) {}
+setInterval(() => LEDGER.flush(), 20000);
+
+// Jalur harga satu sesi (1s diutamakan, fallback 5s) mulai dari detik sinyal (t0+2).
+function sessionPath(asset, t0Sec, endSec) {
+  const pick = (arr) => (arr || []).filter((c) => c.time >= t0Sec + 2 && c.time < endSec);
+  let a = pick(state.cache[asset]?.["1s"]?.candles);
+  if (a.length < 20) { const b = pick(state.cache[asset]?.["5s"]?.candles); if (b.length >= 10) a = b; }
+  return a;
+}
+// Hasil satu sesi untuk learner: arah, sentuh-lock, waktu-ke-lock, MFE/MAE (relatif ke lock).
+function ledgerOutcome(lock, close, dir, path) {
+  const v = (p) => (dir === "up" ? (p - lock) / lock * 100 : (lock - p) / lock * 100);
+  let mfe = -Infinity, mae = Infinity, touch = 0, tTouch = null;
+  for (const c of path) {
+    const H = c.high != null ? c.high : c.h, L = c.low != null ? c.low : c.l;
+    const fHi = dir === "up" ? v(H) : v(L);
+    const fLo = dir === "up" ? v(L) : v(H);
+    if (fHi > mfe) mfe = fHi;
+    if (fLo < mae) mae = fLo;
+    if (!touch && fHi >= 0) { touch = 1; tTouch = c.time; }
+  }
+  const actual = close >= lock ? "up" : "down";
+  return {
+    lock: +lock, close: +close, actual, won: dir === actual ? 1 : 0,
+    touch, tTouchSec: tTouch != null ? tTouch : null,
+    mfeFav: isFinite(mfe) ? +mfe.toFixed(4) : null,
+    maeFav: isFinite(mae) ? +mae.toFixed(4) : null,
+    endFav: +v(close).toFixed(4), bars: path.length,
+  };
+}
+window.ledgerStatus = () => LEDGER.status();
+
+// Tampilkan status ledger (data belajar) di panel pelajaran.
+function renderLedgerStatus() {
+  const el = document.getElementById("ls-ledger"); if (!el) return;
+  const s = LEDGER.status();
+  el.textContent =
+    `${s.local} lokal · ${s.pending} belum terkirim · ${s.uploaded} terkirim sesi ini` +
+    (s.serverTotal != null ? ` · server tersimpan ${s.serverTotal}` : " · server —") +
+    (s.failed ? ` · ${s.failed} gagal` : "") +
+    (s.lastAt ? ` · terakhir ${new Date(s.lastAt).toLocaleTimeString()}` : "");
+}
+setInterval(renderLedgerStatus, 10000);
+
 // TRAIL on a 15s-smoothed price (1s klines). Backtest (BTC+ETH, n=2651): trailing the smoothed
 // price by 0.01% after the lock turns the expectancy POSITIVE (+0.014%/trade, win 64%), while a
 // raw 1s trailing stop is whipsawed by noise. This is the practical way to capture more than the lock.
@@ -2706,6 +2804,30 @@ function captureDesktopSignal() {
         const alreadyFinal = _loggedKeys.has(cacheKey);
         if (!alreadyFinal) {
           PendingSig.add(entry);
+          // PHASE 2: simpan vektor fitur LENGKAP saat sinyal muncul (dipakai learner).
+          try {
+            const L = cached.learn || null;
+            LEDGER.addSignal({
+              asset: sym, interval: tf, t0: t0Sec,
+              dir: cached.verdict, mode: cached.mode, conf: cached.conf, lock: lock,
+              grade: cached.grade || null,
+              expectedWR: cached.expectedWR != null ? +Number(cached.expectedWR).toFixed(4) : null,
+              volRel: cached.volRel != null ? +Number(cached.volRel).toFixed(4) : null,
+              volRel2: cached.volRel2 != null ? +Number(cached.volRel2).toFixed(4) : null,
+              surprise: cached.surprise != null ? +Number(cached.surprise).toFixed(4) : null,
+              mv2: cached.mv2 != null ? +Number(cached.mv2).toFixed(5) : null,
+              rsi: cached.rsi != null ? +Number(cached.rsi).toFixed(2) : null,
+              histStrength: cached.histStrength != null ? cached.histStrength : null,
+              minuteIn: cached.minuteIn != null ? cached.minuteIn : null,
+              rewardPct: cached.rewardPct != null ? +Number(cached.rewardPct).toFixed(4) : null,
+              liqRatio: cached.liqRatio != null ? +Number(cached.liqRatio).toFixed(3) : null,
+              liqLow: !!cached.liqLow,
+              ofi: cached.ofi != null ? +Number(cached.ofi).toFixed(4) : null,
+              touchRate: cached.touch ? +Number(cached.touch.rate).toFixed(4) : null,
+              gateKey: gkey, gateWr: g ? +Number(g.wr).toFixed(4) : null,
+              learn: L ? { label: L.label, touch: L.touch, dirWR: L.dirWR, intervalWR: L.intervalWR ? L.intervalWR.wr : null, gap: L.ctx ? L.ctx.gap : null, hour: L.ctx ? L.ctx.hour : null, trend: L.ctx ? L.ctx.trend : null, blocking: (L.blockable || []).length > 0 } : null,
+            });
+          } catch (e) { console.warn("[LEDGER] addSignal failed:", e && e.message); }
           console.log("[DESK-SIG] pending:", entry);
         }
         
@@ -2979,6 +3101,10 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     rsi,
     histStrength: histStr,
     volRel,
+    volRel2,
+    surprise,
+    mv2,
+    sigma1s,
     grade,
     expectedWR,
     minuteIn,
@@ -3087,6 +3213,11 @@ function evaluateUniversalSessions(now) {
       });
       _loggedKeys.add(logKeyOf(p));
     }
+    // PHASE 2: hasil ronde -> ledger (jalur harga memberi sentuh-lock, waktu, MFE/MAE).
+    try {
+      const path = sessionPath(p.asset, t0Sec, t0Sec + dur / 1000);
+      LEDGER.resolve(p.asset, p.interval, t0Sec, ledgerOutcome(lock, close, p.dir, path));
+    } catch (e) { console.warn("[LEDGER] resolve failed:", e && e.message); }
     PendingSig.remove(p);
     changed = true;
   }

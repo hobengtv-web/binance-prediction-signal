@@ -2604,6 +2604,45 @@ document.addEventListener("click", unlockAudio, { once: true });
 document.addEventListener("touchstart", unlockAudio, { once: true });
 
 /* ----------------------- Boot ----------------------- */
+// Diagnostic: status of EVERY coin/interval combo (background engine + accuracy).
+// Run `__comboStatus()` in the browser console.
+window.__comboStatus = function () {
+  const now = serverNow();
+  const rows = [];
+  for (const sym of ["BTC", "ETH"]) {
+    for (const tf of INTERVALS) {
+      const dur = INTERVAL_MS[tf];
+      const t0 = Math.floor(now / dur) * dur;
+      const key = `${sym}_${tf}_${t0}`;
+      const live = _deskSigLive[key];
+      const locked = _deskSigCache[key];
+      const hist = SignalLog.data().filter((e) => e.asset === sym && e.interval === tf);
+      const ev = hist.filter((e) => e.won !== undefined);
+      const wins = ev.reduce((a, e) => a + e.won, 0);
+      rows.push({
+        combo: `${sym}/${tf}`,
+        elapsed: Math.round((now - t0) / 1000) + "s",
+        live: live ? live.mode + (live.verdict !== "flat" ? " " + live.verdict : "") : "—",
+        locked: locked ? locked.mode + " " + locked.verdict : "—",
+        pending: PendingSig.has(key) ? "yes" : "no",
+        rounds: hist.length,
+        evaluated: ev.length,
+        winrate: ev.length ? ((wins / ev.length) * 100).toFixed(1) + "%" : "—",
+        candles: ((state.cache[sym]?.["5m"]?.candles || []).length) + "/" + ((state.cache[sym]?.[tf]?.candles || []).length),
+      });
+    }
+  }
+  console.table(rows);
+  console.log(
+    "connected:", state.connected,
+    "· transport:", state.viaProxy ? "proxy/SSE" : usingTV ? "tradingview" : "ws",
+    "· pending:", PendingSig.size(),
+    "· history:", SignalLog.size(),
+    "· gate:", GATE_STATUS
+  );
+  return rows;
+};
+
 window.addEventListener("error", (e) => {
   const el = document.getElementById("err");
   if (el) { el.hidden = false; el.textContent = "JS Error: " + (e.message || e.error) + (e.filename ? " @ " + e.filename + ":" + e.lineno : ""); }

@@ -2190,6 +2190,12 @@ function fairMinVol(tf) { return tf === "5m" ? 0.6 : tf === "15m" ? 2.0 : 1.5; }
 // After this fraction of the session the price sits close to the lock, so the reward of a
 // recapture is tiny even if the direction is right -> those entries are suppressed.
 const LATE_FRAC = 0.7;
+function pctile(arr, p) {
+  if (!arr || !arr.length) return 0;
+  const s = arr.slice().sort((a, b) => a - b);
+  const idx = Math.min(s.length - 1, Math.max(0, Math.floor((p / 100) * (s.length - 1))));
+  return s[idx];
+}
 
 // Universal signal cache - untuk background calculation semua coin & interval
 let _deskSigCache = {};  // key: `${sym}_${tf}_${roundStart}` -> LOCKED signal (only non-flat entries)
@@ -2398,6 +2404,16 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   const frac = Math.min(1, Math.max(0.05, (nowS - candleStart) / candleSec));
   const forming = sessionCandles[sessionCandles.length - 1];
   const volRel = baseVol > 0 ? ((forming.vol || 0) / frac) / baseVol : 1;
+  // LIQUIDITY gate — a dead market is the biggest risk, independent of the volume RATIO:
+  // relative volume can look "normal" simply because the whole recent period was quiet.
+  // Compare the projected full-candle volume to the 15th percentile of the last 50 5m
+  // candles AND an absolute per-asset floor (VOL_TYPICAL scaled from 5s to 5m).
+  const prior5 = candles5m.filter((c) => c.time < t0Sec).slice(-50).map((c) => c.vol || 0).filter((v) => v > 0);
+  const typ5m = (VOL_TYPICAL[sym] || 0) * 60;
+  const projVol = (forming.vol || 0) / frac;
+  const liqFloor = Math.max(pctile(prior5, 15), typ5m * 0.3);
+  const liqLow = typ5m > 0 && projVol < liqFloor;
+  const liqRatio = typ5m > 0 ? projVol / typ5m : 1;   // 1.0 = typical market activity
 
   // RSI from completed 5m candles (no lookahead)
   const nowSecFloor = Math.floor(now / 1000);
@@ -2433,6 +2449,8 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   // is tiny even when accurate. Those entries are suppressed (user avoids them by choice).
   const late = elapsed >= LATE_FRAC * dur;
   if (late && grade) { grade = null; verdict = "flat"; mode = "LATE"; conf = 0; }
+  // LIQUIDITY gate: never signal in a dead market, whatever the ratio says.
+  if (liqLow && grade) { grade = null; verdict = "flat"; mode = "NO-LIQ"; conf = 0; }
   const expectedGradeWR = grade ? gradeWR(tf, grade) : null;
   const minuteIn = Math.floor(elapsed / 60000) + 1;                 // 1-based, matches the calibration
   const sessionMin = Math.round(dur / 60000);
@@ -2449,6 +2467,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   });
   if (mode === "OFI contra") reason = "No entry. Executed order flow is against this direction.";
   if (mode === "LATE") reason = `No entry. Late in the session (${Math.round((elapsed / dur) * 100)}% elapsed) — reward too small at this distance from the lock.`;
+  if (mode === "NO-LIQ") reason = `No entry. Liquidity too thin — the market is quiet (volume ${(liqRatio * 100).toFixed(0)}% of typical, need above ${((liqFloor / (typ5m || 1)) * 100).toFixed(0)}%).`;
   
   return {
     roundStart: t0,
@@ -2466,6 +2485,8 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     minuteIn,
     late,
     rewardPct,
+    liqLow,
+    liqRatio,
     ofi,
     ofiAgree,
   };
@@ -3275,6 +3296,7 @@ window.__comboStatus = function () {
         combo: `${sym}/${tf}`,
         elapsed: Math.round((now - t0) / 1000) + "s",
         tier: tierNow,
+        liq: live && live.liqRatio != null ? (live.liqRatio * 100).toFixed(0) + "%" : "—",
         live: live ? live.mode + (live.verdict !== "flat" ? " " + live.verdict : "") : "—",
         locked: locked ? locked.mode + " " + locked.verdict : "—",
         ofi: ofiNow == null ? "—" : (ofiNow * 100).toFixed(0) + "%",

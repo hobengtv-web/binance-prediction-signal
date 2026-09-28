@@ -446,3 +446,10 @@ body {
   .donate-btn { font-size: 0; padding: 4px 7px; }
   .donate-btn::before { content: "☕"; font-size: 13px; }
 }
+
+/* ===== Baris SINYAL vs ARAH TRADE di kartu Trade Assistant ===== */
+.tp-bias { font-size: 11px; font-weight: 600; color: var(--muted); line-height: 1.45; margin: 3px 0 1px; }
+.tp-bias b { font-weight: 800; }
+.tp-bias.up b:last-of-type { color: var(--up); }
+.tp-bias.down b:last-of-type { color: var(--down); }
+.dc-arahtrade.up { color: var(--up); } .dc-arahtrade.down { color: var(--down); }

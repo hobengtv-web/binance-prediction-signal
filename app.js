@@ -708,6 +708,7 @@ function applyType() {
     const tpMeta = document.getElementById("tp-meta");
     const tpStEntry = document.getElementById("tp-st-entry");
     const tpStClose = document.getElementById("tp-st-close");
+    const tpBias = document.getElementById("tp-bias");
 
     if (tpAction) {
       const tp = o.tradePlan;
@@ -731,9 +732,19 @@ function applyType() {
       }
       if (!tp) {
         tpAction.textContent = "—"; tpAction.className = "tp-action wait";
+        if (tpBias) { tpBias.textContent = ""; tpBias.className = "tp-bias"; }
         if (tpLevels) tpLevels.textContent = "";
         if (tpMeta) tpMeta.textContent = "";
       } else {
+        // Sinyal (arah close sesi) vs arah trade (contra-lock: selalu menuju LOCK) — supaya
+        // tidak membingungkan ketika keduanya berlawanan arah.
+        if (tpBias) {
+          const sd = String(o.verdict || "flat").toUpperCase();
+          const td = String(tp.tradeDir || "—").toUpperCase();
+          tpBias.className = "tp-bias " + (tp.tradeDir || "flat");
+          tpBias.innerHTML = `SINYAL <b>${esc(sd)}</b> · ARAH TRADE <b>${esc(td)}</b> — contra-lock, target LOCK <b>${fmtPrice(tp.levels ? tp.levels.target : null)}</b>`;
+          tpBias.title = "SINYAL = arah prediksi close sesi (continuation). ARAH TRADE = kebalikannya, selalu menuju LOCK (contra-lock): beli saat harga di bawah LOCK, jual saat harga di atas LOCK.";
+        }
         tpAction.textContent = tp.action;
         tpAction.className = "tp-action " + (tp.cls || "wait");
         if (tpLevels) {
@@ -1139,8 +1150,12 @@ function applyType() {
     recStatus = `${health.label}${health.score ? ` ${health.score}` : ""}${dwell}`;
     recStatusClass = healthClass(health.label);
     // TRADE ASSISTANT plan (entry zone / averaging / hold / close) for the active combo.
+    // PENTING: seluruh input TA memakai arah TRADE (contra-lock = menuju LOCK), bukan arah
+    // sinyal. Sinyal hanya menentukan SISI harga (di bawah/atas LOCK) -> arah trade kebalikannya.
+    const taBiasNow = taBiasOf(uni.verdict);
+    const taUp = taBiasNow === "up";
     const pk = _tradePeak[uniKey] || -Infinity;
-    const favorNow = isUp ? (C - O) : (O - C);
+    const favorNow = taUp ? (C - O) : (O - C);
     const peakFavor = Math.max(pk, favorNow);
     _tradePeak[uniKey] = peakFavor;
     const retreat = peakFavor > 0 && (peakFavor - favorNow) >= 0.25 * Math.max(std, 1e-9);
@@ -1148,24 +1163,26 @@ function applyType() {
     const wasEntered = !!(entryRec && entryRec.entered);
     // Confirmation evidence + how long it has persisted (dwell), so signals are neither
     // too fast (single noisy tick) nor too late.
-    const turn = turnEvidence(uni.verdict === "up", { slope, slopeRecent, ofiShort, win });
-    const fade = fadeEvidence(uni.verdict === "up", { slope, slopeRecent, ofiShort, retreat, rsi });
+    const turn = turnEvidence(taUp, { slope, slopeRecent, ofiShort, win });
+    const fade = fadeEvidence(taUp, { slope, slopeRecent, ofiShort, retreat, rsi });
     const dw = _tradeDwell[uniKey] || (_tradeDwell[uniKey] = { turnSince: null, fadeSince: null });
     dw.turnSince = turn.count >= 2 ? (dw.turnSince || now) : null;
     dw.fadeSince = fade.count >= 2 ? (dw.fadeSince || now) : null;
     const dwellTurnMs = dw.turnSince ? now - dw.turnSince : 0;
     const dwellFadeMs = dw.fadeSince ? now - dw.fadeSince : 0;
-    const trail = trailOf(state.asset, Math.floor(sessionStart / 1000), Math.floor(now / 1000), O, uni.verdict === "up");
-    tradePlan = computeTradePlan(uni.verdict, {
+    const taBias = taBiasNow;                      // contra-lock (menuju LOCK)
+    const trail = taBias ? trailOf(state.asset, Math.floor(sessionStart / 1000), Math.floor(now / 1000), O, taBias === "up") : null;
+    tradePlan = taBias ? computeTradePlan(taBias, {
       tf: state.interval, lock: O, price: C, std, slope, slopeRecent, rsi, z,
       ofi: uni.ofi, ofiShort, retreat, health, entered: wasEntered,
       turn, fade, dwellTurnMs, dwellFadeMs, histTrend, trail,
-    });
+    }) : null;
+    if (tradePlan && !tradePlan.entered) { delete _tradeEntered[uniKey]; delete _tradeClosed[uniKey]; }   // no position yet / stand down
+    if (tradePlan) {
     if (tradePlan.entered && !wasEntered) {
       _tradeEntered[uniKey] = { entered: true, since: now, price: C };
       console.log(`[TRADE] position opened ${state.asset}/${state.interval} @ ${fmtPrice(C)}`);
     }
-    if (!tradePlan.entered) { delete _tradeEntered[uniKey]; delete _tradeClosed[uniKey]; }   // no position yet / stand down
     tradePlan.entryPrice = _tradeEntered[uniKey] ? _tradeEntered[uniKey].price : null;
     // Catat kapan early-close (state CLOSE) pertama kali muncul pada sesi ini, lalu tempelkan
     // STATUS ke plan supaya panel Trade Assistant bisa menampilkan ENTRY / EARLY CLOSE:
@@ -1183,6 +1200,7 @@ function applyType() {
           : (tradePlan.state === "WAIT" && /TUNGGU PEAK/.test(tradePlan.action) ? "konfirmasi peak contra (2/4 bagian + 4s)" : "harga belum contra / belum kembali ke lock"),
       };
       tradePlan.statusClose = { ok: !!clo, at: clo ? clo.at : null, price: clo ? clo.price : null };
+    }
     }
     // State-transition alerts with DISTINCT sounds:
     //   entry/average -> rising chirp ; close/cut -> descending chime ; signal entry -> pulsing (existing)
@@ -1282,8 +1300,8 @@ function applyType() {
       gateWr: gateInfo ? gateInfo.wr : null,
       ofi: liveSig ? liveSig.ofi : null,
       tradePlan,
-      recPnl: (tradePlan && tradePlan.entryPrice != null && finalVerdict !== "flat")
-        ? ((finalVerdict === "up" ? (C - tradePlan.entryPrice) : (tradePlan.entryPrice - C)) / tradePlan.entryPrice) * 100
+      recPnl: (tradePlan && tradePlan.entryPrice != null && tradePlan.tradeDir)
+        ? (((tradePlan.tradeDir === "up" ? (C - tradePlan.entryPrice) : (tradePlan.entryPrice - C)) / tradePlan.entryPrice) * 100)
         : null,
       calcStatus,
       recStatus,
@@ -2177,7 +2195,7 @@ function computeTradePlan(bias, ctx) {
     }
   }
   const CMD = { ENTRY: "ENTRY SEKARANG", AVERAGE: "TAMBAH ENTRY SEKARANG", HOLD: "HOLD", CAUTION: "SIAP CLOSE", CLOSE: "CLOSE SEKARANG", STAND_DOWN: "CUT SEKARANG", WAIT: "TUNGGU", HOLD_POS: "TUNGGU", NO_SIGNAL: "—" };
-  return { state, action, cls, cmd: CMD[state] || state, levels, fs, cp, cont, adverseStd, favor, why, entered: nowEntered, turn, fade, dwellTurnMs: dwellTurn, dwellFadeMs: dwellFade };
+  return { state, action, cls, tradeDir: bias, cmd: CMD[state] || state, levels, fs, cp, cont, adverseStd, favor, why, entered: nowEntered, turn, fade, dwellTurnMs: dwellTurn, dwellFadeMs: dwellFade };
 }
 
 /* Signals locked during a running session are held here (persisted) and only written to
@@ -2827,7 +2845,10 @@ function analyzeCoin(asset, tf, now) {
   const counterVol = recentC.filter((c) => (isUp ? c.close < c.open : c.close > c.open)).reduce((a, c) => a + (c.vol || 0), 0);
   const totVol = recentC.reduce((a, c) => a + (c.vol || 0), 0);
   const volAgainst = totVol > 0 ? (counterVol / totVol) / 0.5 : null;
-  const favor = isUp ? (C - O) : (O - C);
+  // Arah TRADE (contra-lock) dipakai untuk semua input TA: favor/peak/retreat/turn/fade.
+  const taBiasTmp = sig ? taBiasOf(sig.verdict) : null;
+  const taUp = taBiasTmp === "up";
+  const favor = taUp ? (C - O) : (O - C);
   const peakFavor = Math.max(_tradePeak[key] || -Infinity, favor);
   _tradePeak[key] = peakFavor;
   const retreat = peakFavor > 0 && (peakFavor - favor) >= 0.25 * Math.max(std, 1e-9);
@@ -2838,15 +2859,16 @@ function analyzeCoin(asset, tf, now) {
         slope, slopeRecent, ofi, ofiShort, volAgainst, rsi, z, histTrend,
       })
     : null;
-  const turn = turnEvidence(isUp, { slope, slopeRecent, ofiShort, win });
-  const fade = fadeEvidence(isUp, { slope, slopeRecent, ofiShort, retreat, rsi });
+  const turn = turnEvidence(taUp, { slope, slopeRecent, ofiShort, win });
+  const fade = fadeEvidence(taUp, { slope, slopeRecent, ofiShort, retreat, rsi });
   const dw = _tradeDwell[key] || (_tradeDwell[key] = { turnSince: null, fadeSince: null });
   dw.turnSince = turn.count >= 2 ? (dw.turnSince || now) : null;
   dw.fadeSince = fade.count >= 2 ? (dw.fadeSince || now) : null;
   const entered = !!(_tradeEntered[key] && _tradeEntered[key].entered);
-  const trail = sig && sig.verdict !== "flat" ? trailOf(asset, t0Sec, nowSec, O, sig.verdict === "up") : null;
-  const plan = (sig && sig.verdict !== "flat")
-    ? computeTradePlan(sig.verdict, {
+  const taBias = taBiasTmp;   // contra-lock (menuju LOCK)
+  const trail = taBias ? trailOf(asset, t0Sec, nowSec, O, taBias === "up") : null;
+  const plan = taBias
+    ? computeTradePlan(taBias, {
         tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
         entered, turn, fade, trail,
         dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,
@@ -2944,6 +2966,19 @@ function buildDual() {
     dualCharts[a].fit();
   }
 }
+/* Arah TRADE Trade Assistant = CONTRA-LOCK: selalu menuju LOCK, yaitu KEBALIKAN dari arah
+   sinyal. Sinyal (verdict) = arah pergerakan harga 2 detik vs LOCK (bias continuation):
+     harga di bawah LOCK (sinyal down) -> trade LONG  (beli di dasar, exit di LOCK)
+     harga di atas  LOCK (sinyal up)   -> trade SHORT (jual di puncak, exit di LOCK)
+   Backtest (BTC+ETH, 7d, gate bootstrap, entry puncak kontra +4s, exit LOCK):
+     contra-lock : setup 97% sesi, lock tersentuh 56.4%, capture median 0.077%
+     arah sinyal : setup 78% sesi, lock tersentuh 60.0%, capture median 0.066% (19% sesi tak pernah entry) */
+function taBiasOf(verdict) {
+  if (verdict === "up") return "down";
+  if (verdict === "down") return "up";
+  return null;
+}
+
 // Selisih harga dari LOCK dalam dolar, mis. -$4.23 / $0.00 / +$1.05
 // (desimal menyesuaikan besar nilai: ratusan -> 0 desimal, puluhan -> 1, sisanya -> 2)
 function fmtUsdDelta(d) {
@@ -3110,7 +3145,7 @@ function renderDual(force) {
     }
     const lvEl = g("levels");
     if (lvEl) lvEl.innerHTML = (plan && plan.levels)
-      ? `ENTRY L1 <b>${fmtPrice(plan.levels.l1)}</b> (+${plan.levels.r1.toFixed(2)}%) · L2 <b>${fmtPrice(plan.levels.l2)}</b> (+${plan.levels.r2.toFixed(2)}%) · L3 <b>${fmtPrice(plan.levels.l3)}</b> (+${plan.levels.r3.toFixed(2)}%) · TARGET <b>${fmtPrice(plan.levels.target)}</b>`
+      ? `<b class="dc-arahtrade ${plan.tradeDir}">ARAH TRADE ${String(plan.tradeDir || "").toUpperCase()} (contra-lock)</b> · ENTRY L1 <b>${fmtPrice(plan.levels.l1)}</b> (+${plan.levels.r1.toFixed(2)}%) · L2 <b>${fmtPrice(plan.levels.l2)}</b> (+${plan.levels.r2.toFixed(2)}%) · L3 <b>${fmtPrice(plan.levels.l3)}</b> (+${plan.levels.r3.toFixed(2)}%) · TARGET <b>${fmtPrice(plan.levels.target)}</b>`
       : "";
     const grEl = g("grid");
     if (grEl) {

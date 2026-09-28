@@ -1568,18 +1568,24 @@ function applyType() {
     _obTimer = setInterval(async () => {
       if (_obBusy) return;              // avoid piling up requests if a fetch is slow
       _obBusy = true;
-      const sym = state.asset;
-      const binanceSym = OB_SYMBOLS[sym];
-      if (!binanceSym) { _obBusy = false; return; }
       try {
-        const r = await fetch(`https://data-api.binance.vision/api/v3/depth?symbol=${binanceSym}&limit=5`, { cache: "no-store" });
-        if (r.ok) {
-          const ob = await r.json();
-          if (ob.bids && ob.asks) {
-            state.orderbook[sym] = { bids: ob.bids, asks: ob.asks };
-            updateOrderbook(sym);
-          }
-        }
+        // Di layar lebar, kartu dual menampilkan orderbook KEDUA koin. Sebelumnya hanya koin
+        // AKTIF yang dipoll (500ms) sedangkan koin lain hanya mendapat data dari snapshot awal
+        // -> bar orderbook koin non-aktif MACET. Sekarang keduanya dipoll saat tampilan dual.
+        const wide = typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1100px)").matches;
+        const syms = wide ? ["BTC", "ETH"] : [state.asset];
+        await Promise.all(syms.map(async (sym) => {
+          const binanceSym = OB_SYMBOLS[sym];
+          if (!binanceSym) return;
+          try {
+            const r = await fetch(`https://data-api.binance.vision/api/v3/depth?symbol=${binanceSym}&limit=5`, { cache: "no-store" });
+            if (!r.ok) return;
+            const ob = await r.json();
+            if (ob.bids && ob.asks) state.orderbook[sym] = { bids: ob.bids, asks: ob.asks, at: Date.now() };
+          } catch (_) {}
+        }));
+        // Elemen single-coin (ob-ask/ob-bid/…) TIDAK punya prefiks aset -> hanya ditulis utk koin AKTIF.
+        if (syms.includes(state.asset)) updateOrderbook(state.asset);
       } catch (_) {} finally { _obBusy = false; }
     }, 500);
   }

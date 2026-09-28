@@ -1305,12 +1305,15 @@ function applyType() {
     // BERLAWANAN    -> kalkulasi dari SESI AKTIF saat ini (logika lama / counter-trend).
     const alignWithTrend = !!fadeDir && curTrendDir !== "flat" && curTrendDir === fadeDir;
 
-    let fadeConf = 0;
-    if (fadeDir) {
-      const dn = fadeDir === "down";
+    // Dihitung sebagai FUNGSI atas sebuah arah, supaya LED bar bisa dihitung untuk arah
+    // sinyal utama (bukan hanya arah fade internal).
+    const confForDir = (dir) => {
+      if (!dir) return 0;
+      const dn = dir === "down";
+      const alignThis = !!curTrendDir && curTrendDir !== "flat" && curTrendDir === dir;
       let base;
       // Tab SIGNAL yang sync mobile prediction: gunakan analisis 3-4 sesi sebelumnya
-      if (alignWithTrend || (mobLocked && confMode === "SIGNAL")) {
+      if (alignThis || (mobLocked && confMode === "SIGNAL")) {
         base = confidenceFromPastSessions(state.asset, state.interval, dn);
       } else {
         // BERLAWANAN trend (counter-trend): keyakinan dasar dari SESI AKTIF saat ini (live 5s window).
@@ -1353,8 +1356,9 @@ function applyType() {
         const volMove = std * (remSec / 5) * 2;          // jangkauan sisa waktu (linier thd sisa detik)
         reach = clamp(1 - residual / Math.max(volMove, 1e-9), 0, 1);
       }
-      fadeConf = clamp(Math.round(base * reach), 0, 100);
-    }
+      return clamp(Math.round(base * reach), 0, 100);
+    };
+    const fadeConf = confForDir(fadeDir);
 
     // indikator sumber kalkulasi confidence (SEARAH -> 3 sesi lalu, BERLAWANAN -> sesi aktif)
     const srcEl = document.getElementById("conf-src");
@@ -1394,7 +1398,20 @@ function applyType() {
       stEl.className = t === "bullish" ? "up" : t === "bearish" ? "down" : "";
     }
 
-    updateConfidenceDisplay(fadeDir, fadeConf);
+    // ===== LED bar INLINE dengan MAIN SIGNAL =====
+    // Bila rekomendasi utama UP/DOWN, LED confidence WAJIB searah rekomendasi itu (bukan
+    // arah fade internal). Bila tidak ada sinyal (flat), pakai perilaku lama apa adanya.
+    let ledDir = fadeDir, ledConf = fadeConf;
+    if (finalVerdict === "up" || finalVerdict === "down") {
+      ledDir = finalVerdict;
+      ledConf = confForDir(finalVerdict);
+      const ledAlign = !!curTrendDir && curTrendDir !== "flat" && curTrendDir === ledDir;
+      if (srcEl) {
+        if (ledAlign || (mobLocked && confMode === "SIGNAL")) { srcEl.textContent = "3 SESSIONS PRIOR"; srcEl.className = "src-prev"; }
+        else { srcEl.textContent = "ACTIVE SESSION"; srcEl.className = "src-cur"; }
+      }
+    }
+    updateConfidenceDisplay(ledDir, ledConf);
 
     // akurasi: bekukan prediksi di momen entry, evaluasi saat round berakhir
      captureConfidenceRound(t0, O, C, fadeDir, fadeConf, curTrendDir, confMode, state);
@@ -2015,6 +2032,7 @@ function emphasizeVolume(text, vol) {
 const _tradePeak = {};     // key -> max favourable excursion after recovery
 const _tradeEntered = {};  // key -> { entered, since, price }
 const _tradeClosed = {};   // key -> { at, price }  (kapan EARLY CLOSE pertama kali disinyalkan)
+const _wideSigSounded = new Set();  // key koin yg sudah dibunyikan di tampilan dual (hindari dobel)
 const _tradeDwell = {};    // key -> { turnSince, fadeSince }
 function computeTradePlan(bias, ctx) {
   if (bias !== "up" && bias !== "down") {
@@ -2986,6 +3004,39 @@ function renderDual(force) {
     const dir = graded ? sig.verdict : "flat";
     const plan = m && m.plan;
 
+    // ===== SOUND per-koin untuk tampilan DESKTOP (dual) =====
+    // Mobile: hanya koin aktif yang berbunyi (jalur utama). Di layar lebar KEDUA koin harus
+    // berbunyi. Koin non-aktif ditangani di sini; koin aktif tetap oleh jalur utama supaya
+    // tidak dobel. Trade Assistant memakai _tradeLastState bersama -> transisi sama = 1 suara.
+    if (m && m.key) {
+      if (state.asset !== a && graded) {
+        if (!_wideSigSounded.has(m.key)) {
+          _wideSigSounded.add(m.key);
+          playSoundAlert();
+          flashTitle(`▶ SIGNAL ${dir.toUpperCase()} ${a}/${tf}`);
+          console.log(`[WIDE][SOUND-SIGNAL] ${a}/${tf} ${dir}${sig && sig.grade ? " " + sig.grade : ""}`);
+        }
+      } else if (state.asset !== a && !graded) {
+        _wideSigSounded.delete(m.key);      // flat / sesi baru -> siap berbunyi lagi
+      }
+      // Trade Assistant: entry / average / close (semua koin, termasuk koin aktif — dedupe via state bersama)
+      if (plan) {
+        const prevW = _tradeLastState[m.key];
+        if (prevW !== undefined && plan.state !== prevW) {
+          if (plan.state === "ENTRY" || plan.state === "AVERAGE") {
+            playTradeEntrySound();
+            flashTitle(`▶ ${plan.action} ${a}/${tf}`);
+            console.log(`[WIDE][SOUND-ENTRY] ${a}/${tf} ${plan.state}: ${plan.action}`);
+          } else if (plan.state === "CLOSE" || plan.state === "STAND_DOWN") {
+            playCloseSound();
+            flashTitle(`■ ${plan.action} ${a}/${tf}`);
+            console.log(`[WIDE][SOUND-CLOSE] ${a}/${tf} ${plan.state}: ${plan.action}`);
+          }
+        }
+        _tradeLastState[m.key] = plan.state;
+      }
+    }
+
     const pEl = g("price"); if (pEl) pEl.textContent = fmtPrice(px);
     const cEl = g("chg");
     if (cEl) { cEl.textContent = chg != null ? `${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%` : ""; cEl.className = "dc-chg " + (chg != null ? (chg >= 0 ? "up" : "down") : ""); }
@@ -3227,6 +3278,10 @@ function updateProjectionUniversal() {
   for (const k in _tradeClosed) {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) delete _tradeClosed[k];
+  }
+  for (const k of _wideSigSounded) {
+    const t = parseInt(k.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) _wideSigSounded.delete(k);
   }
   for (const k of _warnedKeys) {
     const t = parseInt(k.split("_")[2]);

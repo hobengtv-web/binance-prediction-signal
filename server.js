@@ -59,6 +59,61 @@ function ledgerStats() {
 loadLedger();
 setInterval(() => { if (ledgerDirty > 0) { compactLedger(); ledgerDirty = 0; } }, 60000);
 
+/* Self-healing: lengkapi hasil ronde yang belum tercatat (mis. browser ditutup sebelum ronde
+   selesai) memakai klines 1m Binance. Arah/jenis hasil = tepat; sentuh-lock/MFE/MAE dihitung
+   dari candle MENIT ke-2 dst (menit pertama memuat detik sinyal, jadi sengaja dikecualikan)
+   -> ditandai src:"server-1m" agar tidak tertukar dengan hasil dari klien (jalur 1s). */
+const DUR_S = { "5m": 300, "15m": 900, "1h": 3600 };
+let resolving = false;
+async function resolveMissing() {
+  if (resolving) return;
+  resolving = true;
+  const now = Math.floor(Date.now() / 1000);
+  let done = 0;
+  try {
+    for (const r of [...ledger.values()]) {
+      if (r.res || !r.sig || !r.t0) continue;
+      const dir = r.sig.dir;
+      if (dir !== "up" && dir !== "down") continue;
+      const dur = DUR_S[r.interval];
+      if (!dur) continue;
+      if (now < r.t0 + dur + 5) continue;                  // ronde belum berakhir
+      if (now > r.t0 + dur + 86400 * 85) continue;         // di luar jangkauan 1m klines (90d)
+      try {
+        const bars = await getKlines(r.asset, "1m", r.t0 + dur, Math.ceil(dur / 60) + 2);
+        const sess = bars.filter((b) => b.time >= r.t0 && b.time < r.t0 + dur);
+        if (sess.length < 2) continue;
+        const lock = sess[0].open, close = sess[sess.length - 1].close;
+        const path = sess.slice(1);
+        const v = (p) => (dir === "up" ? (p - lock) / lock * 100 : (lock - p) / lock * 100);
+        let mfe = -Infinity, mae = Infinity, touch = 0, tTouch = null;
+        for (const b of path) {
+          const fHi = dir === "up" ? v(b.high) : v(b.low);
+          const fLo = dir === "up" ? v(b.low) : v(b.high);
+          if (fHi > mfe) mfe = fHi;
+          if (fLo < mae) mae = fLo;
+          if (!touch && fHi >= 0) { touch = 1; tTouch = b.time; }
+        }
+        const actual = close >= lock ? "up" : "down";
+        const merged = Object.assign({}, r, {
+          res: {
+            lock: +lock, close: +close, actual, won: dir === actual ? 1 : 0,
+            touch, tTouchSec: tTouch,
+            mfeFav: isFinite(mfe) ? +mfe.toFixed(4) : null,
+            maeFav: isFinite(mae) ? +mae.toFixed(4) : null,
+            endFav: +v(close).toFixed(4), bars: path.length, src: "server-1m",
+          },
+          upd: Date.now(),
+        });
+        ledger.set(r.k, merged); appendLedger(merged); ledgerDirty++; done++;
+      } catch (_) { /* coba lagi pada siklus berikutnya */ }
+    }
+  } finally { resolving = false; }
+  if (done) console.log(`[LEDGER] resolved ${done} outcome(s) dari 1m klines · total ${ledger.size}`);
+}
+setTimeout(() => resolveMissing().catch(() => {}), 20000);
+setInterval(() => resolveMissing().catch(() => {}), 5 * 60 * 1000);
+
 const clients = new Set();
 let bnWs = null, bnPollTimer = null, bnHostIdx = 0;
 

@@ -2013,9 +2013,7 @@ function computeTradePlan(bias, ctx) {
   const levels = { l1: lvlPrice(RLV[0]), l2: lvlPrice(RLV[1]), l3: lvlPrice(RLV[2]), target: ctx.lock };
   levels.rNow = rewardOf(ctx.price);
   levels.r1 = RLV[0]; levels.r2 = RLV[1]; levels.r3 = RLV[2];
-  const inZone1 = levels.rNow >= RLV[0];
   const inZone2 = levels.rNow >= RLV[1];
-  const inZone3 = levels.rNow >= RLV[2];
   const h = ctx.health || {};
   const biasAtRisk = h.label === "HAMPIR PASTI BERBALIK" || h.label === "SUDAH BERBALIK";
   // NOTE: "price is contra the lock" is the ENTRY OPPORTUNITY in this workflow, not a risk —
@@ -2026,16 +2024,12 @@ function computeTradePlan(bias, ctx) {
   const ofiStrongAgainst = ctx.ofi != null && (isUp ? ctx.ofi < -0.25 : ctx.ofi > 0.25);
   const realReversal = histFlipped && ofiStrongAgainst;
   // Evidence the move against the bias is about to turn back toward it.
-  const turnToward = isUp
-    ? ((ctx.slope != null && ctx.slope > 0) || (ctx.ofiShort != null && ctx.ofiShort > 0.1))
-    : ((ctx.slope != null && ctx.slope < 0) || (ctx.ofiShort != null && ctx.ofiShort < -0.1));
   // Confirmation: >=2 independent evidence parts AND a minimum dwell time, so a single
   // noisy tick cannot trigger (too fast) and waiting never drags on (too late).
   const turn = ctx.turn || { count: 0, parts: {} };
   const fade = ctx.fade || { count: 0, parts: {} };
   const dwellTurn = ctx.dwellTurnMs || 0;
   const dwellFade = ctx.dwellFadeMs || 0;
-  const turnReady = turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS;
   const avgReady = turn.count >= 2 && dwellTurn >= DWELL_AVG_MS;
   const closeReady = fade.count >= 2 && dwellFade >= DWELL_CLOSE_MS;
 
@@ -2053,28 +2047,20 @@ function computeTradePlan(bias, ctx) {
 
   const entered = !!ctx.entered;
   let state, action, cls, nowEntered = entered;
-  const prog = `${turn.count}/4 bukti · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
   const rNowTxt = levels.rNow.toFixed(2) + "%";
 
   if (!entered) {
     // ---------------- PHASE 1: no position ----------------
-    // Waiting for a contra move into the reward zone, then for confirmed evidence of a turn.
+    // Entry trigger: the moment price crosses to the CONTRA side of the lock, tell the user
+    // to enter (no wait for extra depth / confirmation — that is what this workflow needs).
     if (favor >= 0) {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU — harga masih di sisi ${isUp ? "atas" : "bawah"} lock, tunggu contra ke ${isUp ? "bawah" : "atas"} ${fmtPrice(ctx.lock)}`;
-    } else if (!inZone1) {
-      state = "WAIT"; cls = "wait";
-      action = `TUNGGU — harga baru ${rNowTxt} dari lock (minimum ${RLV[0]}% untuk reward yang layak)`;
-    } else if (realReversal && !turnToward && inZone3) {
-      state = "CAUTION_ENTRY"; cls = "wait";
-      action = "AWAS — tren historis berbalik & arus kuat melawan; tunggu konfirmasi pembalikan dulu (belum entry)";
-    } else if (turnReady) {
-      state = "ENTRY"; cls = "entry";
-      action = `ENTRY ${bias.toUpperCase()} di zona ${rNowTxt} — terkonfirmasi (${partList(turn.parts)})`;
-      nowEntered = true;
     } else {
-      state = "WAIT_TURN"; cls = "wait";
-      action = `TUNGGU KONFIRMASI — ${prog}${partList(turn.parts) ? " · " + partList(turn.parts) : ""}`;
+      state = "ENTRY"; cls = "entry";
+      nowEntered = true;
+      action = `ENTRY ${bias.toUpperCase()} — harga sudah contra lock (${rNowTxt}${isUp ? " di bawah" : " di atas"} lock)`
+        + (realReversal ? " · AWAS tren historis berbalik" : "");
     }
   } else {
     // ---------------- PHASE 2: position open ----------------

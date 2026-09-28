@@ -2095,13 +2095,21 @@ function computeTradePlan(bias, ctx) {
     } else if (favor >= 0) {
       // Behaviour: sell when price reaches/exceeds the lock. Only hold when momentum is clearly
       // strong and there is measurable extra room.
+      // Exit is the main lever (backtest: selling AT the lock captures only ~5% of the potential
+      // move; a target slightly ABOVE the lock captures 2-4x more with a still-high win rate).
+      const exAll = (TIERS && TIERS.locktouch && TIERS.locktouch.exitTargets) ? TIERS.locktouch.exitTargets : null;
+      const ex = exAll && exAll.extended ? exAll.extended.find((e) => e.t === 0.01) : null;
+      const lockWin = exAll ? exAll.lockWin : null;
+      const exTxt = ex
+        ? ` · opsi target lanjutan ${fmtPrice(isUp ? ctx.lock * 1.0001 : ctx.lock * 0.9999)} (+0.01%, win ${(ex.win * 100).toFixed(0)}%)`
+        : "";
       if (ctx.retreat || closeReady || fs < 65) {
         state = "CLOSE"; cls = "exit";
         const why = ctx.retreat ? "harga mundur dari puncak" : closeReady ? "momentum melemah" : "momentum mulai lemah";
-        action = `JUAL SEKARANG DI LOCK — ${why}${contTxt}`;
+        action = `JUAL SEKARANG DI LOCK${lockWin != null ? ` (win ${(lockWin * 100).toFixed(0)}%)` : ""} — ${why}${contTxt}${exTxt}`;
       } else {
         state = "HOLD"; cls = "entry";
-        action = `TAHAN (opsional) — momentum masih kuat${cont ? `, sisa potensi ~${cont.est.toFixed(2)}% → target ${fmtPrice(cont.target)}` : ""} · jika tidak, jual di lock sekarang`;
+        action = `TAHAN (opsional) — momentum masih kuat${cont ? `, sisa potensi ~${cont.est.toFixed(2)}% → target ${fmtPrice(cont.target)}` : ""}${exTxt} · jika tidak, jual di lock sekarang`;
       }
     } else if (inZone2 && avgReady) {
       state = "AVERAGE"; cls = "entry";

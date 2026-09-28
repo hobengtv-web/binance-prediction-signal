@@ -16,6 +16,8 @@
       <span id="visitors" class="visitors" title="Active visitors">👁 <b>—</b></span>
       <!-- akses cepat ke panel learner (klik = buka & scroll) -->
       <button id="learn-chip" class="learn-chip" title="Buka panel STATUS LEARNER">LEARNER —</button>
+      <!-- status suara notifikasi: klik = aktifkan (browser blokir audio sampai ada interaksi) -->
+      <button id="audio-hint" class="audio-hint off" title="Status suara notifikasi">🔇 suara</button>
       <span id="conn" class="conn conn--off" title="Connection status">●</span>
     </div>
 
@@ -233,7 +235,10 @@
       <p><b>Tab SIGNAL / UP / DOWN:</b> SIGNAL = keyakinan mengikuti sinyal 2 detik yang aktif; UP/DOWN = paksa tampilan untuk arah itu (untuk memantau skenario arah lawan).</p>
       <p><b>DESKTOP SIGNAL ACCURACY:</b> riwayat sinyal desktop (hijau benar / merah salah). Tombol <b>reset</b> hanya menghapus riwayat tampilan di browser ini — <b>ledger belajar di server tidak terhapus</b>.</p>
       <p><b>Learner (tanpa AI):</b> setiap sesi — termasuk yang <b>ditolak</b> gate — direkam beserta hasilnya. Re-fit harian menyesuaikan <b>konteks</b> (bucket + Wilson bound) dan <b>ambang</b> (coordinate ascent memaksimalkan Wilson lower bound), dinilai <b>walk-forward</b> (70% data awal untuk latih, 30% paling akhir untuk uji). Model hanya menggantikan yang berjalan bila <b>menang pada jendela uji</b>, dan setiap keputusan tercatat beserta alasannya. Pantau di panel <b>STATUS LEARNER</b>. Balik ke ambang konservatif: env server <code>GATES_MODE=strict</code>.</p>
-      <p class="help-cta"><b>Cara pakai:</b> (1) baca <b>AMBANG AKTIF</b> untuk tahu sedang mode bootstrap (longgar) atau ambang hasil belajar; (2) tunggu <b>Recommendation: UP/DOWN</b> (sinyal lolos gate) dan ikuti <b>TRADE ASSISTANT</b> untuk entry/exit; (3) entry contra-lock saat harga berbalik ke arah lock; (4) exit sesuai instruksi (JUAL DI LOCK / LADDER / TRAIL) — jangan menahan sampai settle; (5) cek <b>STATUS LEARNER</b> untuk progres data &amp; ambang yang dipakai.</p>
+      <p><b>SUARA NOTIFIKASI:</b> browser memblokir audio sampai ada interaksi pertama. Klik sekali di halaman
+      (atau tombol <b>🔇 suara</b> di header) untuk mengaktifkan — indikator berubah menjadi <b>🔊 suara</b>.
+      Selama masih 🔇 alarm tetap berjalan secara visual (kartu coin berkedip/glow) tetapi tanpa bunyi.</p>
+      <p class="help-cta"><b>Cara pakai:</b> (1) baca <b>AMBANG AKTIF</b> untuk tahu sedang mode bootstrap (longgar) atau ambang hasil belajar; (2) tunggu <b>Recommendation: UP/DOWN</b> (sinyal lolos gate) dan ikuti <b>TRADE ASSISTANT</b> untuk entry/exit; (3) entry contra-lock: tunggu harga di sisi BERLAWANAN dari LOCK (rek UP -> harga di bawah LOCK lalu BELI; rek DOWN -> di atas LOCK lalu JUAL); (4) exit sesuai instruksi (JUAL DI LOCK / LADDER / TRAIL) — jangan menahan sampai settle; (5) cek <b>STATUS LEARNER</b> untuk progres data &amp; ambang yang dipakai.</p>
     </div>
   </details>
 

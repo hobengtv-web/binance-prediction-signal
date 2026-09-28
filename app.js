@@ -768,9 +768,11 @@ function applyType() {
       }
     }
     
-    // Trigger alarm otomatis ketika sinyal entry muncul (flat -> up/down transisi)
-    const prevVerdict = lastSignalState ? lastSignalState.verdict : "flat";
-    if (o.verdict !== "flat" && prevVerdict === "flat" && confMode === "SIGNAL" && o.highConf) {
+    // Trigger alarm otomatis ketika sinyal entry muncul. Dedupe PER SESI (key) supaya satu
+    // sinyal hanya berbunyi sekali walau verdict sempat berubah-ubah dalam sesi yang sama.
+    const alertKey = `${state.asset}_${state.interval}_${sessionStart}`;
+    if (o.verdict !== "flat" && confMode === "SIGNAL" && o.highConf && !_mainSigAlerted.has(alertKey)) {
+      _mainSigAlerted.add(alertKey);
       playSoundAlert();
       flashCard(state.asset, "signal");
       console.log("[ALERT] High-confidence signal:", o.verdict, o.mode, o.gateWr);
@@ -2068,6 +2070,7 @@ const _tradePeak = {};     // key -> max favourable excursion after recovery
 const _tradeEntered = {};  // key -> { entered, since, price }
 const _tradeClosed = {};   // key -> { at, price }  (kapan EARLY CLOSE pertama kali disinyalkan)
 const _wideSigSounded = new Set();  // key koin yg sudah dibunyikan di tampilan dual (hindari dobel)
+const _mainSigAlerted = new Set();  // key sesi yg alarm sinyalnya sudah dibunyikan (jalur utama)
 const _tradeDwell = {};    // key -> { turnSince, fadeSince }
 function computeTradePlan(bias, ctx) {
   if (bias !== "up" && bias !== "down") {
@@ -3395,6 +3398,10 @@ function updateProjectionUniversal() {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) _wideSigSounded.delete(k);
   }
+  for (const k of _mainSigAlerted) {
+    const t = parseInt(k.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) _mainSigAlerted.delete(k);
+  }
   for (const k of _warnedKeys) {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) _warnedKeys.delete(k);
@@ -4261,6 +4268,19 @@ function analyzeHistoricalTrend(sym, tf, sessionCount) {
 
 /* ======================= Audio Alert (Web Audio API) ======================= */
 let audioCtx = null;
+let audioBlocked = false;   // true = browser memblokir suara (belum ada gesture user)
+
+// Indikator status suara di topbar: 🔊 aktif / 🔇 diblokir (klik = aktifkan + tes suara)
+function updateAudioHint() {
+  const el = document.getElementById("audio-hint"); if (!el) return;
+  const on = !!(audioCtx && audioCtx.state === "running");
+  if (on) audioBlocked = false;
+  el.textContent = on ? "🔊 suara" : "🔇 suara";
+  el.className = "audio-hint " + (on ? "on" : "off");
+  el.title = on
+    ? "Suara notifikasi AKTIF (klik untuk tes suara)"
+    : "Suara notifikasi DIBLOKIR browser sampai ada interaksi. Klik di sini untuk mengaktifkan.";
+}
 
 // Shared tone sequencer with a GENTLE timbre: sine/triangle only, a low-pass filter and
 // smooth attack/release. A square wave + hard on/off (the old signal sound) is the harshest
@@ -4269,7 +4289,19 @@ function playSequence(notes, opts) {
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const ctx = audioCtx;
-    if (ctx.state === "suspended") ctx.resume();
+    // Browsers blokir AudioContext sampai ada gesture user. Jangan menjadwalkan nada saat
+    // context belum "running": itu membuat warning berulang di console dan suara tetap tak
+    // berbunyi. Coba resume sekali; kalau masih belum jalan, keluar (tandai audioBlocked).
+    if (ctx.state !== "running") {
+      let pr = null;
+      try { pr = ctx.resume(); } catch (_) {}
+      audioBlocked = true; updateAudioHint();
+      if (pr && typeof pr.then === "function") {
+        pr.then(() => { if (audioCtx && audioCtx.state === "running") { audioBlocked = false; updateAudioHint(); } }).catch(() => {});
+      }
+      return;
+    }
+    audioBlocked = false;
     const master = ctx.createGain();
     master.gain.value = (opts && opts.vol != null) ? opts.vol : 0.55;
     const lp = ctx.createBiquadFilter();
@@ -4357,13 +4389,28 @@ const unlockAudio = () => {
   if (!audioCtx) {
     try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
   }
-  if (audioCtx && audioCtx.state === "suspended") { try { audioCtx.resume(); } catch (_) {} }
+  if (audioCtx && audioCtx.state !== "running") {
+    try {
+      const pr = audioCtx.resume();
+      if (pr && typeof pr.then === "function") pr.then(() => { audioBlocked = false; updateAudioHint(); }).catch(() => {});
+    } catch (_) {}
+  }
+  audioBlocked = !(audioCtx && audioCtx.state === "running");
+  updateAudioHint();
   requestNotifyPermission();
 };
-document.addEventListener("click", unlockAudio, { once: true });
-document.addEventListener("touchstart", unlockAudio, { once: true });
-document.addEventListener("keydown", unlockAudio, { once: true });
-document.addEventListener("pointerdown", unlockAudio, { once: true });
+// tanpa { once:true } supaya tetap bisa mencoba lagi bila percobaan pertama belum berhasil
+document.addEventListener("click", unlockAudio);
+document.addEventListener("touchstart", unlockAudio);
+document.addEventListener("keydown", unlockAudio);
+document.addEventListener("pointerdown", unlockAudio);
+// tombol indikator suara: aktifkan + tes 1 nada (dipasang langsung; elemen sudah ada di DOM)
+(function bindAudioHint() {
+  const b = document.getElementById("audio-hint");
+  if (b) b.addEventListener("click", (ev) => { ev.stopPropagation(); unlockAudio(); setTimeout(() => playSoundAlert(), 60); });
+  updateAudioHint();
+  setTimeout(updateAudioHint, 1200);
+})();
 
 /* ===== Background alert: desktop notification + tab title flash =====
    Audio stays ACTIVE-COMBO only (see updateSignal). These fire for EVERY combo so a

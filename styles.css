@@ -477,3 +477,11 @@ body {
 .dual-col.flash-signal .dc-coin::after { content: " ● SIGNAL"; color: #f0b90b; font-size: 10px; }
 .dual-col.flash-entry  .dc-coin::after { content: " ● ENTRY"; color: var(--up); font-size: 10px; }
 .dual-col.flash-exit   .dc-coin::after { content: " ● CLOSE"; color: var(--down); font-size: 10px; }
+
+/* ===== Indikator status suara notifikasi (topbar) ===== */
+.audio-hint { margin-left: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border);
+  font-size: 10px; font-weight: 800; letter-spacing: .04em; cursor: pointer; white-space: nowrap;
+  background: var(--panel-2); }
+.audio-hint.on { color: var(--up); border-color: rgba(14,203,129,.35); background: rgba(14,203,129,.12); }
+.audio-hint.off { color: var(--down); border-color: rgba(246,70,93,.35); background: rgba(246,70,93,.12); }
+.audio-hint:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

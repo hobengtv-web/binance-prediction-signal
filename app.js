@@ -1161,13 +1161,20 @@ function applyType() {
     }
     if (!tradePlan.entered) delete _tradeEntered[uniKey];   // no position yet / stand down
     tradePlan.entryPrice = _tradeEntered[uniKey] ? _tradeEntered[uniKey].price : null;
-    // Actionable alerts (once per session/state) for entry and averaging.
-    if (tradePlan.state === "ENTRY" || tradePlan.state === "AVERAGE") {
-      const ak = `${uniKey}|${tradePlan.state}`;
-      if (!_tradeAlerted.has(ak)) {
-        _tradeAlerted.add(ak);
-        console.log(`[TRADE] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
+    // State-transition alerts with DISTINCT sounds:
+    //   entry/average -> rising chirp ; close/cut -> descending chime ; signal entry -> pulsing (existing)
+    // First observation of a combo is silent, so switching tabs does not replay a sound.
+    const prevTradeState = _tradeLastState[uniKey];
+    _tradeLastState[uniKey] = tradePlan.state;
+    if (prevTradeState !== undefined && tradePlan.state !== prevTradeState) {
+      if (tradePlan.state === "ENTRY" || tradePlan.state === "AVERAGE") {
+        playTradeEntrySound();
+        console.log(`[TRADE][SOUND-ENTRY] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
         flashTitle(`▶ ${tradePlan.action} ${state.asset}/${state.interval}`);
+      } else if (tradePlan.state === "CLOSE" || tradePlan.state === "STAND_DOWN") {
+        playCloseSound();
+        console.log(`[TRADE][SOUND-CLOSE] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
+        flashTitle(`■ ${tradePlan.action} ${state.asset}/${state.interval}`);
       }
     }
     // High-risk alert: notify once per session when the health score is critical.
@@ -1860,7 +1867,7 @@ function computeLockStatus(key, dir, lock, price, now) {
    window), counter-direction volume, RSI/z stretch, opposite peak confirmation, higher-tf
    trend flip, and how long price has been against. Advisory only. */
 const _warnedKeys = new Set();   // one high-risk alert per combo per session
-const _tradeAlerted = new Set(); // one entry/average alert per combo per session per state
+const _tradeLastState = {};      // key -> last trade-assistant state (drives transition alerts)
 function computeSignalHealth(dir, ctx) {
   if (dir !== "up" && dir !== "down") return { score: 0, label: "—", fired: [], confirmedReversal: false };
   const isUp = dir === "up";
@@ -2155,10 +2162,9 @@ function updateProjectionUniversal() {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) delete _tradePeak[k];
   }
-  for (const k of _tradeAlerted) {
-    const base = k.split("|")[0];                 // `${sym}_${tf}_${t0}`
-    const t = parseInt(base.split("_")[2]);
-    if (!isNaN(t) && t < CUTOFF) _tradeAlerted.delete(k);
+  for (const k in _tradeLastState) {
+    const t = parseInt(k.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) delete _tradeLastState[k];
   }
   for (const k of _warnedKeys) {
     const t = parseInt(k.split("_")[2]);
@@ -2970,6 +2976,45 @@ function playSoundAlert() {
   }
 }
 
+// Generic tone-sequence player so each alert type has its own distinct sound.
+function playSequence(notes) {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audioCtx;
+    if (ctx.state === "suspended") ctx.resume();
+    for (const n of notes) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = n.type || "sine";
+      osc.frequency.setValueAtTime(n.f, ctx.currentTime + n.t);
+      gain.gain.setValueAtTime(0, ctx.currentTime + n.t);
+      gain.gain.linearRampToValueAtTime(n.vol || 0.3, ctx.currentTime + n.t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + n.t + n.d);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + n.t);
+      osc.stop(ctx.currentTime + n.t + n.d + 0.03);
+    }
+  } catch (e) { console.log("[SOUND] failed:", e.message); }
+}
+// TRADE ASSISTANT: entry / average -> bright rising two-note chirp (twice).
+function playTradeEntrySound() {
+  playSequence([
+    { f: 660, t: 0.00, d: 0.16, type: "triangle", vol: 0.38 },
+    { f: 990, t: 0.18, d: 0.22, type: "triangle", vol: 0.42 },
+    { f: 660, t: 0.48, d: 0.16, type: "triangle", vol: 0.38 },
+    { f: 990, t: 0.66, d: 0.26, type: "triangle", vol: 0.42 },
+  ]);
+}
+// TRADE ASSISTANT: close / cut -> descending three-note chime.
+function playCloseSound() {
+  playSequence([
+    { f: 1046, t: 0.00, d: 0.18, type: "sine", vol: 0.42 },
+    { f: 784, t: 0.20, d: 0.20, type: "sine", vol: 0.40 },
+    { f: 523, t: 0.42, d: 0.34, type: "sine", vol: 0.36 },
+  ]);
+}
+
 // Preload audio context on first user interaction
 const unlockAudio = () => {
   if (!audioCtx) {
@@ -3163,12 +3208,14 @@ function start() {
   if (audioTestBtn) {
     audioTestBtn.addEventListener("click", () => {
       try {
-        playSoundAlert();
-        audioTestBtn.textContent = "✓";
+        playSoundAlert();                          // 1) signal entry (pulsing)
+        setTimeout(playTradeEntrySound, 2200);     // 2) trade entry/average (rising)
+        setTimeout(playCloseSound, 3800);          // 3) close/cut (descending)
+        audioTestBtn.textContent = "✓ 3 sounds";
       } catch (e) {
         audioTestBtn.textContent = "❌";
       }
-      setTimeout(() => { audioTestBtn.textContent = "🔊"; }, 2000);
+      setTimeout(() => { audioTestBtn.textContent = "🔊"; }, 4500);
     });
   }
 

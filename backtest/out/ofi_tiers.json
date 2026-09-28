@@ -1,0 +1,38 @@
+{
+  "generated": "2026-09-28T05:17:09.915Z",
+  "windowDays": 30,
+  "ofi": {
+    "5m|PREVIEW": {
+      "n": 12648,
+      "wr": 0.6701
+    },
+    "5m|PREVIEW|strong": {
+      "n": 9880,
+      "wr": 0.6811
+    },
+    "5m|CONFIRMED": {
+      "n": 12138,
+      "wr": 0.8099
+    },
+    "5m|CONFIRMED|strong": {
+      "n": 8282,
+      "wr": 0.8287
+    },
+    "15m|PREVIEW": {
+      "n": 4231,
+      "wr": 0.6027
+    },
+    "15m|PREVIEW|strong": {
+      "n": 3292,
+      "wr": 0.6166
+    },
+    "15m|CONFIRMED": {
+      "n": 4000,
+      "wr": 0.8217
+    },
+    "15m|CONFIRMED|strong": {
+      "n": 2157,
+      "wr": 0.847
+    }
+  }
+}

@@ -61,7 +61,8 @@ function startBinance() {
           }
         }
         
-        broadcast("trade", { sym, price: +d.p, qty: +d.q, ts: d.T });
+        // `m` = isBuyerMaker: true means the aggressor was the seller (taker sell).
+        broadcast("trade", { sym, price: +d.p, qty: +d.q, ts: d.T, m: d.m });
       } else if (d.e === "24hrTicker") {
         const sym = d.s === "BTCUSDT" ? "BTC" : "ETH";
         broadcast("ticker", { sym, chg: +d.P, last: +d.c });

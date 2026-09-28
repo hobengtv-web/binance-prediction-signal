@@ -64,6 +64,8 @@ const state = {
   cache: {},
   ticker: { BTC: null, ETH: null },
   orderbook: { BTC: null, ETH: null },
+  // executed order flow per minute: flow[sym][minuteStartSec] = { buy, sell, n }
+  flow: { BTC: {}, ETH: {} },
   // previous live price for gap sync
   prevPrice: { BTC: null, ETH: null },
   connected: false,
@@ -200,6 +202,24 @@ function aggregate5s(ones) {
 function sessionBounds(durMs, now) {
   const start = Math.floor(now / durMs) * durMs;
   return { start, end: start + durMs };
+}
+function pruneFlow(sym, keepFromSec) {
+  const f = state.flow[sym];
+  if (!f) return;
+  for (const k in f) if (+k < keepFromSec - 3600) delete f[k];   // keep ~1h
+}
+// Cumulative executed order-flow imbalance over [t0Sec, nowSec). Returns null if no data.
+function sessionOFI(sym, t0Sec, nowSec) {
+  const f = state.flow[sym];
+  if (!f) return null;
+  let buy = 0, sell = 0, mins = 0;
+  for (let t = t0Sec; t < nowSec; t += 60) {
+    const o = f[t];
+    if (o) { buy += o.buy; sell += o.sell; mins++; }
+  }
+  if (!mins) return null;
+  const tot = buy + sell;
+  return tot > 0 ? (buy - sell) / tot : 0;
 }
 function sessionLock(sym, durMs, now) {
   const startSec = Math.floor(sessionBounds(durMs, now).start / 1000);
@@ -1153,14 +1173,17 @@ function applyType() {
       });
     }
     // Keep the quality tier visible in the reason (it no longer fits in the short recommendation).
+    const ofiTxt = liveSig && liveSig.ofi != null
+      ? ` Order flow (OFI) ${(liveSig.ofi * 100).toFixed(0)} percent, ${liveSig.ofiAgree ? "agreeing" : "against"}.`
+      : "";
     if (previewSig) {
       const wr = previewSig.expectedWR != null ? `~${(previewSig.expectedWR * 100).toFixed(0)}%` : "unknown";
-      currentReason = `PREVIEW (accuracy ${wr}, not yet confirmed — wait for the confirmation window). ` + currentReason;
+      currentReason = `PREVIEW (accuracy ${wr}, not yet confirmed — wait for the confirmation window). ` + currentReason + ofiTxt;
     } else if (finalVerdict !== "flat") {
       const wr = uni && uni.expectedWR != null ? `${(uni.expectedWR * 100).toFixed(0)}%` : null;
       currentReason = (gateInfo
         ? `High confidence, backtested winrate ${(gateInfo.wr * 100).toFixed(0)} percent. `
-        : wr ? `Confirmed, backtested winrate ${wr}. ` : "Watchlist, not filtered for high winrate. ") + currentReason;
+        : wr ? `Confirmed, backtested winrate ${wr}. ` : "Watchlist, not filtered for high winrate. ") + currentReason + ofiTxt;
     }
     
     updateSignal({
@@ -1605,6 +1628,15 @@ let trendTimer = 0;
 // ----- realtime SSE path (local Node server): trade pushed on every fill -----
 function updateLiveTrade(d) {
   const sym = d.sym, price = +d.price, ts = +d.ts, qty = +d.qty || 0;
+  // Accumulate per-minute executed order flow (OFI) — pulled automatically with every trade.
+  // `m` (isBuyerMaker) true = taker sell; false = taker buy.
+  if (typeof d.m === "boolean" && isFinite(qty)) {
+    const min = Math.floor(ts / 60000) * 60;
+    const f = state.flow[sym] || (state.flow[sym] = {});
+    let b = f[min]; if (!b) { b = f[min] = { buy: 0, sell: 0, n: 0 }; pruneFlow(sym, min); }
+    if (d.m) b.sell += qty; else b.buy += qty;
+    b.n++;
+  }
   // Sync client ↔ Binance server time from the trade timestamp, throttled + smoothed.
   // Writing on EVERY trade makes serverNow() jitter by network latency, which can flip
   // the session boundary (and therefore sessionLock / sessionStart) near the edge.
@@ -1865,14 +1897,25 @@ async function loadTiers() {
     const res = await fetch("/backtest/out/tiers.json", { cache: "no-store" });
     if (!res.ok) { TIER_STATUS = "missing"; return; }
     TIERS = await res.json();
+    // Optional OFI-conditional table (order-flow agreement lifts CONFIRMED accuracy).
+    try {
+      const r2 = await fetch("/backtest/out/ofi_tiers.json", { cache: "no-store" });
+      if (r2.ok) { const j = await r2.json(); TIERS.ofi = j.ofi || null; }
+    } catch (_) {}
     TIER_STATUS = "ok";
-    console.log(`[TIERS] loaded · lockFrac ${TIERS.lockFrac} · preview/confirm tables ready`);
+    console.log(`[TIERS] loaded · lockFrac ${TIERS.lockFrac} · ofi table ${TIERS.ofi ? "yes" : "no"}`);
   } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
 }
 function tierWR(tf, mode, tier) {
   if (!TIERS) return null;
   const t = tier === "PREVIEW" ? TIERS.preview : TIERS.confirm;
   const o = t && t[`${tf}|${mode}`];
+  return o ? o.wr : null;
+}
+// OFI-conditional winrate (from backtest/out/ofi_tiers.json, merged into tiers.json).
+function ofiWR(tf, tier, strong) {
+  if (!TIERS || !TIERS.ofi) return null;
+  const o = TIERS.ofi[`${tf}|${tier}${strong ? "|strong" : ""}`];
   return o ? o.wr : null;
 }
 
@@ -1992,6 +2035,12 @@ function updateProjectionUniversal() {
       const sig = calculateUniversalSignal(sym, tf, t0, now, candles5m);
       if (sig) {
         _deskSigLive[cacheKey] = sig;                 // live status (recomputed each tick)
+        // OFI filter: skip a CONFIRMED signal when executed order flow disagrees with it.
+        if (sig.verdict !== "flat" && sig.tier === "CONFIRMED" && sig.ofiAgree === false) {
+          sig.expectedWR = tierWR(tf, sig.mode, "PREVIEW");   // recompute for the demoted tier
+          sig.tier = "PREVIEW";                               // do not lock/notify against the flow
+          sig.mode = sig.mode + " (OFI contra)";
+        }
         if (sig.verdict !== "flat" && sig.tier === "CONFIRMED") {
           // Attach gate info at lock time (single place; reused by capture + notifications).
           const gk = gateKey(tf, sig.mode, sig.verdict, sig.rsi, sig.histStrength);
@@ -2080,10 +2129,19 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   const decision = SignalCore.decideSignal({ tf, elapsed, histTrend, firstCandleDir, currentDir, volRel, rsi });
   let verdict = decision.verdict, mode = decision.mode, conf = decision.conf;
   const histStr = histTrend?.strength || 0;
+  // Executed order-flow imbalance (OFI) accumulated live from the trade stream.
+  // Validated (30d): CONFIRMED 5m 78.7% -> 82.9%, 15m 80.1% -> 84.7% when OFI agrees.
+  const ofi = sessionOFI(sym, t0Sec, nowSecFloor);
+  const ofiAgree = (ofi == null || verdict === "flat") ? null : ((ofi >= 0) === (verdict === "up"));
   // Tier: PREVIEW before LOCK_FRAC of the session, CONFIRMED at/after it.
   const elapsedFrac = elapsed / dur;
   const tier = verdict === "flat" ? null : (elapsedFrac >= LOCK_FRAC ? "CONFIRMED" : "PREVIEW");
-  const expectedWR = tier ? tierWR(tf, mode, tier) : null;
+  const ofiStrong = ofi != null && Math.abs(ofi) >= 0.2;
+  let expectedWR = tier ? tierWR(tf, mode, tier) : null;
+  if (tier && ofiAgree) {
+    const o = ofiWR(tf, tier, ofiStrong);
+    if (o != null) expectedWR = o;
+  }
   const reason = SignalCore.buildReason({
     verdict, mode, rsi, volRel, strength: histStr,
     momentum: histTrend?.momentum, elapsedSec: elapsed / 1000,
@@ -2101,6 +2159,8 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     histStrength: histStr,
     tier,
     expectedWR,
+    ofi,
+    ofiAgree,
   };
 }
 
@@ -2862,12 +2922,14 @@ window.__comboStatus = function () {
         }
       }
       const tierNow = locked ? "CONFIRMED" : (live && live.verdict !== "flat" ? live.tier : "—");
+      const ofiNow = sessionOFI(sym, t0 / 1000, Math.floor(now / 1000));
       rows.push({
         combo: `${sym}/${tf}`,
         elapsed: Math.round((now - t0) / 1000) + "s",
         tier: tierNow,
         live: live ? live.mode + (live.verdict !== "flat" ? " " + live.verdict : "") : "—",
         locked: locked ? locked.mode + " " + locked.verdict : "—",
+        ofi: ofiNow == null ? "—" : (ofiNow * 100).toFixed(0) + "%",
         status: status,
         risk: risk,
         pending: PendingSig.has(key) ? "yes" : "no",

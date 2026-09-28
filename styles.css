@@ -182,6 +182,15 @@ body {
 .tp-levels { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; margin-top:6px; }
 .tp-levels b { color: var(--text); }
 .tp-meta { font-size:11px; color: var(--muted); margin-top:4px; }
+/* Volume value: emphasised + colour-graded by magnitude (bigger = greener) */
+.vol-val { font-weight: 800; font-size: 15px; letter-spacing: .02em; transition: color .2s; }
+.vol-val.v-na { color: var(--muted); }
+.vol-val.v-low { color: #f0b90b; }                                   /* <1.0x  low -> amber */
+.vol-val.v-mid { color: #cfd6e4; }                                   /* 1.0-1.5 neutral       */
+.vol-val.v-good { color: #7ee787; }                                  /* 1.5-2.5 light green   */
+.vol-val.v-strong { color: #2fd67a; }                                /* 2.5-4  green          */
+.vol-val.v-hot { color: #0ecb81; text-shadow: 0 0 8px rgba(14,203,129,.55); }  /* >=4 strong green */
+#s-liq { font-weight: 800; font-size: 14px; letter-spacing: .02em; }
 
 /* ---------- Mobile Prediction ---------- */
 .mobile-pred { padding: 10px 12px; background: var(--panel); border-top: 1px solid var(--border); }

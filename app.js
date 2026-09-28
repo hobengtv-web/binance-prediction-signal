@@ -656,8 +656,9 @@ function applyType() {
       confBar.className = "signal-conf-bar " + (o.verdict === "up" ? "up" : o.verdict === "down" ? "down" : "");
     }
     const fmtVol = (v) => v == null ? "—" : v >= 10 ? "≥10×" : v.toFixed(1) + "×";
-    if (volEl) volEl.textContent = fmtVol(o.vol5m);      // 5m traded-volume pace (drives the grade)
-    if (vol5sEl) vol5sEl.textContent = fmtVol(o.vol5s);  // 5s-window traded volume vs ~5 min baseline
+    const volClass = (v) => v == null ? "v-na" : v < 1.0 ? "v-low" : v < 1.5 ? "v-mid" : v < 2.5 ? "v-good" : v < 4 ? "v-strong" : "v-hot";
+    if (volEl) { volEl.textContent = fmtVol(o.vol5m); volEl.className = "vol-val " + volClass(o.vol5m); }      // 5m traded-volume pace (drives the grade)
+    if (vol5sEl) { vol5sEl.textContent = fmtVol(o.vol5s); vol5sEl.className = "vol-val " + volClass(o.vol5s); }  // 5s-window traded volume vs ~5 min baseline
     if (liqEl) {
       const liq = o.liquidity || "NORMAL";
       liqEl.textContent = liq;

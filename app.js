@@ -2175,7 +2175,7 @@ function minuteWR(tf, minuteIn) {
 function gradeVariant(tf, grade) {
   if (grade === "STRONG") return "OFI strong+vol>=3";
   if (grade === "GOOD") return "OFI agree+vol>=3";
-  if (grade === "FAIR") return tf === "5m" ? "OFI agree+vol>=1.2" : tf === "15m" ? "OFI agree+vol>=2" : "OFI agree+vol>=1.5";
+  if (grade === "FAIR") return tf === "5m" ? "OFI agree+vol>=0.6" : tf === "15m" ? "OFI agree+vol>=2" : "OFI agree+vol>=1.5";
   return null;
 }
 function gradeWR(tf, grade) {
@@ -2186,7 +2186,7 @@ function gradeWR(tf, grade) {
   return o ? o.wr : null;
 }
 // Minimum volume pace for the FAIR tier, per interval (calibrated 30d).
-function fairMinVol(tf) { return tf === "5m" ? 1.2 : tf === "15m" ? 2.0 : 1.5; }
+function fairMinVol(tf) { return tf === "5m" ? 0.6 : tf === "15m" ? 2.0 : 1.5; }
 // After this fraction of the session the price sits close to the lock, so the reward of a
 // recapture is tiny even if the direction is right -> those entries are suppressed.
 const LATE_FRAC = 0.7;

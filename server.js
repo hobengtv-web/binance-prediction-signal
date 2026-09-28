@@ -114,6 +114,88 @@ async function resolveMissing() {
 setTimeout(() => resolveMissing().catch(() => {}), 20000);
 setInterval(() => resolveMissing().catch(() => {}), 5 * 60 * 1000);
 
+/* ===== PHASE 3: MODEL SERVING + RE-FIT TERJADWAL =====
+   Model belajar (gate/touch/lessons) disajikan dari volume; app mengambilnya lewat
+   /api/model/*. Re-fit dijalankan otomatis sekali sehari: bangun kandidat dari ledger,
+   uji pada jendela uji, dan HANYA ganti model bila kandidat menang out-of-sample
+   (lihat learner.js shouldPromote). Kalau tidak menang, model lama tetap dipakai. */
+const LEARNER = require("./learner");
+const MODEL_DIR = path.join(LEDGER_DIR, "..", "models");
+const MODEL_CUR = path.join(MODEL_DIR, "current");
+const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
+const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
+const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json" };
+let modelMeta = { version: "default", promotedAt: null, metrics: null };
+
+function ensureModelDirs() { try { fs.mkdirSync(MODEL_CUR, { recursive: true }); } catch (_) {} }
+function readModelPart(part) {
+  const f = MODEL_FILES[part]; if (!f) return null;
+  try { const p = path.join(MODEL_CUR, f); if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8")); } catch (_) {}
+  try { const p = path.join(DEFAULT_OUT, f); if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8")); } catch (_) {}
+  return null;
+}
+function loadModelMeta() {
+  try {
+    const p = path.join(MODEL_CUR, "meta.json");
+    if (fs.existsSync(p)) modelMeta = JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch (_) {}
+}
+function incumbentModel() {          // bentuk {metrics, gate:{rules}, touch:{rules}} untuk perbandingan
+  const g = readModelPart("gate"), t = readModelPart("touch");
+  if (!g || !g.metrics) return null;
+  return { metrics: g.metrics, gate: { rules: g.rules || [] }, touch: { rules: (t && t.rules) || [] } };
+}
+let refitting = false;
+async function refit(trigger = "manual") {
+  if (refitting) return { ok: false, why: "re-fit sedang berjalan" };
+  refitting = true;
+  try {
+    const records = [...ledger.values()];
+    const rows = LEARNER.rowsFrom(records);
+    const cand = LEARNER.buildModel(rows);
+    const res = { trigger, at: new Date().toISOString(), rows: rows.length, ok: cand.ok };
+    if (!cand.ok) { res.why = cand.reason; res.promote = false; }
+    else {
+      const inc = incumbentModel();
+      // bandingkan pada data uji yang SAMA jika model berjalan punya metrik;
+      // kalau tidak ada, kandidat dipakai (kondisi awal).
+      const dec = LEARNER.shouldPromote({ metrics: cand.metrics }, inc);
+      res.promote = dec.promote; res.why = dec.why;
+      res.candidate = cand.metrics;
+      res.incumbent = inc ? inc.metrics : null;
+      if (dec.promote) {
+        ensureModelDirs();
+        const ver = new Date().toISOString().replace(/[:.]/g, "-");
+        const hist = path.join(MODEL_DIR, "v-" + ver);
+        try { fs.mkdirSync(hist, { recursive: true }); } catch (_) {}
+        const write = (name, obj) => {
+          fs.writeFileSync(path.join(MODEL_CUR, name), JSON.stringify(obj, null, 1));
+          try { fs.writeFileSync(path.join(hist, name), JSON.stringify(obj, null, 1)); } catch (_) {}
+        };
+        write("learn_gate.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.gate));
+        write("learn_touch90.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, baseline: cand.baseline }, cand.touch));
+        write("lessons.json", Object.assign({ generated: new Date().toISOString(), version: ver }, cand.lessons));
+        const meta = { version: ver, promotedAt: new Date().toISOString(), trigger, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline, why: dec.why };
+        write("meta.json", meta);
+        modelMeta = meta;
+        res.version = ver;
+      }
+    }
+    try { fs.appendFileSync(MODEL_LOG, JSON.stringify(res) + "\n"); } catch (_) {}
+    console.log(`[REFIT] ${res.promote ? "PROMOTE" : "KEEP"} · ${res.why || ""} · rows ${rows.length}`);
+    return res;
+  } finally { refitting = false; }
+}
+ensureModelDirs(); loadModelMeta();
+// Jadwal: setiap jam, tapi hanya menjalankan re-fit sekali per hari pada REFIT_HOUR (default 03:00 WIB/server).
+const REFIT_HOUR = parseInt(process.env.REFIT_HOUR || "3", 10);
+let lastRefitDay = null;
+setInterval(() => {
+  const d = new Date();
+  const day = d.toISOString().slice(0, 10);
+  if (d.getHours() === REFIT_HOUR && lastRefitDay !== day) { lastRefitDay = day; refit("jadwal").catch(() => {}); }
+}, 10 * 60 * 1000);
+
 const clients = new Set();
 let bnWs = null, bnPollTimer = null, bnHostIdx = 0;
 
@@ -328,6 +410,33 @@ http.createServer(async (req, res) => {
     } else {
       res.end(JSON.stringify(st));
     }
+    return;
+  }
+
+  // ---- PHASE 3: model belajar yang sedang dipakai ----
+  if (u.pathname.startsWith("/api/model")) {
+    const part = u.pathname.replace("/api/model", "").replace(/^\//, "");
+    if (part === "refit") {
+      if (req.method !== "POST") { res.writeHead(405, CORS); res.end('{"error":"POST only"}'); return; }
+      refit("manual").then((r) => {
+        res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+        res.end(JSON.stringify(r));
+      }).catch((e) => { res.writeHead(500, CORS); res.end(JSON.stringify({ error: String(e) })); });
+      return;
+    }
+    if (part === "" || part === "meta") {
+      res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+      res.end(JSON.stringify({ meta: modelMeta, served: { gate: !!readModelPart("gate"), touch: !!readModelPart("touch"), lessons: !!readModelPart("lessons") }, pending: (() => { let n = 0; for (const r of ledger.values()) if (r.res && !r.sig) n++; return n; })() }));
+      return;
+    }
+    if (MODEL_FILES[part]) {
+      const m = readModelPart(part);
+      if (!m) { res.writeHead(404, CORS); res.end('{"error":"no model"}'); return; }
+      res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+      res.end(JSON.stringify(m));
+      return;
+    }
+    res.writeHead(404, CORS); res.end('{"error":"unknown model part"}');
     return;
   }
 

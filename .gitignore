@@ -8,3 +8,4 @@ backtest/out/signals.json
 
 # Phase 2 ledger (data lokal, bukan artefak repo)
 ledger/
+models/

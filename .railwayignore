@@ -5,3 +5,4 @@ backtest/out/signals.json
 *.bak
 .DS_Store
 ledger/
+models/

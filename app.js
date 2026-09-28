@@ -2233,14 +2233,17 @@ const LEARN_SAFE = new Set(["interval", "symbol", "mode", "minute", "rsi", "hour
 async function loadLearn() {
   const get = (u) => fetch(u, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   try {
-    const [g, t, l] = await Promise.all([
-      get("/backtest/out/learn_gate.json"),
-      get("/backtest/out/learn_touch90.json"),
-      get("/backtest/out/lessons.json"),
-    ]);
-    LEARN.gate = g; LEARN.touch = t; LEARN.lessons = l;
+    // Model yang sedang dipakai disajikan server (hasil re-fit dari ledger produksi bila ada);
+    // bila belum tersedia, jatuh ke tabel statis (hasil backtest 90d).
+    let [g, t, l] = await Promise.all([get("/api/model/gate"), get("/api/model/touch"), get("/api/model/lessons")]);
+    const src = (g && t) ? "model server" : "tabel statis";
+    if (!g) g = await get("/backtest/out/learn_gate.json");
+    if (!t) t = await get("/backtest/out/learn_touch90.json");
+    if (!l) l = await get("/backtest/out/lessons.json");
+    LEARN.gate = g; LEARN.touch = t; LEARN.lessons = l; LEARN.src = src;
+    LEARN.meta = await get("/api/model/meta");
     LEARN.status = g ? "ok" : "missing";
-    console.log(`[LEARN] gate ${g ? "ok" : "-"} · touch90 ${t ? "ok" : "-"} · lessons ${l ? "ok" : "-"}`);
+    console.log(`[LEARN] ${src} · gate ${g ? "ok" : "-"} · touch ${t ? "ok" : "-"} · lessons ${l ? "ok" : "-"}`);
     renderLessons();
   } catch (e) { LEARN.status = "error"; console.warn("[LEARN] load failed:", e.message); }
 }
@@ -2270,17 +2273,19 @@ function learnLookup(o) {
   const res = { ctx, dirWR: null, dirLb: null, dirN: 0, intervalWR: null, touch: null, touchLb: null, touchN: 0, weak: [], strong: [], blockable: [], label: "NETRAL" };
   const G = LEARN.gate, T = LEARN.touch;
   if (G && G.buckets) {
+    // Ambang 200: di bawah itu interval kepercayaan terlalu lebar untuk ditampilkan jujur.
     const mi = G.buckets.minute && G.buckets.minute[ctx.minute];
-    if (mi && mi.nTest >= 500) { res.dirWR = mi.wrTest; res.dirLb = mi.lbTest; res.dirN = mi.nTest; }
+    if (mi && mi.nTest >= 200) { res.dirWR = mi.wrTest; res.dirLb = mi.lbTest; res.dirN = mi.nTest; }
     const iv = G.buckets.interval && G.buckets.interval[ctx.interval];
-    if (iv && iv.nTest >= 500) res.intervalWR = { wr: iv.wrTest, lb: iv.lbTest, n: iv.nTest };
+    if (iv && iv.nTest >= 200) res.intervalWR = { wr: iv.wrTest, lb: iv.lbTest, n: iv.nTest };
     // hanya aturan interval TUNGGAL (mis. "interval=1h") yang boleh menahan sinyal —
     // aturan gabungan seperti "interval=5m&minute=1" terlalu umum (semua sinyal 2s cocok).
     for (const k of G.suppress || []) if (k.indexOf("interval=") === 0 && k.indexOf("&") === -1 && learnMatch(k, ctx)) res.blockable.push(k);
   }
   if (T && T.buckets) {
     const gb = T.buckets.gap && T.buckets.gap[ctx.gap];
-    if (gb && gb.nTest >= 500) { res.touch = gb.touchTest; res.touchLb = gb.lbTest; res.touchN = gb.nTest; }
+    // tabel statis menyimpan lb sentuh di lbTest; model server di touchLbTest -> dukung keduanya
+    if (gb && gb.nTest >= 200) { res.touch = gb.touchTest; res.touchLb = (gb.touchLbTest != null ? gb.touchLbTest : gb.lbTest); res.touchN = gb.nTest; }
     // gap = faktor dominan play reversion; hanya aturan gap TUNGGAL yang boleh menahan sinyal
     for (const k of T.suppress || []) if (k.indexOf("gap=") === 0 && k.indexOf("&") === -1 && learnMatch(k, ctx)) res.blockable.push(k);
   }
@@ -2304,7 +2309,12 @@ function learnNote(L) {
 function renderLessons() {
   const el = document.getElementById("lessons-body"); if (!el) return;
   const st = document.getElementById("ls-status");
-  if (st && LEARN.gate) st.textContent = `${LEARN.gate.rules.length} aturan arah · ${LEARN.touch ? LEARN.touch.rules.length : 0} aturan lock-touch · baseline uji ${(LEARN.gate.baseline.test * 100).toFixed(1)}% (${LEARN.gate.rows} sinyal)`;
+  if (st && LEARN.gate) {
+    const bt = LEARN.gate.baseline || {};
+    const baseTxt = bt.test != null ? bt.test : (bt.dirTest != null ? bt.dirTest : null);
+    const ver = LEARN.meta && LEARN.meta.meta && LEARN.meta.meta.version ? ` · model ${String(LEARN.meta.meta.version).slice(0, 16)}` : "";
+    st.textContent = `${LEARN.gate.rules.length} aturan arah · ${LEARN.touch ? LEARN.touch.rules.length : 0} aturan lock-touch · baseline uji ${baseTxt != null ? (baseTxt * 100).toFixed(1) + "%" : "—"} (${LEARN.gate.rows || "?"} sinyal) · sumber: ${LEARN.src || "—"}${ver}`;
+  }
   const l = LEARN.lessons;
   if (!l || !l.lessons || !l.lessons.length) { el.innerHTML = '<div class="cd-empty">belum ada data pelajaran</div>'; return; }
   const row = (x) => x.type === "cause"

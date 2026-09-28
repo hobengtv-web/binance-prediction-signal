@@ -20,6 +20,9 @@ const OUT = path.join(__dirname, "out");
 const SYMBOLS = ["BTC", "ETH"];
 const TFS = ["5m", "15m", "1h"];
 const MS = Core.INTERVAL_MS;
+// Lock the actionable ("CONFIRMED") signal only at/after this fraction of the session.
+// Data shows accuracy rises steeply with time: 5m 68% (min1) -> 89% (60%) -> 94% (80%).
+const LOCK_FRAC = 0.6;
 
 const load = (sym, tf) => JSON.parse(fs.readFileSync(path.join(DATA, `${sym}_${tf}.json`), "utf8"));
 const lowerBound = (arr, t) => {
@@ -63,7 +66,8 @@ function buildRecords() {
         const baseVols = one.slice(Math.max(0, p1 - 25), p1).map((c) => c.vol);
         const baseVol = baseVols.length ? baseVols.reduce((a, b) => a + b, 0) / baseVols.length : 1;
 
-        let sig = null;
+        let preview = null, confirmed = null;
+        const jStart = Math.max(1, Math.ceil(LOCK_FRAC * intra.length));
         for (let j = 1; j <= intra.length; j++) {
           const nowSec = intra[j - 1].time + 60;
           const C = intra[j - 1].close;
@@ -71,15 +75,22 @@ function buildRecords() {
           const firstCandleDir = intra[0].close > intra[0].open ? "bullish" : "bearish";
           const w = intra.slice(Math.max(0, j - 5), j).map((c) => c.vol);
           const volRel = (w.reduce((a, b) => a + b, 0) / w.length) / (baseVol || 1);
-          const fi = lowerBound(five, nowSec);
-          const rsi = Core.rsiFromSeries(five.slice(0, fi).slice(-50), 14);
+          // RSI from 5m candles that have COMPLETED by nowSec (no lookahead: exclude the
+          // still-forming 5m candle whose final close would leak the future).
+          const rsi = Core.rsiFromSeries(five.filter((c) => c.time + 300 <= nowSec).slice(-50), 14);
           const res = Core.decideSignal({ tf, elapsed: (nowSec - t0) * 1000, histTrend, firstCandleDir, currentDir, volRel, rsi });
-          if (res.verdict !== "flat") { sig = { ...res, minutesIn: Math.round((nowSec - t0) / 60), rsi, volRel }; break; }
+          if (res.verdict !== "flat") {
+            const r1 = { ...res, minutesIn: Math.round((nowSec - t0) / 60), rsi, volRel };
+            if (!preview) preview = r1;                     // earliest non-flat (preview tier)
+            if (j >= jStart) { confirmed = r1; break; }     // lock at/after LOCK_FRAC of the session
+          }
         }
+        if (!confirmed) continue;
+        if (!preview) preview = confirmed;
 
         const lastClose = intra[intra.length - 1].close;
         const actual = lastClose >= lock ? "up" : "down";
-        if (!sig) continue;
+        const sig = confirmed;
         records.push({
           symbol: sym, interval: tf, t0,
           dir: sig.verdict, mode: sig.mode, conf: sig.conf,
@@ -89,6 +100,10 @@ function buildRecords() {
           volRel: +sig.volRel.toFixed(3),
           histStrength: histTrend.strength, histMomentum: histTrend.momentum, histDir: histTrend.predictDir,
           sessTrend, hour: new Date(t0 * 1000).getUTCHours(),
+          // PREVIEW tier = the earliest non-flat verdict (what we can show at the start)
+          pDir: preview.verdict, pMode: preview.mode, pWon: preview.verdict === actual ? 1 : 0,
+          pMinutesIn: preview.minutesIn, pVolRel: +preview.volRel.toFixed(3),
+          pRsi: preview.rsi != null ? +preview.rsi.toFixed(1) : null,
         });
       }
     }
@@ -176,9 +191,46 @@ function main() {
   const gate = [...l1.values()].filter((o) => o.n >= 30 && o.lb >= 0.6)
     .map((o) => ({ key: o.key, n: o.n, wr: +o.wr.toFixed(4), lb: +o.lb.toFixed(4) }))
     .sort((a, b) => b.lb - a.lb);
+
+  // ---- Tier table for the app: PREVIEW (earliest) / EARLY-HIGH (vol>=3x) / CONFIRMED ----
+  const aggKey = (rows, dirKey, wonKey) => {
+    const m = new Map();
+    for (const r of rows) {
+      const k = `${r.interval}|${r[dirKey === "dir" ? "mode" : "pMode"]}`;
+      const dir = r[dirKey];
+      if (dir === "flat") continue;
+      let o = m.get(k); if (!o) { o = { n: 0, w: 0 }; m.set(k, o); }
+      o.n++; o.w += r[wonKey];
+    }
+    const out = {};
+    for (const [k, o] of m) out[k] = { n: o.n, wr: +(o.w / o.n).toFixed(4) };
+    return out;
+  };
+  const preview = aggKey(records, "pDir", "pWon");
+  const confirm = aggKey(records, "dir", "won");
+  const earlyHigh = {};
+  for (const r of records) {
+    if (r.pVolRel < 3) continue;
+    const k = r.interval;
+    let o = earlyHigh[k]; if (!o) { o = { n: 0, w: 0 }; earlyHigh[k] = o; }
+    o.n++; o.w += r.pWon;
+  }
+  for (const k of Object.keys(earlyHigh)) { const o = earlyHigh[k]; earlyHigh[k] = { n: o.n, wr: +(o.w / o.n).toFixed(4) }; }
+
   fs.writeFileSync(path.join(OUT, "signals.json"), JSON.stringify(records));
   fs.writeFileSync(path.join(OUT, "gate.json"), JSON.stringify({ generated: new Date().toISOString(), days: +days.toFixed(2), baseline: +(wins / records.length).toFixed(4), total: records.length, gate }, null, 2));
-  console.log(`\nWrote out/signals.json, out/gate.json  (${((Date.now() - t0ms) / 1000).toFixed(1)}s)  gate conditions: ${gate.length}`);
+  fs.writeFileSync(path.join(OUT, "tiers.json"), JSON.stringify({
+    generated: new Date().toISOString(), lockFrac: LOCK_FRAC, days: +days.toFixed(2),
+    baseline: +(wins / records.length).toFixed(4),
+    preview, earlyHigh, confirm,
+  }, null, 2));
+  console.log(`\n=== PREVIEW (earliest, all) ===`);
+  for (const [k, o] of Object.entries(preview).sort((a, b) => b[1].n - a[1].n).slice(0, 6)) console.log(`  ${k.padEnd(20)} n=${String(o.n).padStart(5)} wr=${(o.wr * 100).toFixed(1)}%`);
+  console.log(`=== EARLY-HIGH (preview & volRel>=3) ===`);
+  for (const [k, o] of Object.entries(earlyHigh)) console.log(`  ${k.padEnd(6)} n=${String(o.n).padStart(5)} wr=${(o.wr * 100).toFixed(1)}%`);
+  console.log(`=== CONFIRMED (lock >= ${LOCK_FRAC * 100}% session) ===`);
+  for (const [k, o] of Object.entries(confirm).sort((a, b) => b[1].n - a[1].n).slice(0, 6)) console.log(`  ${k.padEnd(20)} n=${String(o.n).padStart(5)} wr=${(o.wr * 100).toFixed(1)}%`);
+  console.log(`\nWrote out/signals.json, out/gate.json, out/tiers.json  (${((Date.now() - t0ms) / 1000).toFixed(1)}s)  gate conditions: ${gate.length}`);
 }
 
 main();

@@ -62,28 +62,22 @@
   }
 
   // Single source of truth for entry decision (mirrors app.js calculateUniversalSignal).
+  // Calibrated on 90d walk-forward: only TREND (5m/15m) and MOMENTUM (fallback) are
+  // predictive. HIST-PREDICT (43%) and REVERSAL (19-50%) were removed — they lost money.
   function decideSignal(input) {
-    const { tf, elapsed, histTrend, firstCandleDir, currentDir, volRel, rsi } = input;
+    const { tf, elapsed, currentDir, volRel } = input;
     const isHighFreq = tf === "5m" || tf === "15m";
+    const volOK = volRel >= 1.05;
     let verdict = "flat", mode = "CONT", conf = 0;
 
-    if (histTrend && histTrend.predictDir !== "flat" && histTrend.strength >= 35) {
-      verdict = histTrend.predictDir;
-      mode = "HIST-PREDICT";
-      conf = Math.min(100, Math.round(histTrend.strength * 0.85));
-    } else if (isHighFreq && volRel >= 1.05 && currentDir !== "flat") {
+    if (isHighFreq && volOK && currentDir !== "flat") {
       verdict = currentDir; mode = "TREND"; conf = 65;
-    } else if (firstCandleDir === "bullish" && rsi != null && rsi < 40 && volRel >= 1.05) {
-      verdict = "up"; mode = "REVERSAL↑"; conf = 70;
-    } else if (firstCandleDir === "bearish" && rsi != null && rsi > 60 && volRel >= 1.05) {
-      verdict = "down"; mode = "REVERSAL↓"; conf = 70;
-    } else if (elapsed >= 30000 && currentDir !== "flat" && volRel >= 1.05) {
+    } else if (elapsed >= 30000 && volOK && currentDir !== "flat") {
       verdict = currentDir; mode = "MOMENTUM"; conf = 60;
     } else {
       verdict = "flat";
       if (elapsed < 15000) mode = "WARMUP";
-      else if (volRel < 1.05) mode = "LOWVOL";
-      else if (!histTrend || histTrend.strength < 35) mode = "WEAK-TREND";
+      else if (!volOK) mode = "LOWVOL";
       else mode = "FILTERED";
     }
     return { verdict, mode, conf };

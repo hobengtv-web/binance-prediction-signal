@@ -644,6 +644,10 @@ function applyType() {
       if (o.analyzing) {
         rec.textContent = "Sedang Menganalisa";
         rec.className = "signal-rec flat";
+      } else if (o.preview) {
+        const dirWord = o.previewDir === "up" ? "UP" : "DOWN";
+        rec.textContent = `Preview: ${dirWord}`;
+        rec.className = "signal-rec " + (o.previewDir === "up" ? "up" : "down");
       } else if (o.verdict === "flat") {
         rec.textContent = "No entry for this round";
         rec.className = "signal-rec flat";
@@ -656,8 +660,13 @@ function applyType() {
     // Alert badge next to the recommendation (Masih Sesuai / Awas Melemah / Waspada / Sudah Berbalik)
     const recStatusEl = document.getElementById("rec-status");
     if (recStatusEl) {
-      recStatusEl.textContent = o.recStatus || "";
-      recStatusEl.className = "rec-status" + (o.recStatusClass ? " " + o.recStatusClass : "");
+      if (o.preview) {
+        recStatusEl.textContent = o.previewWR != null ? `Menunggu Konfirmasi (${(o.previewWR * 100).toFixed(0)}%)` : "Menunggu Konfirmasi";
+        recStatusEl.className = "rec-status warn";
+      } else {
+        recStatusEl.textContent = o.recStatus || "";
+        recStatusEl.className = "rec-status" + (o.recStatusClass ? " " + o.recStatusClass : "");
+      }
     }
     
     // Trigger alarm otomatis ketika sinyal entry muncul (flat -> up/down transisi)
@@ -1048,8 +1057,10 @@ function applyType() {
   // the entry that is later scored (no desktop-engine mismatch).
   let gateInfo = null;
   const uniKey = `${state.asset}_${state.interval}_${sessionStart}`;
-  const uni = _deskSigCache[uniKey];              // locked (non-flat only)
+  const uni = _deskSigCache[uniKey];              // CONFIRMED lock only
   const liveSig = uni || _deskSigLive[uniKey] || null;
+  // PREVIEW: a non-flat verdict exists but the session hasn't reached the confirmation point yet.
+  const previewSig = (!uni && liveSig && liveSig.verdict !== "flat") ? liveSig : null;
   if (uni && uni.verdict !== "flat") {
     finalVerdict = uni.verdict;
     mode = uni.mode;
@@ -1109,8 +1120,8 @@ function applyType() {
   const calcStatus = uni
     ? `Signal locked ${elapsedSec - Math.round((now - uni.lockedAt) / 1000)}s after session open · mode ${uni.mode}`
     : `Evaluating session, open +${elapsedSec}s · ${liveSig ? liveSig.mode : "collecting data"}`;
-  // Still analyzing until a signal locks OR the warmup window has passed with a verdict.
-  const analyzing = !uni && (
+  // Still analyzing until a signal locks OR a preview exists OR warmup passed with a verdict.
+  const analyzing = !uni && !previewSig && (
     elapsedSec < 15 ||
     !liveSig ||
     liveSig.mode === "MENUNGGU" ||
@@ -1142,10 +1153,14 @@ function applyType() {
       });
     }
     // Keep the quality tier visible in the reason (it no longer fits in the short recommendation).
-    if (finalVerdict !== "flat") {
+    if (previewSig) {
+      const wr = previewSig.expectedWR != null ? `~${(previewSig.expectedWR * 100).toFixed(0)}%` : "unknown";
+      currentReason = `PREVIEW (accuracy ${wr}, not yet confirmed — wait for the confirmation window). ` + currentReason;
+    } else if (finalVerdict !== "flat") {
+      const wr = uni && uni.expectedWR != null ? `${(uni.expectedWR * 100).toFixed(0)}%` : null;
       currentReason = (gateInfo
         ? `High confidence, backtested winrate ${(gateInfo.wr * 100).toFixed(0)} percent. `
-        : "Watchlist, not filtered for high winrate. ") + currentReason;
+        : wr ? `Confirmed, backtested winrate ${wr}. ` : "Watchlist, not filtered for high winrate. ") + currentReason;
     }
     
     updateSignal({
@@ -1157,6 +1172,9 @@ function applyType() {
       reason: currentReason,
       highConf: !!gateInfo,
       gateWr: gateInfo ? gateInfo.wr : null,
+      preview: !!previewSig,
+      previewWR: previewSig && previewSig.expectedWR != null ? previewSig.expectedWR : null,
+      previewDir: previewSig ? previewSig.verdict : null,
       calcStatus,
       recStatus,
       recStatusClass,
@@ -1836,6 +1854,28 @@ async function loadGate() {
   } catch (e) { GATE_STATUS = "error"; console.warn("[GATE] load failed — all signals will be marked watchlist:", e.message); renderConfidenceReport(); }
 }
 
+/* ===== Two-tier calibration (see backtest/out/tiers.json) =====
+   PREVIEW   = earliest non-flat verdict (shown at the start, lower accuracy)
+   CONFIRMED = verdict at/after LOCK_FRAC of the session (actionable, high accuracy) */
+const LOCK_FRAC = 0.6;
+let TIERS = null;
+let TIER_STATUS = "loading";
+async function loadTiers() {
+  try {
+    const res = await fetch("/backtest/out/tiers.json", { cache: "no-store" });
+    if (!res.ok) { TIER_STATUS = "missing"; return; }
+    TIERS = await res.json();
+    TIER_STATUS = "ok";
+    console.log(`[TIERS] loaded · lockFrac ${TIERS.lockFrac} · preview/confirm tables ready`);
+  } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
+}
+function tierWR(tf, mode, tier) {
+  if (!TIERS) return null;
+  const t = tier === "PREVIEW" ? TIERS.preview : TIERS.confirm;
+  const o = t && t[`${tf}|${mode}`];
+  return o ? o.wr : null;
+}
+
 // Universal signal cache - untuk background calculation semua coin & interval
 let _deskSigCache = {};  // key: `${sym}_${tf}_${roundStart}` -> LOCKED signal (only non-flat entries)
 const _deskSigMap = {};  // key: same -> boolean (mark sudah capture)
@@ -1952,7 +1992,7 @@ function updateProjectionUniversal() {
       const sig = calculateUniversalSignal(sym, tf, t0, now, candles5m);
       if (sig) {
         _deskSigLive[cacheKey] = sig;                 // live status (recomputed each tick)
-        if (sig.verdict !== "flat") {
+        if (sig.verdict !== "flat" && sig.tier === "CONFIRMED") {
           // Attach gate info at lock time (single place; reused by capture + notifications).
           const gk = gateKey(tf, sig.mode, sig.verdict, sig.rsi, sig.histStrength);
           const g = gateLookup(gk);
@@ -1960,8 +2000,8 @@ function updateProjectionUniversal() {
           sig.highConf = !!g;
           sig.gateWr = g ? g.wr : null;
           sig.lockedAt = now;                         // when the session signal was locked
-          _deskSigCache[cacheKey] = sig;              // lock ONLY once a real signal appears
-          console.log(`[SIGNAL] locked ${sym}/${tf} at +${Math.round((now - t0) / 1000)}s:`, sig.mode, sig.verdict, `conf ${sig.conf}`);
+          _deskSigCache[cacheKey] = sig;              // lock ONLY the CONFIRMED tier
+          console.log(`[SIGNAL] confirmed ${sym}/${tf} at +${Math.round((now - t0) / 1000)}s (${Math.round(((now - t0) / INTERVAL_MS[tf]) * 100)}% into session):`, sig.mode, sig.verdict, `expected ${sig.expectedWR != null ? (sig.expectedWR * 100).toFixed(1) + "%" : "—"}`);
           notifySignal(sym, tf, sig);                 // background alert (all combos)
         }
       }
@@ -2040,6 +2080,10 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   const decision = SignalCore.decideSignal({ tf, elapsed, histTrend, firstCandleDir, currentDir, volRel, rsi });
   let verdict = decision.verdict, mode = decision.mode, conf = decision.conf;
   const histStr = histTrend?.strength || 0;
+  // Tier: PREVIEW before LOCK_FRAC of the session, CONFIRMED at/after it.
+  const elapsedFrac = elapsed / dur;
+  const tier = verdict === "flat" ? null : (elapsedFrac >= LOCK_FRAC ? "CONFIRMED" : "PREVIEW");
+  const expectedWR = tier ? tierWR(tf, mode, tier) : null;
   const reason = SignalCore.buildReason({
     verdict, mode, rsi, volRel, strength: histStr,
     momentum: histTrend?.momentum, elapsedSec: elapsed / 1000,
@@ -2055,6 +2099,8 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     conf,
     rsi,
     histStrength: histStr,
+    tier,
+    expectedWR,
   };
 }
 
@@ -2244,7 +2290,7 @@ function renderConfidenceReport() {
   const totalAll = allData.length;
   const pendingCount = PendingSig.size();
   if (head) head.textContent = `DESKTOP SIGNAL ACCURACY · Universal · `;
-  if (countEl) countEl.textContent = `${totalAll} rounds total${pendingCount ? ` · ${pendingCount} waiting to settle` : ""}${GATE_STATUS === "ok" ? "" : ` · gate ${GATE_STATUS}`}`;
+  if (countEl) countEl.textContent = `${totalAll} rounds total${pendingCount ? ` · ${pendingCount} waiting to settle` : ""}${GATE_STATUS === "ok" ? "" : ` · gate ${GATE_STATUS}`}${TIER_STATUS === "ok" ? "" : ` · tiers ${TIER_STATUS}`}`;
   
   if (!totalAll) {
     body.innerHTML = `<div class="cd-empty">no completed rounds yet — ${pendingCount ? pendingCount + " signal(s) waiting to settle" : "let it run a few rounds"}</div>`;
@@ -2815,9 +2861,11 @@ window.__comboStatus = function () {
           risk = `${rr.risk} ${riskLabel(rr.risk)}`;
         }
       }
+      const tierNow = locked ? "CONFIRMED" : (live && live.verdict !== "flat" ? live.tier : "—");
       rows.push({
         combo: `${sym}/${tf}`,
         elapsed: Math.round((now - t0) / 1000) + "s",
+        tier: tierNow,
         live: live ? live.mode + (live.verdict !== "flat" ? " " + live.verdict : "") : "—",
         locked: locked ? locked.mode + " " + locked.verdict : "—",
         status: status,
@@ -2857,7 +2905,9 @@ function start() {
   evaluateUniversalSessions(serverNow());   // finalize rounds that already ended (e.g. after reload)
   renderConfidenceReport();
   loadGate();
+  loadTiers();
   setInterval(loadGate, 10 * 60 * 1000);
+  setInterval(loadTiers, 10 * 60 * 1000);
   setTimeout(rescoreAll, 8000);        // after history candles are loaded
   setTimeout(rescoreAll, 25000);
   // timers — use rAF for smooth timer, updateProjection only on data events

@@ -1395,10 +1395,18 @@ function applyType() {
      updateMobilePrediction();
      captureDesktopSignal();
 
-    // price zone overlay (entry zone / sell TP)
+    // price zone overlay (entry zone / sell TP) — must follow the RECOMMENDATION (what the
+    // user acts on), NOT the live price direction. Using liveStatus made the zones flip
+    // whenever price crossed the lock (e.g. after switching tabs, an UP signal showed the
+    // sell zone below the lock). Fallbacks below it: mobile prediction, then live direction.
+    const zoneKey = `${state.asset}_${state.interval}_${t0}`;
+    const recSig = _deskSigCache[zoneKey] || _deskSigLive[zoneKey] || null;
     const pred = _mobilePredSession;
-    const predDir = pred && pred.prediction !== "flat" && pred.lockPrice === O ? pred.prediction : liveStatus;
-     chart.setPrediction(predDir !== "flat" ? predDir : null, O);
+    const mobOk = pred && pred.prediction !== "flat" && pred.asset === state.asset &&
+      pred.interval === state.interval && pred.lockPrice != null && Math.abs(pred.lockPrice - O) < 1e-9;
+    const predDir = (recSig && recSig.verdict !== "flat") ? recSig.verdict
+      : (mobOk ? pred.prediction : liveStatus);
+    chart.setPrediction(predDir !== "flat" ? predDir : null, O);
     chart.setCurrentPrice(C);
 
     // Store session bounds for smooth rAF timer (client-time reference to avoid serverTimeOffset jitter)

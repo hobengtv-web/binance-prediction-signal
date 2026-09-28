@@ -1,0 +1,6 @@
+.git/
+node_modules/
+backtest/data/
+backtest/out/signals.json
+*.bak
+.DS_Store

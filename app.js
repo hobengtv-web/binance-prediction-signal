@@ -2347,11 +2347,15 @@ const LEDGER = (() => {
   function upsert(k, part) {
     const prev = map.get(k) || { k, v: 1 };
     const merged = Object.assign({}, prev, part);
-    if (prev.sig && !part.sig) merged.sig = prev.sig;
+    // Vektor fitur = snapshot PERTAMA (detik ke-2). Capture ulang sesi yang sama — mis. setelah
+    // user menekan reset di panel akurasi (yang mengosongkan _deskSigMap/_loggedKeys) — TIDAK
+    // boleh menimpa dengan snapshot dari menit yang lebih lambat, karena itu merusak data belajar.
+    if (prev.sig) merged.sig = prev.sig;          // first write wins
+    else if (part.sig) merged.sigSync = false;
+    // Hasil boleh diperbarui (mis. perkiraan 1m dari server -> jalur 1s dari klien yang lebih presisi).
+    if (part.res) merged.resSync = false;
     if (prev.res && !part.res) merged.res = prev.res;
     merged.upd = Date.now();
-    if (part.sig) merged.sigSync = false;
-    if (part.res) merged.resSync = false;
     map.set(k, merged); save();
     return merged;
   }
@@ -3706,6 +3710,9 @@ function bindControls() {
   });
   const cdbg = document.getElementById("conf-debug-reset");
   if (cdbg) cdbg.addEventListener("click", () => {
+    // PENTING: reset ini SENGAJA hanya mengosongkan tampilan akurasi lokal (MobilePredLog) dan
+    // cache in-memory. JANGAN menambahkan localStorage.clear() / LEDGER.clear() di sini —
+    // ledger belajar tersimpan di server (volume) dan salinan lokalnya harus tetap utuh.
     MobilePredLog.clear();
     PendingSig.clear();
     // Clear in-memory caches in place (they may be const)

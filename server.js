@@ -388,9 +388,11 @@ http.createServer(async (req, res) => {
             // Tanpa vektor fitur (sig) record tidak berguna untuk learner -> jangan disimpan.
             if (!r.sig && !prev.sig) continue;
             const merged = Object.assign({}, prev, r);
+            // vektor fitur = snapshot PERTAMA (detik ke-2); capture ulang sesi yang sama tidak boleh
+            // menimpanya (defense in depth untuk klien lain / reset di sisi user)
+            if (prev.sig) merged.sig = prev.sig;
             // jangan menimpa hasil yang sudah tercatat dengan record sinyal yang lebih baru
             if (prev.res && !r.res) merged.res = prev.res;
-            if (prev.sig && !r.sig) merged.sig = prev.sig;
             merged.upd = Date.now();
             ledger.set(r.k, merged);
             appendLedger(merged);

@@ -1167,10 +1167,11 @@ function applyType() {
     dw.fadeSince = fade.count >= 2 ? (dw.fadeSince || now) : null;
     const dwellTurnMs = dw.turnSince ? now - dw.turnSince : 0;
     const dwellFadeMs = dw.fadeSince ? now - dw.fadeSince : 0;
+    const trail = trailOf(state.asset, Math.floor(sessionStart / 1000), Math.floor(now / 1000), O, uni.verdict === "up");
     tradePlan = computeTradePlan(uni.verdict, {
       tf: state.interval, lock: O, price: C, std, slope, slopeRecent, rsi, z,
       ofi: uni.ofi, ofiShort, retreat, health, entered: wasEntered,
-      turn, fade, dwellTurnMs, dwellFadeMs, histTrend,
+      turn, fade, dwellTurnMs, dwellFadeMs, histTrend, trail,
     });
     if (tradePlan.entered && !wasEntered) {
       _tradeEntered[uniKey] = { entered: true, since: now, price: C };
@@ -2103,13 +2104,16 @@ function computeTradePlan(bias, ctx) {
       const exTxt = ex
         ? ` · opsi target lanjutan ${fmtPrice(isUp ? ctx.lock * 1.0001 : ctx.lock * 0.9999)} (+0.01%, win ${(ex.win * 100).toFixed(0)}%)`
         : "";
+      const trailTxt = (ctx.trail && ctx.trail.armed)
+        ? ` · TRAIL puncak-halus ${fmtPrice(ctx.trail.smaPeak)} → exit bila mundur ke ${fmtPrice(ctx.trail.exitPrice)} (win 64%, E+0.014%)`
+        : "";
       if (ctx.retreat || closeReady || fs < 65) {
         state = "CLOSE"; cls = "exit";
         const why = ctx.retreat ? "harga mundur dari puncak" : closeReady ? "momentum melemah" : "momentum mulai lemah";
-        action = `JUAL SEKARANG DI LOCK${lockWin != null ? ` (win ${(lockWin * 100).toFixed(0)}%)` : ""} — ${why}${contTxt}${exTxt}`;
+        action = `JUAL SEKARANG DI LOCK${lockWin != null ? ` (win ${(lockWin * 100).toFixed(0)}%)` : ""} — ${why}${trailTxt}${exTxt}`;
       } else {
         state = "HOLD"; cls = "entry";
-        action = `TAHAN (opsional) — momentum masih kuat${cont ? `, sisa potensi ~${cont.est.toFixed(2)}% → target ${fmtPrice(cont.target)}` : ""}${exTxt} · jika tidak, jual di lock sekarang`;
+        action = `TAHAN (opsional) — momentum masih kuat${cont ? `, sisa potensi ~${cont.est.toFixed(2)}%` : ""}${trailTxt}${exTxt} · jika tidak, jual di lock sekarang`;
       }
     } else if (inZone2 && avgReady) {
       state = "AVERAGE"; cls = "entry";
@@ -2208,6 +2212,26 @@ async function loadTiers() {
     console.log(`[TIERS] early tiers loaded · ${TIERS.windowDays}d window · byMinute ${TIERS.byMinute ? "yes" : "no"}`);
   } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
 }
+
+// TRAIL on a 15s-smoothed price (1s klines). Backtest (BTC+ETH, n=2651): trailing the smoothed
+// price by 0.01% after the lock turns the expectancy POSITIVE (+0.014%/trade, win 64%), while a
+// raw 1s trailing stop is whipsawed by noise. This is the practical way to capture more than the lock.
+function trailOf(sym, t0Sec, nowSec, lock, isUp) {
+  const ones = state.cache[sym]?.["1s"]?.candles || [];
+  const sess = ones.filter((c) => c.time >= t0Sec && c.time < nowSec);
+  if (sess.length < 5) return null;
+  const closes = sess.map((c) => c.c);
+  const sma = [];
+  for (let i = 0; i < closes.length; i++) {
+    const w = closes.slice(Math.max(0, i - 14), i + 1);
+    sma.push(w.reduce((x, y) => x + y, 0) / w.length);
+  }
+  const smaNow = sma[sma.length - 1];
+  const smaPeak = isUp ? Math.max(...sma) : Math.min(...sma);
+  const exitPrice = isUp ? smaPeak * (1 - 0.0001) : smaPeak * (1 + 0.0001);
+  return { smaNow, smaPeak, exitPrice, armed: isUp ? smaNow >= lock : smaNow <= lock };
+}
+
 // LOCK-TOUCH: at 2s the price sits a small distance from the lock; historically it comes back
 // with this probability (5m: 92.8% within 0.005%, 82.6% 0.005-0.01%, 79.5% 0.01-0.02%, ...).
 function lockTouchOf(tf, dist, dir) {
@@ -2336,10 +2360,11 @@ function analyzeCoin(asset, tf, now) {
   dw.turnSince = turn.count >= 2 ? (dw.turnSince || now) : null;
   dw.fadeSince = fade.count >= 2 ? (dw.fadeSince || now) : null;
   const entered = !!(_tradeEntered[key] && _tradeEntered[key].entered);
+  const trail = sig && sig.verdict !== "flat" ? trailOf(a, t0Sec, nowSec, O, sig.verdict === "up") : null;
   const plan = (sig && sig.verdict !== "flat")
     ? computeTradePlan(sig.verdict, {
         tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
-        entered, turn, fade,
+        entered, turn, fade, trail,
         dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,
         dwellFadeMs: dw.fadeSince ? now - dw.fadeSince : 0,
         histTrend,

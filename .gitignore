@@ -1,0 +1,7 @@
+node_modules/
+.DS_Store
+*.bak
+
+# Backtest artifacts: raw klines and the full signal dump are large and regenerable.
+backtest/data/
+backtest/out/signals.json

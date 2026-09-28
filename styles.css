@@ -206,6 +206,7 @@ body {
 .conf-debug .dot { width: 18px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 700; }
 .conf-debug .dot-win { background: var(--up); color: #fff; }
 .conf-debug .dot-lose { background: var(--down); color: #fff; }
+.conf-debug .dot-pending { background: rgba(255,255,255,0.15); color: var(--muted, #888); }
 .conf-debug .cd-win { color: var(--up); }
 .conf-debug .cd-lose { color: var(--down); }
 

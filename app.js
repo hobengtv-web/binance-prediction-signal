@@ -523,16 +523,7 @@ function applyType() {
   }
   // RSI on an arbitrary series (used on 5m candles → round-relevant & stable)
   function rsiFromSeries(candles, period) {
-    const cls = candles.map((c) => c.close);
-    if (cls.length < period + 1) return null;
-    let gain = 0, loss = 0;
-    for (let i = cls.length - period; i < cls.length; i++) {
-      const d = cls[i] - cls[i - 1];
-      if (d >= 0) gain += d; else loss -= d;
-    }
-    if (loss === 0) return 100;
-    const rs = (gain / period) / (loss / period);
-    return 100 - 100 / (1 + rs);
+    return SignalCore.rsiFromSeries(candles, period);
   }
   // ANALYIS = window candle 5s terakhir (bukan lagi "entry window" ronde)
   const ANALYSIS_CANDLES = { "5m": 24, "15m": 60, "1h": 120 };
@@ -550,50 +541,43 @@ function applyType() {
 
 // Generate dynamic entry reason based on analysis criteria
     function generateEntryReason(o) {
-    // Use locked reason from _deskSig if available (sesi lock)
-    if (o.reason) {
-      return o.reason;
-    }
+    // Locked reason (plain text) is always available from the engine.
+    if (o.reason) return o.reason;
+
     if (o.verdict === "flat") {
-      if (o.mode === "MENUNGGU") return "Waiting for signal…";
-      if (o.mode === "LOWVOL") return "🔍 Low volume: Entry too risky";
-      if (o.mode === "WARMUP") return "⏱️ Early round: Insufficient data";
-      if (o.mode === "FILTERED-REVERSAL") return "🔍 Quality filter: No reversal confirmation";
-      if (o.mode === "BLOCKED-GOAL") return "🚫 Goal filter: Continuation mode blocked";
+      if (o.mode === "MENUNGGU") return "No entry. Waiting for the new session to start.";
+      if (o.mode === "LOWVOL") return "No entry. Volume is below the minimum, entry too risky.";
+      if (o.mode === "WARMUP") return "No entry. Warmup in progress, not enough data yet.";
+      if (o.mode === "FILTERED-REVERSAL") return "No entry. A reversal was detected but not confirmed.";
+      if (o.mode === "BLOCKED-GOAL") return "No entry. Continuation mode is blocked by policy.";
       if (o.zone && o.zone.indexOf("PEAK") >= 0) {
-        return "📊 " + o.zone + ": Waiting for " + (o.peakDir === "top" ? "▼ DOWN reversal" : "▲ UP reversal") + " confirmation";
+        return "No entry. Price is at " + o.zone + ", waiting for a " +
+          (o.peakDir === "top" ? "down" : "up") + " reversal confirmation.";
       }
-      return "⏳ Waiting for peak/reversal signal…";
+      return "No entry. Waiting for a qualifying signal.";
     }
-    
-    // Entry signal reasons (dynamic)
+
     const reasons = [];
-    if (o.mode.indexOf("REVERSAL") === 0) {
-      reasons.push("🎯 REVERSAL: Peak detected, fading trend");
-    } else if (o.mode === "CLOSE") {
-      reasons.push("⏰ CLOSE: Late round, price vs LOCK dominance");
-    } else if (o.mode === "CONT") {
-      reasons.push("📈 CONT: Following trend continuation");
-    }
-    
+    if (o.mode && o.mode.indexOf("REVERSAL") === 0) reasons.push("Reversal at a detected peak");
+    else if (o.mode === "CLOSE") reasons.push("Near settlement, price versus session open");
+    else if (o.mode === "CONT") reasons.push("Trend continuation");
+    else if (o.mode === "HIST-PREDICT") reasons.push("Historical trend of the last 50 sessions");
+    else if (o.mode === "TREND") reasons.push("Price direction away from session open");
+    else if (o.mode === "MOMENTUM") reasons.push("Momentum confirmed after warmup");
+
     if (o.peakPrice != null && o.peakDir) {
-      reasons.push("▲ PEAK: " + (o.peakDir === "top" ? "▼ top @ " + fmtPrice(o.peakPrice) : "▲ bottom @ " + fmtPrice(o.peakPrice)));
+      reasons.push((o.peakDir === "top" ? "Top peak at " : "Bottom peak at ") + fmtPrice(o.peakPrice));
     }
-    
     if (o.rsi != null) {
-      if (o.rsi >= 70) reasons.push("📉 RSI " + o.rsi.toFixed(1) + " — Overbought (fade down)");
-      else if (o.rsi <= 30) reasons.push("📈 RSI " + o.rsi.toFixed(1) + " — Oversold (fade up)");
-      else reasons.push("RSI " + o.rsi.toFixed(1) + " (neutral)");
+      if (o.rsi >= 70) reasons.push("RSI " + o.rsi.toFixed(1) + " overbought");
+      else if (o.rsi <= 30) reasons.push("RSI " + o.rsi.toFixed(1) + " oversold");
+      else reasons.push("RSI " + o.rsi.toFixed(1) + " neutral");
     }
-    
-    if (o.reward > 0) reasons.push("💰 Reward: +" + o.reward.toFixed(2) + "%");
-    if (o.volRel != null) reasons.push("💥 Volume: " + (o.volRel >= 10 ? "≥10× spike" : o.volRel.toFixed(1) + "×"));
-    
-    if (o.verdict === "up") {
-      return '<span class="dot" style="color:var(--up);">✓</span> <b>UP</b> — ' + reasons.join(" • ");
-    } else {
-      return '<span class="dot" style="color:var(--down);">✓</span> <b>DOWN</b> — ' + reasons.join(" • ");
-    }
+    if (o.reward > 0) reasons.push("Reward " + (o.reward >= 0 ? "+" : "") + o.reward.toFixed(2) + " percent");
+    if (o.volRel != null) reasons.push("Volume " + (o.volRel >= 10 ? "at least 10x" : o.volRel.toFixed(1) + "x"));
+
+    const dirWord = o.verdict === "up" ? "UP" : "DOWN";
+    return "Entry " + dirWord + ". " + reasons.join(". ") + ".";
   }
    
    function updateSignal(o) {
@@ -609,10 +593,13 @@ function applyType() {
     const confEl = document.getElementById("s-conf");
     const confBar = document.getElementById("s-conf-bar");
     const reasonEl = document.getElementById("entryReason");
+    const statusEl = document.getElementById("calcStatus");
     
+    // Live calculation status (when and how the signal is produced)
+    if (statusEl) statusEl.textContent = o.calcStatus || "";
     // Generate dynamic entry reason based on analysis
     if (reasonEl) {
-      reasonEl.innerHTML = generateEntryReason(o);
+      reasonEl.textContent = generateEntryReason(o);
     }
     if (z) { z.textContent = o.zone; z.className = o.zone.indexOf("ATAS") >= 0 ? "down" : o.zone.indexOf("BAWAH") >= 0 ? "up" : ""; }
     if (m) { m.textContent = o.momentum; m.className = o.momentum === "BULLISH" ? "up" : o.momentum === "BEARISH" ? "down" : ""; }
@@ -627,7 +614,7 @@ function applyType() {
       else { pk.textContent = "—"; pk.className = ""; }
     }
     if (rv) {
-      if (o.verdict !== "flat" && o.mode.indexOf("REVERSAL") === 0) { rv.textContent = o.verdict === "up" ? "FADE ▲" : "FADE ▼"; rv.className = o.verdict === "up" ? "up" : "down"; }
+      if (o.verdict !== "flat" && o.mode.indexOf("REVERSAL") === 0) { rv.textContent = o.verdict === "up" ? "FADE UP" : "FADE DOWN"; rv.className = o.verdict === "up" ? "up" : "down"; }
       else { rv.textContent = "—"; rv.className = ""; }
     }
     if (rw) {
@@ -646,22 +633,29 @@ function applyType() {
       liqEl.className = liq === "LOW" ? "down" : liq === "THIN" ? "warn" : liq === "—" ? "" : "up";
     }
     if (rec) {
-      if (o.verdict === "flat") {
+      if (o.analyzing) {
+        rec.textContent = "Sedang Menganalisa";
+        rec.className = "signal-rec flat";
+      } else if (o.verdict === "flat") {
         rec.textContent = "No entry for this round";
         rec.className = "signal-rec flat";
       } else {
-        rec.textContent = "RECOMMENDATION: " + (o.verdict === "up" ? "UP ▲ (fade peak)" : "DOWN ▼ (fade peak)");
+        const dirWord = o.verdict === "up" ? "UP" : "DOWN";
+        const tier = o.highConf
+          ? `HIGH CONFIDENCE, backtested winrate ${(o.gateWr * 100).toFixed(0)} percent`
+          : "watchlist only, not filtered for high winrate";
+        rec.textContent = `Recommendation: ${dirWord}. Mode ${o.mode}. ${tier}.`;
         rec.className = "signal-rec " + (o.verdict === "up" ? "up" : o.verdict === "down" ? "down" : "flat");
       }
     }
     
     // Trigger alarm otomatis ketika sinyal entry muncul (flat -> up/down transisi)
     const prevVerdict = lastSignalState ? lastSignalState.verdict : "flat";
-    if (o.verdict !== "flat" && prevVerdict === "flat" && confMode === "SIGNAL") {
+    if (o.verdict !== "flat" && prevVerdict === "flat" && confMode === "SIGNAL" && o.highConf) {
       playSoundAlert();
-      console.log("[ALERT] Sound alert triggered for new signal:", o.verdict);
+      console.log("[ALERT] High-confidence signal:", o.verdict, o.mode, o.gateWr);
     }
-    lastSignalState = { verdict: o.verdict, mode: o.mode };
+    lastSignalState = { verdict: o.verdict, mode: o.mode, highConf: !!o.highConf };
   }
 
   let confSegs = null;
@@ -910,15 +904,26 @@ function applyType() {
     const modeBeforeFilter = mode;
     
     const isReversalMode = mode.indexOf("REVERSAL") === 0;
+    const isHistPredictMode = mode === "HIST-PREDICT";
     const hasPeakConf = peakConf === true;
     const histAligns = histTrend && histTrend.predictDir === verdict;
     const hasVolumeSpikes = (typeof rel === 'number' && rel > 1.3) || (typeof volRel === 'number' && volRel > 1.3);
     const hasRsiExtreme = rsi !== null && (rsi < 35 || rsi > 75);
     
-    const isQualified = isReversalMode && hasPeakConf && (
-      (histTrend && histTrend.strength > 70 && histTrend.momentum && histAligns) ||
-      (hasVolumeSpikes && hasRsiExtreme)
-    );
+    // QUALIFICATION: REVERSAL requires strong conditions, HIST-PREDICT can be lighter
+    let isQualified;
+    if (isReversalMode) {
+      isQualified = hasPeakConf && (
+        (histTrend && histTrend.strength > 70 && histTrend.momentum && histAligns) ||
+        (hasVolumeSpikes && hasRsiExtreme)
+      );
+    } else if (isHistPredictMode) {
+      // HIST-PREDICT: just needs valid signal with minimum strength
+      isQualified = histTrend && histTrend.predictDir !== "flat" && histTrend.strength > 35;
+    } else {
+      // Continuation mode - always qualified
+      isQualified = true;
+    }
     
     let finalVerdict;
     if (isQualified) {
@@ -991,27 +996,16 @@ function applyType() {
   const sessionChanged = !_deskSig || _deskSig.roundStart !== sessionStart || _deskSig.asset !== state.asset || _deskSig.interval !== state.interval;
   
   if (sessionChanged && elapsed > 15000) {
-    // Generate detailed reason based on actual filter conditions
-    let reason = "";
-    if (finalVerdict !== "flat") {
-      reason = `${mode} ${verdict.toUpperCase()} | peak:${peakPrice != null ? fmtPrice(peakPrice) : '—'} | conf:${conf}% | ` +
-               `${histTrend?.dir || '—'} (str:${histTrend?.strength || 0}) | ` +
-               `RSI:${rsi?.toFixed(1) || '—'} | vol:${rel?.toFixed(2) || '—'}x`;
-    } else {
-      // Build detailed reason for flat based on blocking mode
-      if (mode === "LOWVOL") {
-        reason = `NO ENTRY: LOW VOL | current:${rel?.toFixed(2)}x typical:${absRel.toFixed(2)}x | liquidity:${liquidity}`;
-      } else if (mode === "WARMUP") {
-        reason = `NO ENTRY: WARMUP | elapsed:${Math.round(elapsed/1000)}s < ${WARMUP_MS/1000}s threshold`;
-      } else if (mode === "FILTERED-REVERSAL") {
-        reason = `NO ENTRY: FILTER | reversal:${isReversalMode} peakConf:${peakConf} ` +
-                 `| histAlign:${histAligns} volSpikes:${hasVolumeSpikes} rsiExt:${hasRsiExtreme}`;
-      } else if (mode === "BLOCKED-GOAL") {
-        reason = `NO ENTRY: GOAL BLOCK | continuation mode, trendBias:${trendBias}`;
-      } else {
-        reason = `NO ENTRY: ${mode} | no qualified reversal signal`;
-      }
-    }
+    // Plain-text reason via shared builder (desktop fallback path)
+    const reason = SignalCore.buildReason({
+      verdict: finalVerdict,
+      mode: mode,
+      rsi: rsi,
+      volRel: typeof rel === "number" ? rel : null,
+      strength: histTrend?.strength,
+      momentum: histTrend?.momentum,
+      elapsedSec: elapsed / 1000,
+    });
     
     _deskSig = {
       roundStart: sessionStart,
@@ -1026,12 +1020,34 @@ function applyType() {
     console.log("[DESK-SIG] new session signal:", _deskSig);
   }
   
-  // Lock: gunakan signal dari sesi ini (hanya update setelah sesi baru)
-  if (_deskSig && _deskSig.asset === state.asset && _deskSig.interval === state.interval && _deskSig.roundStart === sessionStart) {
-    finalVerdict = _deskSig.verdict;
-    mode = _deskSig.mode;
-    conf = _deskSig.conf;
+  // Recommendation source: the calibrated universal engine ONLY, which is also the source
+  // that gets captured into history. This guarantees the displayed verdict always matches
+  // the entry that is later scored (no desktop-engine mismatch).
+  let gateInfo = null;
+  const uniKey = `${state.asset}_${state.interval}_${sessionStart}`;
+  const uni = _deskSigCache[uniKey];              // locked (non-flat only)
+  const liveSig = uni || _deskSigLive[uniKey] || null;
+  if (uni && uni.verdict !== "flat") {
+    finalVerdict = uni.verdict;
+    mode = uni.mode;
+    conf = uni.conf;
+    gateInfo = gateLookup(gateKey(state.interval, uni.mode, uni.verdict, uni.rsi, uni.histStrength));
+  } else {
+    finalVerdict = "flat";
+    mode = liveSig ? liveSig.mode : "MENUNGGU";
+    conf = 0;
   }
+  const elapsedSec = Math.round((now - sessionStart) / 1000);
+  const calcStatus = uni
+    ? `Signal locked ${elapsedSec - Math.round((now - uni.lockedAt) / 1000)}s after session open · mode ${uni.mode}`
+    : `Evaluating session, open +${elapsedSec}s · ${liveSig ? liveSig.mode : "collecting data"}`;
+  // Still analyzing until a signal locks OR the warmup window has passed with a verdict.
+  const analyzing = !uni && (
+    elapsedSec < 15 ||
+    !liveSig ||
+    liveSig.mode === "MENUNGGU" ||
+    liveSig.mode === "WARMUP"
+  );
 
     // Sync: confidence tetap realtime, verdict tetap di filter desktop
     const mob = _mobilePredSession;
@@ -1045,19 +1061,17 @@ function applyType() {
       try { sessionStorage.setItem(MOBILE_PRED_SESSION_KEY, JSON.stringify(mob)); } catch (_) {}
     }
 
-    // Generate fallback reason for early session (before lock)
-    let currentReason = _deskSig ? _deskSig.reason : "";
+    // Reason: locked signal first, then live evaluation, then desktop fallback
+    let currentReason = "";
+    if (liveSig && liveSig.reason) currentReason = liveSig.reason;
+    else if (_deskSig && _deskSig.reason) currentReason = _deskSig.reason;
     if (!currentReason) {
-      // Fallback ke universal cache jika ada
-      const universalKey = `${state.asset}_${state.interval}_${sessionStart}`;
-      const universalCached = _deskSigCache[universalKey];
-      if (universalCached?.reason) {
-        currentReason = universalCached.reason;
-      } else if (finalVerdict !== "flat") {
-        currentReason = `${mode} ${finalVerdict.toUpperCase()} | conf:${conf}%`;
-      } else {
-        currentReason = `NO ENTRY: ${(now - t0) < WARMUP_MS ? "WARMUP" : mode} | elapsed:${Math.round(elapsed/1000)}s`;
-      }
+      const fbMode = finalVerdict !== "flat" ? mode : ((now - t0) < WARMUP_MS ? "WARMUP" : mode);
+      currentReason = SignalCore.buildReason({
+        verdict: finalVerdict, mode: fbMode, rsi: rsi,
+        volRel: hasVolData ? rel : null, strength: histTrend?.strength,
+        momentum: histTrend?.momentum, elapsedSec: elapsed / 1000,
+      });
     }
     
     updateSignal({
@@ -1067,6 +1081,10 @@ function applyType() {
       reward: reward,
       volRel: hasVolData ? rel : null, liquidity: liquidity,
       reason: currentReason,
+      highConf: !!gateInfo,
+      gateWr: gateInfo ? gateInfo.wr : null,
+      calcStatus,
+      analyzing,
     });
 
     // Confidence level LED bar: direction ikut mobile prediction pada tab SIGNAL (value tetap realtime)
@@ -1283,22 +1301,7 @@ function applyType() {
 // Mayoritas sesi naik -> BULLISH, mayoritas turun -> BEARISH, sisanya FLAT.
 // Dipakai utk TREND display & sbg bias tren di confidence / keputusan sinyal.
 function sessionTrend(sym, tf, n) {
-  const candles = state.cache[sym][tf].candles;
-  if (!candles || candles.length < 2) return "flat";
-  // exclude candle sesi AKTIF yg masih terbentuk, agar trend stabil & sesuai desain
-  // (counter-trend dihitung dari sesi yg SUDAH selesai). Bounce live di sesi aktif
-  // tidak boleh membalik trend menjadi SEARAH.
-  const last = candles.slice(0, -1).slice(-n);
-  let bull = 0, bear = 0;
-  for (const c of last) {
-    const d = c.close - c.open;
-    if (d > 0) bull++;
-    else if (d < 0) bear++;
-  }
-  const need = Math.ceil(n / 2);
-  if (bull > bear && bull >= need) return "bullish";
-  if (bear > bull && bear >= need) return "bearish";
-  return "flat";
+  return SignalCore.sessionTrend(state.cache[sym]?.[tf]?.candles, n);
 }
 
 /* ----------------------- Confidence dari 3 sesi sebelumnya ----------------------- */
@@ -1632,15 +1635,38 @@ const MobilePredLog = (() => {
     data() { return log; },
     clear() { log = []; save(); },
     size() { return log.length; },
+    save() { save(); },
   };
 })();
 
 // SignalLog alias - untuk desktop signal capture (source of truth)
 const SignalLog = MobilePredLog;
 
+/* ===== Backtest-calibrated quality gate (see backtest/replay.js) ===== */
+let GATE = null;
+const GATE_MAP = new Map();
+function gateRsiBucket(r) { return r == null ? "na" : r < 30 ? "<30" : r < 40 ? "30-40" : r <= 60 ? "40-60" : r <= 70 ? "60-70" : ">70"; }
+function gateStrBucket(s) { return s < 35 ? "<35" : s < 50 ? "35-50" : s < 70 ? "50-70" : ">=70"; }
+function gateKey(tf, mode, dir, rsi, strength) {
+  return `${tf}|${mode}|${dir}|rsi:${gateRsiBucket(rsi)}|str:${gateStrBucket(strength)}`;
+}
+function gateLookup(key) { return GATE_MAP.get(key) || null; }
+async function loadGate() {
+  try {
+    const res = await fetch("/backtest/out/gate.json", { cache: "no-store" });
+    if (!res.ok) { console.log("[GATE] no gate.json yet"); return; }
+    GATE = await res.json();
+    GATE_MAP.clear();
+    for (const g of (GATE.gate || [])) GATE_MAP.set(g.key, g);
+    console.log(`[GATE] loaded ${GATE_MAP.size} high-confidence conditions · baseline ${(GATE.baseline * 100).toFixed(1)}% · ${GATE.days}d`);
+    renderConfidenceReport();
+  } catch (e) { console.log("[GATE] load failed:", e.message); }
+}
+
 // Universal signal cache - untuk background calculation semua coin & interval
-let _deskSigCache = {};  // key: `${sym}_${tf}_${roundStart}` -> signal result
+let _deskSigCache = {};  // key: `${sym}_${tf}_${roundStart}` -> LOCKED signal (only non-flat entries)
 const _deskSigMap = {};  // key: same -> boolean (mark sudah capture)
+const _deskSigLive = {}; // key: same -> latest evaluation each tick (for live status display)
 
 let _cap_t0 = null;        // t0 ronde yang sedang di-capture
 let _cap_pending = null;   // prediksi entry: { t0, asset, interval, mode, dir, conf, trend }
@@ -1652,7 +1678,6 @@ let _deskSig = null;       // { roundStart, asset, interval, verdict, mode, reas
 let _mob_t0 = null;        // t0 ronde mobile pred yang sedang di-capture
 
 function captureDesktopSignal() {
-  // Universal capture - check semua coin & interval combos di background
   const now = serverNow();
   
   for (const sym of ["BTC", "ETH"]) {
@@ -1661,14 +1686,19 @@ function captureDesktopSignal() {
       const t0 = Math.floor(now / dur) * dur;
       const cacheKey = `${sym}_${tf}_${t0}`;
       
-      // Skip jika sudah capture untuk sesi ini
       if (_deskSigMap[cacheKey]) continue;
       
-      // Dapatkan signal result dari cache (di-generate oleh calculateAllSignals)
       const cached = _deskSigCache[cacheKey];
       if (cached && cached.verdict !== "flat") {
-        _deskSigMap[cacheKey] = true;  // Mark as captured
+        _deskSigMap[cacheKey] = true;
         
+        const gkey = gateKey(tf, cached.mode, cached.verdict, cached.rsi, cached.histStrength);
+        const g = gateLookup(gkey);
+        // Lock = the session open price, taken from the interval candle itself (matches the chart
+        // lock line). Falls back to the 5s series only if that candle is not available.
+        const t0Sec = Math.floor(t0 / 1000);
+        const sessionCandle = (state.cache[sym]?.[tf]?.candles || []).find((c) => c.time === t0Sec);
+        const lock = sessionCandle ? sessionCandle.open : sessionLock(sym, dur, now);
         const entry = {
           ts: Date.now(),
           t0: t0,
@@ -1677,12 +1707,15 @@ function captureDesktopSignal() {
           mode: cached.mode,
           dir: cached.verdict,
           conf: cached.conf,
-          lock: sessionLock(sym, dur, now),
+          lock: lock,
           reason: cached.reason || "",
+          gateKey: gkey,
+          highConf: !!g,
+          gateWr: g ? g.wr : null,
         };
         SignalLog.add(entry);
         console.log("[DESK-SIG] captured:", entry);
-        // Re-render hanya jika ini active combo
+        
         if (state.asset === sym && state.interval === tf) {
           renderConfidenceReport();
         }
@@ -1695,6 +1728,9 @@ function captureDesktopSignal() {
 function updateProjectionUniversal() {
   const now = serverNow();
   
+  // Score finished rounds (all combos) before generating new signals
+  evaluateUniversalSessions(now);
+  
   // Cleanup old cache entries (>3 hours old) untuk prevent memory leak
   const CUTOFF = now - 3 * 3600000;
   for (const k in _deskSigCache) {
@@ -1702,6 +1738,7 @@ function updateProjectionUniversal() {
     if (!isNaN(t) && t < CUTOFF) {
       delete _deskSigCache[k];
       delete _deskSigMap[k];
+      delete _deskSigLive[k];
     }
   }
   
@@ -1722,7 +1759,12 @@ function updateProjectionUniversal() {
       // Ini adalah lightweight calculation - tidak perlu full desktop filter
       const sig = calculateUniversalSignal(sym, tf, t0, now, candles5m);
       if (sig) {
-        _deskSigCache[cacheKey] = sig;
+        _deskSigLive[cacheKey] = sig;                 // live status (recomputed each tick)
+        if (sig.verdict !== "flat") {
+          sig.lockedAt = now;                         // when the session signal was locked
+          _deskSigCache[cacheKey] = sig;              // lock ONLY once a real signal appears
+          console.log(`[SIGNAL] locked ${sym}/${tf} at +${Math.round((now - t0) / 1000)}s:`, sig.mode, sig.verdict, `conf ${sig.conf}`);
+        }
       }
     }
   }
@@ -1745,7 +1787,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
       interval: tf,
       verdict: "flat",
       mode: "MENUNGGU",
-      reason: `NO ENTRY: MENUNGGU (session just started)`,
+      reason: SignalCore.buildReason({ verdict: "flat", mode: "MENUNGGU" }),
       conf: 0,
     };
   }
@@ -1767,7 +1809,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
       interval: tf,
       verdict: "flat",
       mode: "WARMUP",
-      reason: `NO ENTRY: WARMUP (elapsed:${Math.round(elapsed/1000)}s ${'<'} ${WARMUP_MS/1000}s) — insufficient data`,
+      reason: SignalCore.buildReason({ verdict: "flat", mode: "WARMUP", elapsedSec: elapsed / 1000 }),
       conf: 0,
     };
   }
@@ -1779,53 +1821,30 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   const firstCandleDir = sessionCandles[0].close > sessionCandles[0].open ? "bullish" : "bearish";
   const currentDir = C > lockPrice ? "up" : C < lockPrice ? "down" : "flat";
   
-  // Volume analysis
-  const volWindow = sessionCandles.slice(-5);
-  const volAvg = sessionCandles.slice(-30, -5).reduce((a, c) => a + (c.vol || 0), 0) / 25 || 1;
-  const volCurrent = volWindow.reduce((a, c) => a + (c.vol || 0), 0) / volWindow.length;
-  const volRel = volCurrent / volAvg;
-  
-  // RSI calculation
-  const rsi = rsiFromSeries(candles5m.slice(-50), 14);
-  
-  // Decision logic
-  let verdict = "flat", mode = "CONT", reason = "";
-  let conf = 0;
-  
-  // Historical trend based signal (for non-active combos - lightweight)
-  if (histTrend && histTrend.strength > 70 && histTrend.momentum && histTrend.predictDir !== "flat") {
-    verdict = histTrend.predictDir;
-    mode = "HIST-PREDICT";
-    reason = `ENTRY ${verdict.toUpperCase()}: HIST-PREDICT | lock:${fmtPrice(lockPrice)} | hist-str:${histTrend.strength} | momentum:${histTrend.momentum}`;
-    conf = Math.min(100, histTrend.strength);
-  } else if (firstCandleDir === "bullish" && rsi != null && rsi < 35 && volRel > 1.5) {
-    verdict = "up";
-    mode = "REVERSAL↑";
-    reason = `ENTRY UP: REVERSAL↑ | lock:${fmtPrice(lockPrice)} | RSI:${rsi?.toFixed(1) || '—'} | vol:${volRel?.toFixed(1) || '—'}x`;
-    conf = 75;
-  } else if (firstCandleDir === "bearish" && rsi != null && rsi > 75 && volRel > 1.5) {
-    verdict = "down";
-    mode = "REVERSAL↓";
-    reason = `ENTRY DOWN: REVERSAL↓ | lock:${fmtPrice(lockPrice)} | RSI:${rsi?.toFixed(1) || '—'} | vol:${volRel?.toFixed(1) || '—'}x`;
-    conf = 75;
-  } else {
-    // No entry
-    verdict = "flat";
-    if (elapsed < WARMUP_MS) {
-      mode = "WARMUP";
-      reason = `NO ENTRY: WARMUP (elapsed:${Math.round(elapsed/1000)}s ${'<'}${WARMUP_MS/1000}) — insufficient data`;
-    } else if (volRel < 1.1) {
-      mode = "LOWVOL";
-      reason = `NO ENTRY: LOWVOL (vol:${volRel?.toFixed(2) || '—'}x < 1.1x) — liquidity too thin`;
-    } else if (!histTrend || histTrend.strength < 50) {
-      mode = "WEAK-TREND";
-      reason = `NO ENTRY: WEAK-TREND (hist-str:${histTrend?.strength || 0} < ${50}) — no clear direction`;
-    } else {
-      mode = "FILTERED";
-      reason = `NO ENTRY: FILTER | hist-str:${histTrend?.strength || 0} | RSI:${rsi?.toFixed(0) || '—'} | vol:${volRel?.toFixed(2) || '—'}x`;
-    }
-    conf = 0;
-  }
+  // Volume analysis — baseline from completed candles BEFORE the session.
+  // Compare volume PACE: project the still-forming candle to a full candle before
+  // comparing, so the filter works early in the session (not only near its close).
+  const prior = candles5m.filter(c => c.time < t0Sec).slice(-25);
+  const baseVol = prior.length ? prior.reduce((a, c) => a + (c.vol || 0), 0) / prior.length : 0;
+  const candleSec = 300;
+  const nowS = now / 1000;
+  const candleStart = Math.floor(nowS / candleSec) * candleSec;
+  const frac = Math.min(1, Math.max(0.05, (nowS - candleStart) / candleSec));
+  const forming = sessionCandles[sessionCandles.length - 1];
+  const volRel = baseVol > 0 ? ((forming.vol || 0) / frac) / baseVol : 1;
+
+  // RSI from completed 5m candles (no lookahead)
+  const nowSecFloor = Math.floor(now / 1000);
+  const rsi = rsiFromSeries(candles5m.filter(c => c.time < nowSecFloor).slice(-50), 14);
+
+  // Decision via shared core — identical rules to the backtest
+  const decision = SignalCore.decideSignal({ tf, elapsed, histTrend, firstCandleDir, currentDir, volRel, rsi });
+  let verdict = decision.verdict, mode = decision.mode, conf = decision.conf;
+  const histStr = histTrend?.strength || 0;
+  const reason = SignalCore.buildReason({
+    verdict, mode, rsi, volRel, strength: histStr,
+    momentum: histTrend?.momentum, elapsedSec: elapsed / 1000,
+  });
   
   return {
     roundStart: t0,
@@ -1835,6 +1854,8 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     mode,
     reason,
     conf,
+    rsi,
+    histStrength: histStr,
   };
 }
 
@@ -1875,6 +1896,66 @@ function captureConfidenceRound(t0, O, C, fadeDir, fadeConf, trendDir, mode, sta
   }
 }
 
+// Evaluate all captured sessions whose round has ENDED (all coin/interval combos).
+// Sets `won` on each SignalLog entry: dir matches actual close-vs-lock direction.
+function evaluateUniversalSessions(now) {
+  const data = SignalLog.data();
+  let changed = false;
+
+  for (const entry of data) {
+    if (entry.won !== undefined) continue;        // already scored
+    const dur = INTERVAL_MS[entry.interval];
+    if (!dur || entry.t0 == null) continue;
+    const sessionEnd = entry.t0 + dur;
+    if (now < sessionEnd) continue;               // round still running
+
+    const candles = state.cache[entry.asset]?.[entry.interval]?.candles || [];
+    const t0Sec = Math.floor(entry.t0 / 1000);
+    // Use the SAME session candle for lock and close (matches the chart lock line exactly).
+    const sessionCandle = candles.find((c) => c.time === t0Sec);
+    const lock = sessionCandle ? sessionCandle.open : entry.lock;
+    const close = sessionCandle ? sessionCandle.close : null;
+    if (lock == null || close == null) continue;
+
+    const actual = close >= lock ? "up" : "down";
+    entry.lock = lock;
+    entry.close = close;
+    entry.actual = actual;
+    entry.won = entry.dir === actual ? 1 : 0;
+    changed = true;
+  }
+
+  if (changed) SignalLog.save();
+}
+
+// One-time correction for already-stored entries: re-derive lock/close/actual/won from the
+// session candle so any entry scored with the old (5s-fallback) lock gets fixed.
+function rescoreAll() {
+  const data = SignalLog.data();
+  let changed = 0;
+  for (const entry of data) {
+    const candles = state.cache[entry.asset]?.[entry.interval]?.candles || [];
+    if (!candles.length || entry.t0 == null) continue;
+    const t0Sec = Math.floor(entry.t0 / 1000);
+    const sc = candles.find((c) => c.time === t0Sec);
+    if (!sc) continue;                       // candle no longer in cache, cannot verify
+    const actual = sc.close >= sc.open ? "up" : "down";
+    const won = entry.dir === actual ? 1 : 0;
+    if (entry.lock !== sc.open || entry.close !== sc.close || entry.actual !== actual || entry.won !== won) {
+      entry.lock = sc.open;
+      entry.close = sc.close;
+      entry.actual = actual;
+      entry.won = won;
+      changed++;
+    }
+  }
+  if (changed) {
+    SignalLog.save();
+    renderConfidenceReport();
+    console.log(`[RESCORE] corrected ${changed} history entries`);
+  }
+}
+
 function renderConfidenceReport() {
   const body = document.getElementById("conf-debug-body");
   const head = document.getElementById("conf-debug-head");
@@ -1903,24 +1984,32 @@ function renderConfidenceReport() {
     const n = data.length;
     if (n < 1) continue;  // Skip empty combos
     
-    const totW = data.reduce((a, r) => a + r.won, 0);
-    const overall = (totW / n * 100).toFixed(1);
-    const wins = totW, losses = n - totW;
-    const winClass = overall >= 50 ? "cd-win" : "cd-lose";
+    // Winrate only from rounds that have finished (won defined); rest are pending
+    const evaluated = data.filter(r => r.won !== undefined);
+    const nEval = evaluated.length;
+    const pending = n - nEval;
+    const totW = evaluated.reduce((a, r) => a + r.won, 0);
+    const overall = nEval > 0 ? (totW / nEval * 100).toFixed(1) : "—";
+    const wins = totW, losses = nEval - totW;
+    const winClass = nEval > 0 ? (Number(overall) >= 50 ? "cd-win" : "cd-lose") : "";
     
-    const dirLetter = (d) => d === "up" ? "U" : "D";
+    const dirLetter = (d) => d === "up" ? "U" : d === "down" ? "D" : "?";
+    const nums = (r) => `lock ${r.lock != null ? r.lock : "?"} close ${r.close != null ? r.close : "?"} actual ${r.actual || "?"}`;
     const dots = data.slice(-20).map(r => {
+      if (r.won === undefined) {
+        return `<span class="dot dot-pending" title="${r.dir.toUpperCase()} pending | ${nums(r)}">${dirLetter(r.dir)}</span>`;
+      }
       const cls = r.won ? "dot-win" : "dot-lose";
-      return `<span class="dot ${cls}" title="${r.dir.toUpperCase()} (${r.won ? 'BENAR' : 'SALAH'})">${dirLetter(r.dir)}</span>`;
+      return `<span class="dot ${cls}" title="${r.dir.toUpperCase()} ${r.won ? 'BENAR' : 'SALAH'} | ${nums(r)}">${dirLetter(r.dir)}</span>`;
     }).join('');
     
     html += `
       <div class="cd-row" style="margin-bottom:6px;">
         <span class="cd-b">${sym}/${tf}</span>
-        <span class="cd-c">${n}</span>
-        <span class="cd-wr ${winClass}">${overall}%</span>
-        <span style="text-align:right;color:${overall >= 50 ? 'var(--up)' : 'var(--down)'}">
-          ${wins}W / ${losses}L
+        <span class="cd-c">${nEval}${pending ? ` (+${pending})` : ''}</span>
+        <span class="cd-wr ${winClass}">${overall}${nEval > 0 ? '%' : ''}</span>
+        <span style="text-align:right;color:${nEval > 0 ? (Number(overall) >= 50 ? 'var(--up)' : 'var(--down)') : 'var(--muted, #888)'}">
+          ${wins}W / ${losses}L${pending ? ` · ${pending} pending` : ''}
         </span>
       </div>
       <div class="cd-dots" style="margin-top:4px; margin-bottom:8px;">${dots}</div>
@@ -2250,7 +2339,17 @@ function bindControls() {
     updateProjection();
   });
   const cdbg = document.getElementById("conf-debug-reset");
-  if (cdbg) cdbg.addEventListener("click", () => { MobilePredLog.clear(); renderConfidenceReport(); });
+  if (cdbg) cdbg.addEventListener("click", () => {
+    MobilePredLog.clear();
+    // Clear in-memory caches in place (they may be const)
+    for (const k in _deskSigCache) delete _deskSigCache[k];
+    for (const k in _deskSigMap) delete _deskSigMap[k];
+    for (const k in _deskSigLive) delete _deskSigLive[k];
+    // Reset active session state
+    _mobilePredSession = null;
+    sessionStorage.removeItem(MOBILE_PRED_SESSION_KEY);
+    renderConfidenceReport();
+  });
   const mrefresh = document.getElementById("m-refresh");
   if (mrefresh) mrefresh.addEventListener("click", () => {
     console.log("[MOBILE-PRED] refresh button clicked");
@@ -2288,41 +2387,7 @@ function segActive(segId, btn) {
 
 /* ======================= Historical Trend Analysis ======================= */
 function analyzeHistoricalTrend(sym, tf, sessionCount) {
-  const candles = state.cache[sym]?.[tf]?.candles;
-  if (!candles || candles.length < sessionCount + 1) return { dir: 'flat', strength: 0, momentum: false, predictDir: 'flat', sessionDur: 300 };
-  
-  const recent = candles.slice(0, -1).slice(-sessionCount);
-  let bull = 0, bear = 0;
-  const totalWeight = sessionCount * (sessionCount + 1) / 2;
-  
-  for (let i = 0; i < recent.length; i++) {
-    const c = recent[i];
-    const d = c.close - c.open;
-    const weight = (i + 1) / totalWeight;
-    if (d > 0) bull += weight;
-    else if (d < 0) bear += weight;
-  }
-  
-  const strength = Math.abs(bull - bear) * 100;
-  const dir = bull > bear ? 'up' : bear > bull ? 'down' : 'flat';
-  const momentum = Math.abs(bull - bear) > 0.4;
-  
-  // Session duration calculation
-  let sessionDur = 300;
-  if (tf === '15m') sessionDur = 900;
-  else if (tf === '1h') sessionDur = 3600;
-  
-  // Predict next candle using acceleration (last 3 candles vs previous 3)
-  const last3 = recent.slice(-3);
-  const prev3 = recent.slice(-6, -3);
-  let lastBull = 0, prevBull = 0;
-  for (const c of last3) { if (c.close > c.open) lastBull++; else if (c.close < c.open) lastBull--; }
-  for (const c of prev3) { if (c.close > c.open) prevBull++; else if (c.close < c.open) prevBull--; }
-  
-  const predictDir = (dir === 'down' && lastBull > 0 && lastBull > prevBull) ? 'up' :
-                     (dir === 'up' && lastBull < 0 && Math.abs(lastBull) > Math.abs(prevBull)) ? 'down' : dir;
-  
-  return { dir, strength: Math.round(strength), momentum, predictDir, sessionDur };
+  return SignalCore.analyzeHistoricalTrend(state.cache[sym]?.[tf]?.candles, sessionCount);
 }
 
 /* ======================= Audio Alert (Web Audio API) ======================= */
@@ -2389,6 +2454,10 @@ function start() {
   restoreMobilePredSession();
   startData();
   renderConfidenceReport();
+  loadGate();
+  setInterval(loadGate, 10 * 60 * 1000);
+  setTimeout(rescoreAll, 8000);        // after history candles are loaded
+  setTimeout(rescoreAll, 25000);
   // timers — use rAF for smooth timer, updateProjection only on data events
    requestAnimationFrame(updateTimerDisplay);
    setInterval(updateProjection, 5000);  // heavy projection update every 5s only

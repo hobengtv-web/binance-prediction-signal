@@ -505,7 +505,8 @@ http.createServer(async (req, res) => {
   // ---- STATUS LEARNER (dipakai panel UI agar user bisa memantau proses belajar) ----
   if (u.pathname === "/api/learner") {
     const CANON_MS = 6000, TARGET = 120;
-    let total = 0, withSig = 0, withRes = 0, canon = 0, canonRes = 0, late = 0, sincePromote = 0;
+    let total = 0, withSig = 0, withRes = 0, canon = 0, canonRes = 0, late = 0, sincePromote = 0, rate24h = 0;
+    const dayAgo = Date.now() - 86400000;
     const promotedTs = modelMeta && modelMeta.promotedAt ? Date.parse(modelMeta.promotedAt) : null;
     let lastUpd = 0;
     for (const r of ledger.values()) {
@@ -518,7 +519,7 @@ http.createServer(async (req, res) => {
       const s = r.sig;
       const off = typeof s.capOffsetMs === "number" ? s.capOffsetMs : null;
       const isCanon = off != null ? off <= CANON_MS : (s.minuteIn == null || s.minuteIn <= 1);
-      if (isCanon) { canon++; if (r.res) canonRes++; } else late++;
+      if (isCanon) { canon++; if (r.res) { canonRes++; if (r.upd && r.upd > dayAgo) rate24h++; } } else late++;
     }
     const g = readModelPart("gate"), t = readModelPart("touch");
     const single = (rules, prefix) => (rules || []).filter((k) => typeof k === "string" && k.indexOf("&") === -1 && k.indexOf(prefix) === 0);
@@ -531,7 +532,10 @@ http.createServer(async (req, res) => {
     const learned = !!(modelMeta && modelMeta.version && modelMeta.version !== "default");
     res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
     res.end(JSON.stringify({
-      ledger: { total, withSig, withRes, canonical: canon, canonicalWithRes: canonRes, late, target: TARGET, pct: +Math.min(1, canonRes / TARGET).toFixed(3), lastUpd: lastUpd || null, sincePromote },
+      ledger: { total, withSig, withRes, canonical: canon, canonicalWithRes: canonRes, late, target: TARGET, pct: +Math.min(1, canonRes / TARGET).toFixed(3), lastUpd: lastUpd || null, sincePromote, rate24h,
+        etaDays: rate24h > 0 ? +Math.max(0, (TARGET - canonRes) / rate24h).toFixed(1) : null },
+      // jadwal re-fit berikutnya (jam server) supaya user tahu kapan model bisa berubah
+      nextRefitAt: (() => { const d = new Date(); const n = new Date(d); n.setHours(REFIT_HOUR, 0, 0, 0); if (n <= d) n.setDate(n.getDate() + 1); return n.toISOString(); })(),
       model: {
         source: learned ? "learned" : "default",
         version: modelMeta.version || "default", promotedAt: modelMeta.promotedAt || null, trigger: modelMeta.trigger || null,

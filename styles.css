@@ -53,7 +53,11 @@ body {
 .asset-chg.down, .down { color: var(--down); }
 
 /* ---------- Controls ---------- */
-  .topbar, .controls, .round, .signal, .help { flex-shrink: 0; }
+  /* body = flex column: item dengan overflow:hidden TANPA flex-shrink:0 akan dijepit
+     sampai ~0 px (itu sebabnya panel LEARNER tampil hanya 2px / tak terlihat).
+     Semua section konten harus ikut dilindungi. */
+  .topbar, .controls, .round, .signal, .help,
+  .learn-status, .lessons, .conf-debug, .mobile-pred, .dual, .monitors, main.chart-wrap { flex-shrink: 0; }
 .controls {
   display: flex; gap: 8px; padding: 8px 12px;
   border-bottom: 1px solid var(--border);

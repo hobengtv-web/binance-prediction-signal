@@ -2421,66 +2421,78 @@ function renderLearnerStatus() {
   updateLearnChip();
   const el = document.getElementById("lstat-body"); if (!el) return;
   if (LEARNER_ERR || !LEARNER_STATUS) { el.innerHTML = `<div class="cd-empty">status learner belum tersedia${LEARNER_ERR ? " (" + esc(LEARNER_ERR) + ")" : ""}</div>`; return; }
-  const S = LEARNER_STATUS, L = S.ledger || {}, M = S.model || {}, B = S.blockers || {}, g = S.gates || {};
+  const S = LEARNER_STATUS, L = S.ledger || {}, M = S.model || {}, g = S.gates || {}, C = S.capture || {};
   const pctv = Math.round((L.pct || 0) * 1000) / 10;
-  const learned = M.source === "learned";
-  const mt = M.metrics || {};
-  const bs = M.baseline || {};
-  const baseTxt = bs.test != null ? bs.test : (bs.dirTest != null ? bs.dirTest : null);
-  const blockers = [...(B.gate || []), ...(B.touch || [])];
-  const hist = S.history || [];
-  const badge = learned ? '<span class="lstat-badge ok">BELAJAR DARI LEDGER</span>' : '<span class="lstat-badge def">DEFAULT (BACKTEST 90d)</span>';
+  const need = Math.max(0, (L.target || 120) - (L.canonicalWithRes || 0));
+  const learned = g.mode === "learned";
+  // ---- hasil perbaikan (terukur pada jendela uji) ----
+  const gm = g.metrics || null;
+  const baseT = (g.baselineTest && g.baselineTest.takenWinrate != null) ? g.baselineTest.takenWinrate
+    : (g.baselineTest && g.baselineTest.wr != null) ? g.baselineTest.wr : null;
+  const hasilTxt = gm
+    ? `<div class="lstat-line">sinyal yang <b>diambil</b>: winrate <b>${((gm.takenWinrate || 0) * 100).toFixed(1)}%</b>${baseT != null ? ` (sebelum disaring: ${(baseT * 100).toFixed(1)}%)` : ""} · cakupan <b>${((gm.coverage || 0) * 100).toFixed(0)}%</b></div>
+       <div class="lstat-line lstat-dim">artinya: dari semua sinyal, ${((gm.coverage || 0) * 100).toFixed(0)}% tetap diambil dan winrate subset itu ${((gm.takenWinrate || 0) * 100).toFixed(1)}% (diukur pada 30% data paling akhir, tidak dipakai saat melatih).</div>`
+    : `<div class="lstat-line lstat-dim">belum ada hasil terukur — masih mengumpulkan data. Setelah cukup, baris ini akan menampilkan perbandingan <b>sebelum vs sesudah</b> penyaringan.</div>`;
+  // ---- riwayat + alasan belum diganti ----
+  const hist = (S.history || []).slice().reverse();
+  const lastKeep = hist.find((h) => !h.promote);
+  const histHtml = hist.length ? hist.slice(0, 6).map((h) => `<div class="lstat-row">
+      <span class="lstat-badge ${h.promote ? "ok" : "def"}">${h.promote ? "DIPAKAI" : "DITAHAN"}</span>
+      <span class="lstat-dim">${h.at ? new Date(h.at).toLocaleString() : ""} · pemicu ${esc(h.trigger || "—")} · data ${h.rows != null ? h.rows : "—"}</span>
+      <span>${esc(h.why || "")}</span></div>`).join("") : '<div class="lstat-dim">belum ada keputusan (menunggu data cukup)</div>';
+  // ---- aksi selanjutnya ----
+  const acts = [];
+  if (need > 0) {
+    acts.push(`Kumpulkan <b>${need}</b> sinyal kanonik berhasil lagi` + (L.rate24h ? ` — laju sekarang <b>${L.rate24h}/24 jam</b>${L.etaDays != null ? `, perkiraan <b>${L.etaDays} hari</b>` : ""}` : "") + `.`);
+    if (!L.rate24h) acts.push(`Belum ada data kanonik baru dalam 24 jam terakhir — capture server perlu menghasilkan data. Cek status capture di bagian 1 (harus <b>AKTIF</b>) dan jam sesi 5m/15m.`);
+  } else {
+    acts.push(learned ? `Data sudah cukup dan model belajar <b>sudah aktif</b>. Re-fit berikutnya: ${S.nextRefitAt ? new Date(S.nextRefitAt).toLocaleString() : "03:00 jam server"}.`
+      : `Target data tercapai. Re-fit otomatis berikutnya <b>${S.nextRefitAt ? new Date(S.nextRefitAt).toLocaleString() : "03:00 jam server"}</b>, atau jalankan <code>POST /api/model/refit</code>. Model hanya dipakai bila <b>menang pada jendela uji</b>.`);
+  }
+  if (g.mode === "bootstrap") acts.push(`Sedang <b>BOOTSTRAP</b> (ambang dilonggarkan supaya sinyal lebih sering) → winrate yang tampil memang lebih rendah. Ini disengaja sampai learner mengetatkan sendiri. Balik cepat: <code>GATES_MODE=strict</code>.`);
+  if (lastKeep && !learned) acts.push(`Keputusan terakhir <b>DITAHAN</b>: ${esc(lastKeep.why || "")}.`);
+  if (learned) acts.push(`Aktifkan penahanan konteks lemah (opsional): <code>window.setLearnBlock(true)</code> — sinyal pada konteks tervalidasi lemah akan ditahan (mode <code>LEARN-BLOCK</code>).`);
+  const blk = [...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])];
+  if (blk.length) acts.push(`Penahan konteks aktif: ${blk.map((k) => `<code>${esc(k)}</code>`).join(" · ")}`);
+  const actsHtml = acts.map((a, i) => `<div class="lstat-line">${i + 1}. ${a}</div>`).join("");
   el.innerHTML = `
     <div class="lstat-sec">
       <b>1 · PROGRESS DATA BELAJAR</b>
       <div class="lstat-bar"><i style="width:${Math.min(100, pctv)}%"></i></div>
-      <div class="lstat-line"><b>${L.canonicalWithRes || 0}</b> / ${L.target || 120} sinyal kanonik berhasil
-        (${pctv}%) · ${L.canonicalWithRes >= (L.target || 120) ? "target tercapai — re-fit otomatis berjalan" : "mengumpulkan, re-fit otomatis tiap hari 03:00"}</div>
-      <div class="lstat-line">${(S.capture && S.capture.enabled)
-        ? `capture otomatis server: <span class="lstat-badge ok">AKTIF</span> · <b>${S.capture.captured || 0}</b> sinyal kanonik tersimpan · ${S.capture.accepted || 0} lolos gate · ${S.capture.rejected || 0} ditolak (tetap direkam untuk belajar) · ${S.capture.skipped || 0} dilewati (tanpa arah/data)${S.capture.errors ? ` · <span class="lstat-warn">${S.capture.errors} error</span>` : ""}${S.capture.lastAt ? ` · terakhir ${new Date(S.capture.lastAt).toLocaleTimeString()}` : ""}`
-        : `capture otomatis server: <span class="lstat-badge def">MATI</span> — data hanya terkumpul saat ada browser terbuka`}</div>
+      <div class="lstat-line"><b>${L.canonicalWithRes || 0}</b> / ${L.target || 120} sinyal kanonik berhasil (${pctv}%)${L.rate24h != null ? ` · laju ${L.rate24h}/24 jam` : ""}${L.etaDays != null && need > 0 ? ` · perkiraan ${L.etaDays} hari lagi` : ""}</div>
+      <div class="lstat-line">capture otomatis server: ${C.enabled ? '<span class="lstat-badge ok">AKTIF</span>' : '<span class="lstat-badge def">MATI</span>'} · <b>${C.captured || 0}</b> tersimpan · ${C.accepted || 0} lolos gate · ${C.rejected || 0} ditolak (tetap direkam)${C.errors ? ` · <span class="lstat-warn">${C.errors} error</span>` : ""}${C.lastAt ? ` · terakhir ${new Date(C.lastAt).toLocaleTimeString()}` : ""}</div>
       <div class="lstat-grid">
         <span><i>total record</i><b>${L.total || 0}</b></span>
-        <span><i>dengan fitur</i><b>${L.withSig || 0}</b></span>
         <span><i>dengan hasil</i><b>${L.withRes || 0}</b></span>
         <span><i>kanonik (detik-2)</i><b>${L.canonical || 0}</b></span>
         <span><i>tengah sesi (dibuang)</i><b>${L.late || 0}</b></span>
-        <span><i>terakhir dapat data</i><b>${L.lastUpd ? new Date(L.lastUpd).toLocaleTimeString() : "—"}</b></span>
+        <span><i>data baru sejak promosi</i><b>${L.sincePromote || 0}</b></span>
+        <span><i>re-fit berikutnya</i><b>${S.nextRefitAt ? new Date(S.nextRefitAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</b></span>
       </div>
     </div>
     <div class="lstat-sec">
-      <b>2 · MODEL YANG SEDANG DIPAKAI UNTUK SINYAL</b>
-      <div class="lstat-line">${badge}${M.version && M.version !== "default" ? ` <span class="lstat-dim">versi ${esc(String(M.version).slice(0, 19))}</span>` : ""}</div>
-      <div class="lstat-line lstat-dim">${learned
-        ? `dipromosikan ${M.promotedAt ? new Date(M.promotedAt).toLocaleString() : "—"} · pemicu: ${esc(M.trigger || "—")} · data latih ${M.rows || "—"} baris · data baru sejak promosi: ${L.sincePromote || 0}`
-        : `belum ada model hasil belajar — masih memakai tabel backtest 90 hari. Model belajar otomatis menggantikan hanya bila menang pada jendela uji.`}</div>
-      <div class="lstat-line">${mt.score != null
-        ? `metrik uji: cakupan <b>${((mt.coverage || 0) * 100).toFixed(0)}%</b> · winrate sinyal diambil <b>${((mt.takenWinrate || 0) * 100).toFixed(1)}%</b> · skor <b>${mt.score}</b>${baseTxt != null ? ` · baseline arah ${(baseTxt * 100).toFixed(1)}%` : ""}`
-        : `metrik uji: — (belum ada model belajar)`}</div>
-      <div class="lstat-line">penahan aktif: ${blockers.length ? blockers.map((k) => `<code>${esc(k)}</code>`).join(" · ") : '<span class="lstat-dim">tidak ada</span>'}</div>
+      <b>2 · APA YANG DI-IMPROVE</b>
+      <div class="lstat-line">Yang dipelajari sistem: <b>(a) konteks</b> — kombinasi tier/aset/jam/interval yang historis lemah ditahan, yang kuat diunggulkan; <b>(b) ambang</b> — batas numerik (volRel2, surprise, gap, likuiditas) disesuaikan dari data nyata.</div>
+      <div class="lstat-line">metode: split <b>70/30 berurutan waktu</b> (latih = data paling awal, uji = 30% paling akhir) + <b>Wilson bound</b>; ambang dicari dengan coordinate-ascent memaksimalkan batas bawah Wilson, dengan syarat cakupan ≥20%. Model hanya dipakai bila <b>menang pada jendela uji</b>.</div>
+      <div class="lstat-line">status model: ${learned ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR AKTIF</span>' : (g.mode === "strict" ? '<span class="lstat-badge def">AMBANG KONSERVATIF</span>' : '<span class="lstat-badge sup">BOOTSTRAP — BELUM ADA AMBANG BELAJAR</span>')}</div>
+      <div class="lstat-line">ambang aktif: ${(g.thresholds && g.thresholds.length) ? g.thresholds.map((t) => `<code>${esc(t.f)} ${esc(t.op)} ${esc(t.t)}</code>`).join(" · ") : '<span class="lstat-dim">belum ada (memakai tier ladder saja)</span>'}</div>
+      <div class="lstat-line lstat-dim">tier: STRONG volRel2≥${g.tiers ? g.tiers.STRONG.volRel2 : "—"}${g.tiers && g.tiers.STRONG.surprise ? " & surprise≥" + g.tiers.STRONG.surprise : ""} · GOOD ≥${g.tiers ? g.tiers.GOOD.volRel2 : "—"} · FAIR ≥${g.tiers && g.tiers.FAIR ? g.tiers.FAIR.volRel2 : "—"} · floor likuiditas ×${g.liqFloorMul != null ? g.liqFloorMul : "—"} · batas telat ${g.lateFrac != null ? (g.lateFrac * 100).toFixed(0) + "%" : "—"}${learned && g.promotedAt ? ` · dipromosikan ${new Date(g.promotedAt).toLocaleString()}` : ""}</div>
     </div>
     <div class="lstat-sec">
-      <b>3 · AMBANG / FILTER YANG SEDANG DIPAKAI UNTUK SINYAL</b>
-      <div class="lstat-line">${(g.mode === "learned")
-        ? `<span class="lstat-badge ok">AMBANG HASIL BELAJAR</span> <span class="lstat-dim">dipromosikan ${g.promotedAt ? new Date(g.promotedAt).toLocaleString() : "—"}</span>`
-        : `<span class="lstat-badge sup">BOOTSTRAP (DILONGGARKAN)</span> <span class="lstat-dim">kriteria sengaja dilonggarkan agar cepat mengumpulkan data — learner akan mengetatkan sendiri</span>`}</div>
-      <div class="lstat-line">ambang aktif: ${(g.thresholds && g.thresholds.length)
-        ? g.thresholds.map((t) => `<code>${esc(t.f)} ${esc(t.op)} ${esc(t.t)}</code>`).join(" · ")
-        : '<span class="lstat-dim">belum ada (memakai tier ladder saja)</span>'}</div>
-      <div class="lstat-line lstat-dim">tier: STRONG volRel2≥${g.tiers ? g.tiers.STRONG.volRel2 : "—"} · GOOD ≥${g.tiers ? g.tiers.GOOD.volRel2 : "—"} · FAIR ≥${g.tiers && g.tiers.FAIR ? g.tiers.FAIR.volRel2 : "—"} · floor likuiditas ×${g.liqFloorMul != null ? g.liqFloorMul : "—"} · batas telat ${g.lateFrac != null ? (g.lateFrac * 100).toFixed(0) + "%" : "—"} sesi</div>
-      ${g.metrics ? `<div class="lstat-line">hasil uji ambang ini: cakupan <b>${((g.metrics.coverage || 0) * 100).toFixed(0)}%</b> · winrate sinyal diambil <b>${((g.metrics.takenWinrate || 0) * 100).toFixed(1)}%</b></div>` : ""}
+      <b>3 · HASIL PERBAIKAN (terukur pada data uji)</b>
+      ${hasilTxt}
     </div>
     <div class="lstat-sec">
       <b>4 · EFEK DI BROWSER INI (sejak halaman dibuka)</b>
       <div class="lstat-line">sinyal diamati <b>${LEARN_STATS.signals}</b> · konteks kuat <b>${LEARN_STATS.strong}</b> · campuran <b>${LEARN_STATS.mixed}</b> · lemah <b>${LEARN_STATS.weak}</b> · <span class="${LEARN_STATS.wouldBlock ? "lstat-warn" : "lstat-dim"}">akan ditahan <b>${LEARN_STATS.wouldBlock}</b></span>${LEARN_BLOCK ? ' <span class="lstat-badge sup">TAHAN AKTIF</span>' : ' <span class="lstat-badge def">TAHAN MATI</span>'}</div>
-      <div class="lstat-line lstat-dim">aktifkan penahanan: <code>window.setLearnBlock(true)</code></div>
     </div>
     <div class="lstat-sec">
       <b>5 · RIWAYAT PENYESUAIAN MODEL</b> <span class="lstat-dim">(build JS: ${BUILD})</span>
-      ${hist.length ? hist.slice().reverse().map((h) => `<div class="lstat-row">
-        <span class="lstat-badge ${h.promote ? "ok" : "def"}">${h.promote ? "PROMOTE" : "KEEP"}</span>
-        <span class="lstat-dim">${h.at ? new Date(h.at).toLocaleString() : ""} · pemicu ${esc(h.trigger || "—")} · data ${h.rows != null ? h.rows : "—"}</span>
-        <span>${esc(h.why || "")}</span></div>`).join("") : '<div class="lstat-dim">belum ada keputusan (menunggu data cukup)</div>'}
+      ${histHtml}
+    </div>
+    <div class="lstat-sec">
+      <b>6 · AKSI SELANJUTNYA</b>
+      ${actsHtml}
     </div>`;
 }
 setInterval(loadLearnerStatus, 60000);

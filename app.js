@@ -1793,8 +1793,8 @@ function captureDesktopSignal() {
       if (cached && cached.verdict !== "flat") {
         _deskSigMap[cacheKey] = true;
         
-        const gkey = gateKey(tf, cached.mode, cached.verdict, cached.rsi, cached.histStrength);
-        const g = gateLookup(gkey);
+        const gkey = cached.gateKey || gateKey(tf, cached.mode, cached.verdict, cached.rsi, cached.histStrength);
+        const g = cached.highConf ? { wr: cached.gateWr } : gateLookup(gkey);
         // Lock = the session open price, taken from the interval candle itself (matches the chart
         // lock line). Falls back to the 5s series only if that candle is not available.
         const t0Sec = Math.floor(t0 / 1000);
@@ -1851,6 +1851,10 @@ function updateProjectionUniversal() {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) { delete _deskSigLive[k]; delete _lockStatusSince[k]; }
   }
+  for (const k of _alertedKeys) {
+    const t = parseInt(k.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) _alertedKeys.delete(k);
+  }
   
   for (const sym of ["BTC", "ETH"]) {
     for (const tf of INTERVALS) {
@@ -1871,9 +1875,16 @@ function updateProjectionUniversal() {
       if (sig) {
         _deskSigLive[cacheKey] = sig;                 // live status (recomputed each tick)
         if (sig.verdict !== "flat") {
+          // Attach gate info at lock time (single place; reused by capture + notifications).
+          const gk = gateKey(tf, sig.mode, sig.verdict, sig.rsi, sig.histStrength);
+          const g = gateLookup(gk);
+          sig.gateKey = gk;
+          sig.highConf = !!g;
+          sig.gateWr = g ? g.wr : null;
           sig.lockedAt = now;                         // when the session signal was locked
           _deskSigCache[cacheKey] = sig;              // lock ONLY once a real signal appears
           console.log(`[SIGNAL] locked ${sym}/${tf} at +${Math.round((now - t0) / 1000)}s:`, sig.mode, sig.verdict, `conf ${sig.conf}`);
+          notifySignal(sym, tf, sig);                 // background alert (all combos)
         }
       }
     }
@@ -2627,9 +2638,61 @@ const unlockAudio = () => {
   if (!audioCtx) {
     try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
   }
+  if (audioCtx && audioCtx.state === "suspended") { try { audioCtx.resume(); } catch (_) {} }
+  requestNotifyPermission();
 };
 document.addEventListener("click", unlockAudio, { once: true });
 document.addEventListener("touchstart", unlockAudio, { once: true });
+document.addEventListener("keydown", unlockAudio, { once: true });
+document.addEventListener("pointerdown", unlockAudio, { once: true });
+
+/* ===== Background alert: desktop notification + tab title flash =====
+   Audio stays ACTIVE-COMBO only (see updateSignal). These fire for EVERY combo so a
+   signal detected while the tab is not focused is still surfaced. */
+let _origTitle = document.title;
+let _titleAlert = false;
+let _lastNotifAt = 0;
+const _alertedKeys = new Set();   // one background alert per combo per session
+
+function requestNotifyPermission() {
+  try {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  } catch (_) {}
+}
+function flashTitle(text) {
+  if (!_titleAlert) { _origTitle = document.title.replace(/^🔔.*?·\s*/, ""); _titleAlert = true; }
+  document.title = `🔔 ${text} · ${_origTitle}`;
+}
+function clearTitleFlash() {
+  if (_titleAlert) { document.title = _origTitle; _titleAlert = false; }
+}
+function notifySignal(sym, tf, sig) {
+  const key = `${sym}_${tf}_${sig.roundStart}`;
+  if (_alertedKeys.has(key)) return;         // once per combo per session
+  _alertedKeys.add(key);
+
+  const dir = String(sig.verdict || "").toUpperCase();
+  flashTitle(`${dir} ${sym}/${tf}`);          // visible in the tab bar even when unfocused
+
+  const hidden = typeof document.hidden === "boolean" ? document.hidden : false;
+  if (!hidden) return;                         // tab focused -> UI already shows it
+  const nowMs = Date.now();
+  if (nowMs - _lastNotifAt < 5000) return;     // throttle notifications
+  _lastNotifAt = nowMs;
+  const tier = sig.highConf ? "HIGH CONF" : "watchlist";
+  const body = `${sig.mode} · ${tier}${sig.gateWr != null ? ` · ${(sig.gateWr * 100).toFixed(0)}%` : ""}`;
+  try {
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      new Notification(`Signal ${dir} · ${sym}/${tf}`, { body, tag: key });
+    }
+  } catch (_) {}
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) { clearTitleFlash(); if (audioCtx && audioCtx.state === "suspended") { try { audioCtx.resume(); } catch (_) {} } }
+});
+window.addEventListener("focus", clearTitleFlash);
 
 /* ----------------------- Boot ----------------------- */
 // Diagnostic: status of EVERY coin/interval combo (background engine + accuracy).

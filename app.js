@@ -1182,7 +1182,7 @@ function applyType() {
       ofi: uni.ofi, ofiShort, retreat, health, entered: wasEntered,
       turn, fade, dwellTurnMs, dwellFadeMs, histTrend, trail,
     }) : null;
-    if (tradePlan && !tradePlan.entered) { delete _tradeEntered[uniKey]; delete _tradeClosed[uniKey]; }   // no position yet / stand down
+    if (tradePlan && !tradePlan.entered) { delete _tradeEntered[uniKey]; delete _tradeClosed[uniKey]; _closeSounded.delete(uniKey); }   // no position yet / stand down
     if (tradePlan) {
     if (tradePlan.entered && !wasEntered) {
       _tradeEntered[uniKey] = { entered: true, since: now, price: C };
@@ -1219,9 +1219,12 @@ function applyType() {
         console.log(`[TRADE][SOUND-ENTRY] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
         flashTitle(`▶ ${tradePlan.action} ${state.asset}/${state.interval}`);
       } else if (tradePlan.state === "CLOSE" || tradePlan.state === "STAND_DOWN") {
-        playCloseSound();
+        if (!_closeSounded.has(uniKey)) {
+          _closeSounded.add(uniKey);
+          playCloseSound();
+          console.log(`[TRADE][SOUND-CLOSE] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
+        }
         flashCard(state.asset, "exit");
-        console.log(`[TRADE][SOUND-CLOSE] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
         flashTitle(`■ ${tradePlan.action} ${state.asset}/${state.interval}`);
       }
     }
@@ -2073,6 +2076,7 @@ const _tradeEntered = {};  // key -> { entered, since, price }
 const _tradeClosed = {};   // key -> { at, price }  (kapan EARLY CLOSE pertama kali disinyalkan)
 const _wideSigSounded = new Set();  // key koin yg sudah dibunyikan di tampilan dual (hindari dobel)
 const _mainSigAlerted = new Set();  // key sesi yg alarm sinyalnya sudah dibunyikan (jalur utama)
+const _closeSounded = new Set();    // key sesi yg nada close-nya sudah dibunyikan (cegah berulang)
 const _tradeDwell = {};    // key -> { turnSince, fadeSince }
 function computeTradePlan(bias, ctx) {
   if (bias !== "up" && bias !== "down") {
@@ -2904,7 +2908,7 @@ function analyzeCoin(asset, tf, now) {
       _tradeEntered[key] = { entered: true, since: now, price: C };
       console.log(`[TRADE] position opened ${asset}/${tf} @ ${fmtPrice(C)}`);
     }
-    if (!plan.entered) { delete _tradeEntered[key]; delete _tradeClosed[key]; }
+    if (!plan.entered) { delete _tradeEntered[key]; delete _tradeClosed[key]; _closeSounded.delete(key); }
     if (plan.state === "CLOSE" && !_tradeClosed[key]) {
       _tradeClosed[key] = { at: now, price: C };
       console.log(`[TRADE] early close disinyalkan ${asset}/${tf} @ ${fmtPrice(C)}`);
@@ -3158,10 +3162,13 @@ function renderDual(force) {
             flashTitle(`▶ ${plan.action} ${a}/${tf}`);
             console.log(`[WIDE][SOUND-ENTRY] ${a}/${tf} ${plan.state}: ${plan.action}`);
           } else if (plan.state === "CLOSE" || plan.state === "STAND_DOWN") {
-            playCloseSound();
+            if (!_closeSounded.has(m.key)) {
+              _closeSounded.add(m.key);
+              playCloseSound();
+              console.log(`[WIDE][SOUND-CLOSE] ${a}/${tf} ${plan.state}: ${plan.action}`);
+            }
             flashCard(a, "exit");
             flashTitle(`■ ${plan.action} ${a}/${tf}`);
-            console.log(`[WIDE][SOUND-CLOSE] ${a}/${tf} ${plan.state}: ${plan.action}`);
           }
         }
         _tradeLastState[m.key] = plan.state;
@@ -3444,6 +3451,10 @@ function updateProjectionUniversal() {
   for (const k of _mainSigAlerted) {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) _mainSigAlerted.delete(k);
+  }
+  for (const k of _closeSounded) {
+    const t = parseInt(k.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) _closeSounded.delete(k);
   }
   for (const k of _warnedKeys) {
     const t = parseInt(k.split("_")[2]);
@@ -4419,12 +4430,16 @@ function playTradeEntrySound() {
     { f: 1175, t: 0.32, d: 0.12, type: "triangle", vol: 0.26, ping: true },
   ], { vol: 0.6, cutoff: 3600 });
 }
-// TRADE ASSISTANT close/cut — MASTER WARNING: descending "whoop" (pitch glide), twice.
+// TRADE ASSISTANT close/cut — "TING" ala notifikasi iPhone: SATU pukulan nada tunggal,
+// attack cepat + decay panjang (~1,6s). Nada oktaf di atasnya dibunyikan BERSAMAAN dengan
+// volume kecil hanya untuk memberi karakter "bell"; tidak ada nada kedua/bergantian sehingga
+// tidak terasa ramai. (Sebelumnya: dua kali "whoop" turun -> terlalu intens & bersaut-sautan.)
 function playCloseSound() {
   playSequence([
-    { f: 1220, f2: 700, t: 0.00, d: 0.26, type: "triangle", vol: 0.26 },
-    { f: 1220, f2: 700, t: 0.34, d: 0.30, type: "triangle", vol: 0.26 },
-  ], { vol: 0.6, cutoff: 3600 });
+    { f: 1318.5, t: 0.00, d: 1.60, type: "sine", vol: 0.30, ping: true },   // E6 — "ting"
+    { f: 2637.0, t: 0.00, d: 0.70, type: "sine", vol: 0.085, ping: true },  // oktaf (kilau bell)
+  ], { vol: 0.55, cutoff: 6200 });
+  console.log("[SOUND] close bell (ting) played");
 }
 
 // Preload audio context on first user interaction

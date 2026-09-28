@@ -2884,7 +2884,8 @@ function analyzeCoin(asset, tf, now) {
         histTrend,
       })
     : null;
-  return { key, C, O, std, slope, slopeRecent, rsi, z, sig, health, plan, ofi, ofiShort, histTrend };
+  return { key, C, O, std, slope, slopeRecent, rsi, z, sig, health, plan, ofi, ofiShort, histTrend,
+    liveMode: liveSig ? liveSig.mode : null };   // mode live (utk teks status saat tidak ada sinyal graded)
 }
 
 function switchAsset(asset) {
@@ -2912,6 +2913,7 @@ function renderMonitors(force) {
     const px = m ? m.C : (tick.last || 0);
     const chg = (tick.chg != null && isFinite(tick.chg)) ? +tick.chg : null;
     const sig = m && m.sig;
+    const liveMode = m ? m.liveMode : null;     // mode live dari analyzeCoin (scope renderDual tidak punya liveSig)
     const graded = !!(sig && sig.verdict !== "flat");
     const dir = graded ? sig.verdict : "flat";
     const dirWord = dir === "up" ? "UP" : dir === "down" ? "DOWN" : "—";
@@ -3086,6 +3088,7 @@ function renderDual(force) {
     const chg = (tick.chg != null && isFinite(tick.chg)) ? +tick.chg : null;
     const g = (id) => document.getElementById(`dc-${a}-${id}`);
     const sig = m && m.sig;
+    const liveMode = m ? m.liveMode : null;   // mode live dari analyzeCoin (liveSig hanya ada di analyzeCoin)
     const graded = !!(sig && sig.verdict !== "flat");
     const dir = graded ? sig.verdict : "flat";
     const plan = m && m.plan;
@@ -3153,7 +3156,7 @@ function renderDual(force) {
     if (rEl) {
       rEl.textContent = graded
         ? `Recommendation: ${dir.toUpperCase()}${sig.grade ? ` · ${sig.grade}${sig.expectedWR != null ? " " + (sig.expectedWR * 100).toFixed(0) + "%" : ""}` : ""}${sig.minuteIn ? ` · min ${sig.minuteIn}` : ""}`
-        : (liveSig && liveSig.mode ? `No entry · ${liveSig.mode}` : "Menunggu…");
+        : (liveMode ? `No entry · ${liveMode}` : "Menunggu…");
       rEl.className = "dc-rec " + (graded ? dir : "flat");
     }
     const bEl = g("badge");
@@ -3196,7 +3199,7 @@ function renderDual(force) {
     const prEl = g("pred");
     if (prEl && m) {
       const delta = m.O > 0 ? (m.C - m.O) / m.O * 100 : 0;
-      prEl.innerHTML = `LOCK <b>${fmtPrice(m.O)}</b> · PREDIKSI <b>${graded ? dir.toUpperCase() : "—"}</b> · CONF <b>${sig && sig.conf != null ? sig.conf : "—"}</b> · MODE <b>${liveSig ? liveSig.mode : "—"}</b> · DELTA <b>${delta >= 0 ? "+" : ""}${delta.toFixed(3)}%</b>`;
+      prEl.innerHTML = `LOCK <b>${fmtPrice(m.O)}</b> · PREDIKSI <b>${graded ? dir.toUpperCase() : "—"}</b> · CONF <b>${sig && sig.conf != null ? sig.conf : "—"}</b> · MODE <b>${liveMode || "—"}</b> · DELTA <b>${delta >= 0 ? "+" : ""}${delta.toFixed(3)}%</b>`;
     }
     const ch = dualCharts[a];
     if (ch) {

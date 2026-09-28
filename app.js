@@ -2958,7 +2958,7 @@ function buildDual() {
   if (!el || dualCharts) return;
   el.innerHTML = ["BTC", "ETH"].map((a) => `
     <div class="dual-col" id="dc-${a}-col">
-      <div class="dc-head"><span class="dc-coin">${a}</span><span class="dc-price" id="dc-${a}-price">—</span><span class="dc-chg" id="dc-${a}-chg"></span><span class="dc-dusd" id="dc-${a}-dusd"></span><span class="dc-chg24" id="dc-${a}-chg24"></span></div>
+      <div class="dc-head"><span class="dc-coin">${a}</span><span class="dc-price" id="dc-${a}-price">—</span><span class="dc-chg" id="dc-${a}-chg"></span><span class="dc-dusd" id="dc-${a}-dusd"></span><span class="dc-chg24" id="dc-${a}-chg24"></span><span class="dc-cd" id="dc-${a}-cd" title="Sisa waktu sesi">--:--</span></div>
       <div class="dc-chart" id="dc-${a}-chart"></div>
       <div class="dc-recrow"><span class="dc-rec" id="dc-${a}-rec">—</span><span class="rec-status" id="dc-${a}-badge"></span></div>
       <div class="dc-act" id="dc-${a}-act">—</div>
@@ -3085,6 +3085,11 @@ function renderDual(force) {
   const now = serverNow();
   const tf = state.interval;
   const dur = INTERVAL_MS[tf];
+  // Countdown sisa durasi sesi (satu nilai untuk kedua koin; di kanan atas kartu, sejajar
+  // judul/harga/%). Hanya ditulis bila detiknya berubah supaya tidak thrash tiap 250ms.
+  const sbNow = sessionBounds(dur, now);
+  const remSec = Math.max(0, Math.round((sbNow.end - now) / 1000));
+  const cdTxt = `${String(Math.floor(remSec / 60)).padStart(2, "0")}:${String(remSec % 60).padStart(2, "0")}`;
   for (const a of ["BTC", "ETH"]) {
     const m = analyzeCoin(a, tf, now);
     const tick = state.ticker[a] || {};
@@ -3134,6 +3139,13 @@ function renderDual(force) {
     }
 
     const pEl = g("price"); if (pEl) pEl.textContent = fmtPrice(px);
+    const cdEl = g("cd");
+    if (cdEl) {
+      if (cdEl.textContent !== cdTxt) cdEl.textContent = cdTxt;
+      const cls = "dc-cd" + (remSec <= 60 ? " warn" : "");
+      if (cdEl.className !== cls) cdEl.className = cls;
+      cdEl.title = `Sisa waktu sesi ${tf}: ${cdTxt}`;
+    }
     // dc-chg = selisih harga dari LOCK (%), dc-dusd = selisih yang sama dalam $ (permintaan user),
     // dc-chg24 = perubahan 24 jam dari ticker (dibedakan agar tidak tertukar).
     const cEl = g("chg");

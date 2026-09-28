@@ -485,3 +485,10 @@ body {
 .audio-hint.on { color: var(--up); border-color: rgba(14,203,129,.35); background: rgba(14,203,129,.12); }
 .audio-hint.off { color: var(--down); border-color: rgba(246,70,93,.35); background: rgba(246,70,93,.12); }
 .audio-hint:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ===== Countdown sisa durasi sesi di kanan atas kartu coin (layar lebar) ===== */
+.dc-cd { margin-left: auto; align-self: center; font-size: 11px; font-weight: 800;
+  font-variant-numeric: tabular-nums; letter-spacing: .04em; white-space: nowrap;
+  color: var(--text); background: var(--panel-2); border: 1px solid var(--border);
+  padding: 2px 7px; border-radius: 7px; }
+.dc-cd.warn { color: var(--down); border-color: rgba(246,70,93,.35); background: rgba(246,70,93,.12); }

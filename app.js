@@ -2107,13 +2107,19 @@ function computeTradePlan(bias, ctx) {
       const trailTxt = (ctx.trail && ctx.trail.armed)
         ? ` · TRAIL puncak-halus ${fmtPrice(ctx.trail.smaPeak)} → exit bila mundur ke ${fmtPrice(ctx.trail.exitPrice)} (win 64%, E+0.014%)`
         : "";
+      // PARTIAL LADDER EXIT (max 3 legs) — backtest BTC+ETH: 40% lock / 30% lock+0.02% / 30% trail
+      // captures ~8x more than selling everything at the lock (median $5.07 vs $0.61) at win 70%.
+      const l2Price = isUp ? ctx.lock * 1.0002 : ctx.lock * 0.9998;
+      const ladderTxt = (ctx.trail && ctx.trail.armed)
+        ? `LADDER (3 level, win ~70%): 40% di lock ${fmtPrice(ctx.lock)} · 30% di ${fmtPrice(l2Price)} (+0.02%) · 30% TRAIL puncak-halus ${fmtPrice(ctx.trail.smaPeak)} → exit ${fmtPrice(ctx.trail.exitPrice)}`
+        : `TAHAN — tunggu harga menyentuh lock ${fmtPrice(ctx.lock)} untuk mulai ladder`;
       if (ctx.retreat || closeReady || fs < 65) {
         state = "CLOSE"; cls = "exit";
         const why = ctx.retreat ? "harga mundur dari puncak" : closeReady ? "momentum melemah" : "momentum mulai lemah";
-        action = `JUAL SEKARANG DI LOCK${lockWin != null ? ` (win ${(lockWin * 100).toFixed(0)}%)` : ""} — ${why}${trailTxt}${exTxt}`;
+        action = `JUAL SEMUA SEKARANG${lockWin != null ? ` (dasar win ${(lockWin * 100).toFixed(0)}%)` : ""} — ${why}${trailTxt}${exTxt}`;
       } else {
         state = "HOLD"; cls = "entry";
-        action = `TAHAN (opsional) — momentum masih kuat${cont ? `, sisa potensi ~${cont.est.toFixed(2)}%` : ""}${trailTxt}${exTxt} · jika tidak, jual di lock sekarang`;
+        action = ladderTxt;
       }
     } else if (inZone2 && avgReady) {
       state = "AVERAGE"; cls = "entry";

@@ -1170,7 +1170,7 @@ function applyType() {
     tradePlan = computeTradePlan(uni.verdict, {
       lock: O, price: C, std, slope, slopeRecent, rsi, z,
       ofi: uni.ofi, ofiShort, retreat, health, entered: wasEntered,
-      turn, fade, dwellTurnMs, dwellFadeMs,
+      turn, fade, dwellTurnMs, dwellFadeMs, histTrend,
     });
     if (tradePlan.entered && !wasEntered) {
       _tradeEntered[uniKey] = { entered: true, since: now, price: C };
@@ -2018,12 +2018,17 @@ function computeTradePlan(bias, ctx) {
   const inZone3 = levels.rNow >= RLV[2];
   const h = ctx.health || {};
   const biasAtRisk = h.label === "HAMPIR PASTI BERBALIK" || h.label === "SUDAH BERBALIK";
-  const biasWeakening = h.label === "WASPADA BERBALIK ARAH";
+  // NOTE: "price is contra the lock" is the ENTRY OPPORTUNITY in this workflow, not a risk —
+  // so the health label (built for managing an open position) must NOT veto PHASE 1.
+  // The only genuine reason to hold back is a real reversal: higher-tf trend flipped against
+  // the bias AND strong opposing flow, while the move is still going against us.
+  const histFlipped = !!ctx.histTrend && ctx.histTrend.predictDir !== "flat" && ctx.histTrend.predictDir !== bias && ctx.histTrend.strength >= 35;
+  const ofiStrongAgainst = ctx.ofi != null && (isUp ? ctx.ofi < -0.25 : ctx.ofi > 0.25);
+  const realReversal = histFlipped && ofiStrongAgainst;
   // Evidence the move against the bias is about to turn back toward it.
   const turnToward = isUp
     ? ((ctx.slope != null && ctx.slope > 0) || (ctx.ofiShort != null && ctx.ofiShort > 0.1))
     : ((ctx.slope != null && ctx.slope < 0) || (ctx.ofiShort != null && ctx.ofiShort < -0.1));
-  const ofiAgainst = ctx.ofi != null && (isUp ? ctx.ofi < -0.15 : ctx.ofi > 0.15);
   // Confirmation: >=2 independent evidence parts AND a minimum dwell time, so a single
   // noisy tick cannot trigger (too fast) and waiting never drags on (too late).
   const turn = ctx.turn || { count: 0, parts: {} };
@@ -2053,18 +2058,16 @@ function computeTradePlan(bias, ctx) {
 
   if (!entered) {
     // ---------------- PHASE 1: no position ----------------
-    if (biasAtRisk) {
-      state = "STAND_DOWN"; cls = "exit";
-      action = `BATAL — bias ${bias.toUpperCase()} berisiko berbalik, jangan entry`;
-    } else if (favor >= 0) {
+    // Waiting for a contra move into the reward zone, then for confirmed evidence of a turn.
+    if (favor >= 0) {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU — harga masih di sisi ${isUp ? "atas" : "bawah"} lock, tunggu contra ke ${isUp ? "bawah" : "atas"} ${fmtPrice(ctx.lock)}`;
     } else if (!inZone1) {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU — harga baru ${rNowTxt} dari lock (minimum ${RLV[0]}% untuk reward yang layak)`;
-    } else if (inZone3 && ofiAgainst && biasWeakening) {
-      state = "NO_AVERAGE"; cls = "exit";
-      action = "JANGAN MASUK — tren melawan terlalu kuat";
+    } else if (realReversal && !turnToward && inZone3) {
+      state = "CAUTION_ENTRY"; cls = "wait";
+      action = "AWAS — tren historis berbalik & arus kuat melawan; tunggu konfirmasi pembalikan dulu (belum entry)";
     } else if (turnReady) {
       state = "ENTRY"; cls = "entry";
       action = `ENTRY ${bias.toUpperCase()} di zona ${rNowTxt} — terkonfirmasi (${partList(turn.parts)})`;

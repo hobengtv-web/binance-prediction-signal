@@ -1445,7 +1445,9 @@ function applyType() {
     updateConfidenceDisplay(ledDir, ledConf);
 
     // akurasi: bekukan prediksi di momen entry, evaluasi saat round berakhir
-     captureConfidenceRound(t0, O, C, fadeDir, fadeConf, curTrendDir, confMode, state);
+     // Pakai arah yang BENAR-BENAR DITAMPILKAN (ledDir), bukan arah fade internal, supaya
+     // log konsisten dengan rekomendasi/led bar yang dilihat user.
+     captureConfidenceRound(t0, O, C, typeof ledDir !== "undefined" ? ledDir : fadeDir, typeof ledConf !== "undefined" ? ledConf : fadeConf, curTrendDir, confMode, state);
      
 
      // Universal background: update all coin/interval signal cache setiap tick
@@ -3361,28 +3363,40 @@ function captureDesktopSignal() {
       const cacheKey = `${sym}_${tf}_${t0}`;
       
       if (_deskSigMap[cacheKey]) continue;
-      
+
+      // ===== SUMBER KEBENARAN = SAMA DENGAN YANG DITAMPILKAN =====
+      // Panel DESKTOP SIGNAL ACCURACY menilai entri ini. Dulu entri selalu memakai verdict
+      // LOKAL, sedangkan rekomendasi yang dilihat user kini memakai sinyal SERVER -> bila
+      // keduanya berbeda (mis. device dibuka di tengah sesi), log tercatat berlawanan dengan
+      // sinyal yang menang (user melihat "D dan benar" tapi tercatat "U/salah").
+      const srv = (typeof LIVE !== "undefined") ? LIVE.signalFor(sym, tf) : null;
       const cached = _deskSigCache[cacheKey];
-      if (cached && cached.verdict !== "flat") {
+      const shown = srv
+        ? { verdict: srv.verdict, mode: srv.mode, conf: srv.conf, grade: srv.grade, rsi: srv.rsi,
+            histStrength: srv.histStrength, gateKey: srv.gateKey, highConf: !!srv.accepted,
+            gateWr: null, reason: cached ? cached.reason : "", lock: srv.lock }
+        : (cached ? { verdict: cached.verdict, mode: cached.mode, conf: cached.conf, grade: cached.grade,
+            rsi: cached.rsi, histStrength: cached.histStrength, gateKey: cached.gateKey,
+            highConf: !!cached.highConf, gateWr: cached.gateWr, reason: cached.reason || "", lock: null } : null);
+      if (shown && shown.verdict !== "flat") {
         _deskSigMap[cacheKey] = true;
-        
-        const gkey = cached.gateKey || gateKey(tf, cached.mode, cached.verdict, cached.rsi, cached.histStrength);
-        const g = cached.highConf ? { wr: cached.gateWr } : gateLookup(gkey);
+        const gkey = shown.gateKey || gateKey(tf, shown.mode, shown.verdict, shown.rsi, shown.histStrength);
+        const g = shown.highConf ? { wr: shown.gateWr } : gateLookup(gkey);
         // Lock = the session open price, taken from the interval candle itself (matches the chart
         // lock line). Falls back to the 5s series only if that candle is not available.
         const t0Sec = Math.floor(t0 / 1000);
         const sessionCandle = (state.cache[sym]?.[tf]?.candles || []).find((c) => c.time === t0Sec);
-        const lock = sessionCandle ? sessionCandle.open : sessionLock(sym, dur, now);
+        const lock = shown.lock || (sessionCandle ? sessionCandle.open : sessionLock(sym, dur, now));
         const entry = {
           ts: Date.now(),
           t0: t0,
           asset: sym,
           interval: tf,
-          mode: cached.mode,
-          dir: cached.verdict,
-          conf: cached.conf,
+          mode: shown.mode,
+          dir: shown.verdict,          // = arah yang DITAMPILKAN (server bila segar)
+          conf: shown.conf,
           lock: lock,
-          reason: cached.reason || "",
+          reason: shown.reason || "",
           gateKey: gkey,
           highConf: !!g,
           gateWr: g ? g.wr : null,
@@ -3395,8 +3409,8 @@ function captureDesktopSignal() {
           // Dilewati bila sinyal untuk tf ini sudah diproduksi server (engine 5m/15m) supaya
           // tidak ada record ganda; 1h tetap direkam klien karena server tidak menyajikannya.
           const srvHas = ["5m", "15m"].includes(tf) && !!(typeof LIVE !== "undefined" && LIVE.fresh() && LIVE.tf === tf);
-          try {
-            if (srvHas) throw new Error("skip: sinyal tf ini diproduksi server");
+          if (srvHas) { /* sinyal tf ini diproduksi server -> klien tidak merekam (hindari duplikat) */ }
+          else try {
             const L = cached.learn || null;
             LEDGER.addSignal({
               asset: sym, interval: tf, t0: t0Sec,

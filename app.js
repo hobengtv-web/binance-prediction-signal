@@ -72,6 +72,7 @@ const state = {
 
 let serverTimeOffset = 0;  // client now → server now correction (ms)
 let lastTimeSync = 0;      // Date.now() of last successful time sync
+let _lastTradeOffsetAt = 0; // throttle for trade-derived offset updates
 function serverNow() { return Date.now() + serverTimeOffset; }
 // Re-sync Binance time if it's been stale for >3s (catches missed syncs)
 function ensureTimeSync() { const now = Date.now(); if (!lastTimeSync || now - lastTimeSync > 3000) { lastTimeSync = now; fetchBinanceTime(); } }
@@ -258,26 +259,32 @@ function mergeOlder(sym, ones) {
 }
 
 async function fetchOlder(sym, beforeSec, limit) {
-  // Fetch 1m candles (Binance REST supports this) and expand to 1s granularity
+  // Prefer REAL 1s klines (Binance spot supports interval=1s). Only fall back to
+  // expanding 1m candles into synthetic 1s when the source returns coarse data.
   const histLimit = Math.min(limit, 1000);
+  const toOnes = (candles) => {
+    if (!candles || candles.length < 2) return candles || [];
+    const gap = candles[1].time - candles[0].time;
+    return gap > 1 ? expandTo1s(candles) : candles;
+  };
   // 1) proxy server (same-origin)
   try {
-    const r = await fetch(`/api/klines?symbol=${sym}&tf=1m&before=${beforeSec}&limit=${histLimit}`);
+    const r = await fetch(`/api/klines?symbol=${sym}&tf=1s&before=${beforeSec}&limit=${histLimit}`);
     if (r.ok) {
       const j = await r.json();
-      if (j && Array.isArray(j.candles) && j.candles.length) return expandTo1s(j.candles);
+      if (j && Array.isArray(j.candles) && j.candles.length) return toOnes(j.candles);
     }
   } catch (e) { console.warn("[HISTORY] proxy fetch failed:", e); }
   // 2) fallback: direct Binance
   try {
-    const rows = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=1m&limit=${histLimit}&endTime=${beforeSec * 1000 - 1000}`);
+    const rows = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=1s&limit=${histLimit}&endTime=${beforeSec * 1000 - 1000}`);
     const candles = rows.map((r) => ({
       time: Math.floor(r[0] / 1000),
       open: +r[1], high: +r[2], low: +r[3], close: +r[4],
       vol: +r[5], trades: +r[8],
       openTime: r[0], closeTime: r[6],
     }));
-    return expandTo1s(candles);
+    return toOnes(candles);
   } catch (e) { console.warn("[HISTORY] direct Binance fetch failed:", e); throw e; }
 }
 
@@ -433,6 +440,7 @@ function startTV() {
   }, 9000);
 }
 function setConn(on) {
+  state.connected = !!on;   // single source of truth for every transport (WS, SSE, polling)
   const el = document.getElementById("conn");
   el.className = "conn " + (on ? "conn--on" : "conn--off");
 }
@@ -460,7 +468,7 @@ function feedCandle(symKey, tf, candle) {
   store.meta = candle;
    if (tf === "1s") rebuild5s(symKey);
 
-  if (symKey === state.asset && tf === "1s") { chart.setData(activeCandles()); updateProjection(); updateMobilePrediction(); }
+  if (symKey === state.asset && tf === "1s") { scheduleRender(); updateMobilePrediction(); }
   updateGap();
 }
 
@@ -706,6 +714,19 @@ function applyType() {
     const s = arr.slice().sort((a, b) => a - b);
     const idx = Math.min(s.length - 1, Math.max(0, Math.floor((p / 100) * (s.length - 1))));
     return s[idx];
+  }
+
+  // Coalesce the hottest render path (per-trade / per-1s-candle) so updateProjection
+  // runs at most ~4x/second instead of on every event. User actions still call
+  // updateProjection() directly for instant feedback.
+  let _renderTimer = null;
+  function scheduleRender() {
+    if (_renderTimer) return;
+    _renderTimer = setTimeout(() => {
+      _renderTimer = null;
+      chart.setData(activeCandles());
+      updateProjection();
+    }, 250);
   }
 
   function updateProjection() {
@@ -1017,7 +1038,6 @@ function applyType() {
       conf: conf,
       timestamp: now,
     };
-    console.log("[DESK-SIG] new session signal:", _deskSig);
   }
   
   // Recommendation source: the calibrated universal engine ONLY, which is also the source
@@ -1214,15 +1234,23 @@ function applyType() {
     const sk = state.asset + ":" + dur + ":" + t0;
     _sessionT0 = t0; _sessionT = T; _sessionO = O; _sessionC = C; _sessionDur = dur;
     // Only recompute _sessionT_client when session boundary changes (prevents flicker)
-    if (sk !== _sessionKey) { _sessionKey = sk; _sessionT_client = T - serverTimeOffset; _lastTimerSec = -1; }
+    if (sk !== _sessionKey) { _sessionKey = sk; _sessionT_client = T - serverTimeOffset; _sessionOffsetAtSet = serverTimeOffset; _lastTimerSec = -1; }
 
   }
 
   let _lastTimerSec = -1, _sessionT0 = 0, _sessionT = 0, _sessionO = 0, _sessionC = 0, _sessionDur = 0, _sessionT_client = 0;
   let _sessionKey = "";  // guards against flicker: recompute _sessionT_client only when session changes
+  let _sessionOffsetAtSet = 0;  // serverTimeOffset used when _sessionT_client was anchored
   function updateTimerDisplay() {
     const now = Date.now();  // pure client time — no serverTimeOffset jitter
     ensureTimeSync();  // re-sync if stale (>3s since last sync)
+    // Re-anchor the client-facing round timer if the server-time offset has drifted
+    // materially since the session boundary (otherwise the countdown is wrong all round).
+    if (_sessionT_client && Math.abs(serverTimeOffset - _sessionOffsetAtSet) > 300) {
+      _sessionT_client = _sessionT - serverTimeOffset;
+      _sessionOffsetAtSet = serverTimeOffset;
+      _lastTimerSec = -1;
+    }
     const remaining = _sessionT_client - now;
     const elapsed = now - (_sessionT_client - _sessionDur);
     const total = _sessionDur;
@@ -1279,12 +1307,15 @@ function applyType() {
 
   /* ----------------------- Real-time orderbook poller (browser-level, 200ms) ----------------------- */
   let _obTimer = null;
+  let _obBusy = false;
   function startOrderbookPoll() {
     if (_obTimer) return;
     _obTimer = setInterval(async () => {
+      if (_obBusy) return;              // avoid piling up requests if a fetch is slow
+      _obBusy = true;
       const sym = state.asset;
       const binanceSym = OB_SYMBOLS[sym];
-      if (!binanceSym) return;
+      if (!binanceSym) { _obBusy = false; return; }
       try {
         const r = await fetch(`https://data-api.binance.vision/api/v3/depth?symbol=${binanceSym}&limit=5`, { cache: "no-store" });
         if (r.ok) {
@@ -1294,7 +1325,7 @@ function applyType() {
             updateOrderbook(sym);
           }
         }
-      } catch (_) {}
+      } catch (_) {} finally { _obBusy = false; }
     }, 500);
   }
 
@@ -1500,9 +1531,16 @@ let trendTimer = 0;
 // ----- realtime SSE path (local Node server): trade pushed on every fill -----
 function updateLiveTrade(d) {
   const sym = d.sym, price = +d.price, ts = +d.ts, qty = +d.qty || 0;
-  // sync client ↔ Binance server time using trade timestamp
-  serverTimeOffset = ts - Date.now();
-  lastTimeSync = Date.now();
+  // Sync client ↔ Binance server time from the trade timestamp, throttled + smoothed.
+  // Writing on EVERY trade makes serverNow() jitter by network latency, which can flip
+  // the session boundary (and therefore sessionLock / sessionStart) near the edge.
+  const _nowMs = Date.now();
+  if (!_lastTradeOffsetAt || _nowMs - _lastTradeOffsetAt > 2000) {
+    const raw = ts - _nowMs;
+    serverTimeOffset = serverTimeOffset ? Math.round(serverTimeOffset * 0.8 + raw * 0.2) : raw;
+    _lastTradeOffsetAt = _nowMs;
+    lastTimeSync = _nowMs;
+  }
 
   // Aggregate into 1s candles (real-time) — needed by mobile prediction
   const t1s = Math.floor(ts / 1000);
@@ -1534,7 +1572,7 @@ function updateLiveTrade(d) {
    }
    state.ticker[sym] = state.ticker[sym] || {}; state.ticker[sym].last = price;
    updateHeader(); updateGap();
-   if (sym === state.asset) { chart.setData(activeCandles()); updateProjection(); }
+   if (sym === state.asset) { scheduleRender(); }
 }
 function updateLiveTicker(d) {
   const t = state.ticker[d.sym] || (state.ticker[d.sym] = {});
@@ -1554,7 +1592,7 @@ async function refreshTrends() {
         if (last && last.time === b.time) arr[arr.length - 1] = b;
         else if (!last || b.time > last.time) { arr.push(b); if (arr.length > 500) arr.shift(); }
       });
-      store.meta = arr[arr.length - 1] || null;
+      store.meta = store.candles[store.candles.length - 1] || null;
     }
   } catch (_) {}
 }
@@ -1643,6 +1681,15 @@ const MobilePredLog = (() => {
 // SignalLog alias - untuk desktop signal capture (source of truth)
 const SignalLog = MobilePredLog;
 
+// O(1) index of history keys `${asset}_${interval}_${t0}` so capture/finalize do not
+// scan the whole log (up to 8000 entries) on every tick.
+const _loggedKeys = new Set();
+function logKeyOf(r) { return `${r.asset}_${r.interval}_${r.t0}`; }
+function rebuildLoggedIndex() {
+  _loggedKeys.clear();
+  for (const e of SignalLog.data()) _loggedKeys.add(logKeyOf(e));
+}
+
 /* Signals locked during a running session are held here (persisted) and only written to
    history when the round ENDS. Prevents history entries appearing before a round finishes,
    and prevents duplicates across page reloads. */
@@ -1653,7 +1700,9 @@ const PendingSig = (() => {
   const save = () => { try { localStorage.setItem(PENDING_SIG_KEY, JSON.stringify(map)); } catch (_) {} };
   const keyOf = (r) => `${r.asset}_${r.interval}_${r.t0}`;
   return {
-    add(r) { map[keyOf(r)] = r; save(); },
+    // Immutable: keep the FIRST locked signal for a round. A later re-computation
+    // (e.g. after a page reload) must not silently replace an already-locked signal.
+    add(r) { const k = keyOf(r); if (!(k in map)) { map[k] = r; save(); } },
     all() { return Object.values(map); },
     remove(r) { delete map[keyOf(r)]; save(); },
     has(k) { return !!map[k]; },
@@ -1664,6 +1713,7 @@ const PendingSig = (() => {
 
 /* ===== Backtest-calibrated quality gate (see backtest/replay.js) ===== */
 let GATE = null;
+let GATE_STATUS = "loading";   // loading | ok | missing | error
 const GATE_MAP = new Map();
 function gateRsiBucket(r) { return r == null ? "na" : r < 30 ? "<30" : r < 40 ? "30-40" : r <= 60 ? "40-60" : r <= 70 ? "60-70" : ">70"; }
 function gateStrBucket(s) { return s < 35 ? "<35" : s < 50 ? "35-50" : s < 70 ? "50-70" : ">=70"; }
@@ -1674,13 +1724,14 @@ function gateLookup(key) { return GATE_MAP.get(key) || null; }
 async function loadGate() {
   try {
     const res = await fetch("/backtest/out/gate.json", { cache: "no-store" });
-    if (!res.ok) { console.log("[GATE] no gate.json yet"); return; }
+    if (!res.ok) { GATE_STATUS = "missing"; console.warn("[GATE] gate.json not available — all signals will be marked watchlist"); renderConfidenceReport(); return; }
     GATE = await res.json();
     GATE_MAP.clear();
     for (const g of (GATE.gate || [])) GATE_MAP.set(g.key, g);
+    GATE_STATUS = "ok";
     console.log(`[GATE] loaded ${GATE_MAP.size} high-confidence conditions · baseline ${(GATE.baseline * 100).toFixed(1)}% · ${GATE.days}d`);
     renderConfidenceReport();
-  } catch (e) { console.log("[GATE] load failed:", e.message); }
+  } catch (e) { GATE_STATUS = "error"; console.warn("[GATE] load failed — all signals will be marked watchlist:", e.message); renderConfidenceReport(); }
 }
 
 // Universal signal cache - untuk background calculation semua coin & interval
@@ -1692,6 +1743,8 @@ let _cap_t0 = null;        // t0 ronde yang sedang di-capture
 let _cap_pending = null;   // prediksi entry: { t0, asset, interval, mode, dir, conf, trend }
 let _cap_lastClose = null; // C terakhir (close ronde sebelumnya saat boundary)
 let _cap_lastLock = null;  // O terakhir (lock ronde sebelumnya)
+let _cap_asset = null;     // combo guard: asset of the round being captured
+let _cap_interval = null;  // combo guard: interval of the round being captured
 
 // Desktop signal lock - signal hanya dihitung saat sesi dimulai, kemudian lock
 let _deskSig = null;       // { roundStart, asset, interval, verdict, mode, reason, conf, timestamp }
@@ -1734,7 +1787,7 @@ function captureDesktopSignal() {
           gateWr: g ? g.wr : null,
         };
         // Hold in PendingSig until the round ends (avoids early + duplicate history entries).
-        const alreadyFinal = SignalLog.data().some((e) => e.asset === sym && e.interval === tf && e.t0 === t0);
+        const alreadyFinal = _loggedKeys.has(cacheKey);
         if (!alreadyFinal) {
           PendingSig.add(entry);
           console.log("[DESK-SIG] pending:", entry);
@@ -1762,8 +1815,13 @@ function updateProjectionUniversal() {
     if (!isNaN(t) && t < CUTOFF) {
       delete _deskSigCache[k];
       delete _deskSigMap[k];
-      delete _deskSigLive[k];
     }
+  }
+  // _deskSigLive is populated for EVERY session (including flat), so it must be
+  // pruned independently — otherwise it grows without bound.
+  for (const k in _deskSigLive) {
+    const t = parseInt(k.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) delete _deskSigLive[k];
   }
   
   for (const sym of ["BTC", "ETH"]) {
@@ -1884,9 +1942,18 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
 }
 
 function captureConfidenceRound(t0, O, C, fadeDir, fadeConf, trendDir, mode, state) {
+  // Guard against asset/interval switches mid-round: the accumulator is global, so a
+  // switch would otherwise score the old combo's prediction against the new combo's prices.
+  if (_cap_asset !== state.asset || _cap_interval !== state.interval) {
+    _cap_t0 = null;
+    _cap_pending = null;
+    _cap_asset = state.asset;
+    _cap_interval = state.interval;
+  }
   // boundary: ronde sebelumnya baru saja berakhir (t0 berubah)
   if (_cap_t0 !== null && t0 !== _cap_t0) {
-    if (_cap_pending && _cap_lastClose != null && _cap_lastLock != null) {
+    const pendingMatches = _cap_pending && _cap_pending.asset === state.asset && _cap_pending.interval === state.interval;
+    if (pendingMatches && _cap_lastClose != null && _cap_lastLock != null) {
       const actual = _cap_lastClose >= _cap_lastLock ? "up" : "down";
       const won = _cap_pending.dir === actual ? 1 : 0;
       ConfLog.add({
@@ -1946,7 +2013,7 @@ function evaluateUniversalSessions(now) {
     const actual = close >= lock ? "up" : "down";
     const won = p.dir === actual ? 1 : 0;
 
-    const dup = SignalLog.data().some((e) => e.asset === p.asset && e.interval === p.interval && e.t0 === p.t0);
+    const dup = _loggedKeys.has(logKeyOf(p));
     if (!dup) {
       SignalLog.add({
         ts: Date.now(),
@@ -1966,6 +2033,7 @@ function evaluateUniversalSessions(now) {
         gateWr: p.gateWr != null ? p.gateWr : null,
         lockedAt: p.lockedAt,
       });
+      _loggedKeys.add(logKeyOf(p));
     }
     PendingSig.remove(p);
     changed = true;
@@ -1995,6 +2063,7 @@ function migrateUnfinished(now) {
   }
   if (moved) {
     SignalLog.replaceAll(keep);
+    rebuildLoggedIndex();
     console.log(`[MIGRATE] moved ${moved} unfinished history entries back to pending`);
   }
 }
@@ -2012,6 +2081,7 @@ function dedupeLog() {
   const out = [...byKey.values()].sort((a, b) => a.t0 - b.t0);
   if (out.length !== data.length) {
     SignalLog.replaceAll(out);
+    rebuildLoggedIndex();
     console.log(`[DEDUPE] removed ${data.length - out.length} duplicate history entries`);
   }
 }
@@ -2057,7 +2127,7 @@ function renderConfidenceReport() {
   const totalAll = allData.length;
   const pendingCount = PendingSig.size();
   if (head) head.textContent = `DESKTOP SIGNAL ACCURACY · Universal · `;
-  if (countEl) countEl.textContent = `${totalAll} rounds total${pendingCount ? ` · ${pendingCount} waiting to settle` : ""}`;
+  if (countEl) countEl.textContent = `${totalAll} rounds total${pendingCount ? ` · ${pendingCount} waiting to settle` : ""}${GATE_STATUS === "ok" ? "" : ` · gate ${GATE_STATUS}`}`;
   
   if (!totalAll) {
     body.innerHTML = `<div class="cd-empty">no completed rounds yet — ${pendingCount ? pendingCount + " signal(s) waiting to settle" : "let it run a few rounds"}</div>`;
@@ -2126,9 +2196,9 @@ function restoreMobilePredSession() {
       const tfMatch = saved.interval === state.interval;
       if (Math.abs(saved.roundStart - curStart) < 1000 && assetMatch && tfMatch) {
         _mobilePredSession = saved;
+        sessionStorage.removeItem(MOBILE_PRED_SESSION_KEY);   // consumed; guard prevents wrong restores otherwise
         console.log("[MOBILE-PRED] restored from sessionStorage:", saved);
       }
-      sessionStorage.removeItem(MOBILE_PRED_SESSION_KEY);
     }
   } catch (_) {}
 }
@@ -2339,7 +2409,11 @@ function predictSessionStart(sym, tf) {
        const pred = predictSessionStart(state.asset, state.interval);
        if (pred) {
          _mobilePredSession = pred;
-         if (pred.prediction !== "flat") predCache[state.asset][cacheKey] = pred;
+         if (pred.prediction !== "flat") {
+          predCache[state.asset][cacheKey] = pred;
+          const ck = Object.keys(predCache[state.asset]);
+          if (ck.length > 200) delete predCache[state.asset][ck[0]];   // keep the cache bounded
+        }
        } else if (!_mobilePredSession || _mobilePredSession.roundStart !== roundStart) {
          _mobilePredSession = {
            roundStart,
@@ -2383,9 +2457,6 @@ function predictSessionStart(sym, tf) {
     confEl.textContent = pred.prediction !== "flat" ? pred.confidence + "%" : "—";
     confEl.className = pred.prediction === "up" ? "up" : pred.prediction === "down" ? "down" : "";
   }
-  
-  // Track desktop signal for accuracy logging
-  captureDesktopSignal();
 }
 
 /* ----------------------- Controls ----------------------- */
@@ -2545,6 +2616,7 @@ function start() {
   startData();
   migrateUnfinished(serverNow());
   dedupeLog();
+  rebuildLoggedIndex();                     // build O(1) index after migrations
   evaluateUniversalSessions(serverNow());   // finalize rounds that already ended (e.g. after reload)
   renderConfidenceReport();
   loadGate();

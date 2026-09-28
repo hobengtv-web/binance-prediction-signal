@@ -700,9 +700,9 @@ function applyType() {
         tpAction.className = "tp-action " + (tp.cls || "wait");
         if (tpLevels) {
           tpLevels.innerHTML = tp.levels
-            ? `<span>ENTRY L1 <b>${fmtPrice(tp.levels.l1)}</b></span>` +
-              `<span>L2 <b>${fmtPrice(tp.levels.l2)}</b></span>` +
-              `<span>L3 <b>${fmtPrice(tp.levels.l3)}</b></span>` +
+            ? `<span>ENTRY L1 <b>${fmtPrice(tp.levels.l1)}</b> <i>(+${tp.levels.r1.toFixed(2)}%)</i></span>` +
+              `<span>L2 <b>${fmtPrice(tp.levels.l2)}</b> <i>(+${tp.levels.r2.toFixed(2)}%)</i></span>` +
+              `<span>L3 <b>${fmtPrice(tp.levels.l3)}</b> <i>(+${tp.levels.r3.toFixed(2)}%)</i></span>` +
               `<span>TARGET <b>${fmtPrice(tp.levels.target)}</b></span>`
             : "";
         }
@@ -712,7 +712,8 @@ function applyType() {
           const pos = tp.entryPrice != null
             ? ` · posisi @${fmtPrice(tp.entryPrice)} (${o.recPnl != null ? (o.recPnl >= 0 ? "+" : "") + o.recPnl.toFixed(2) + "%" : "—"})`
             : " · belum ada posisi";
-          tpMeta.textContent = `Momentum ${tp.fs} · jarak lock ${adv} · ${ofiTxt}${pos}${tp.why.length ? " · " + tp.why.join(", ") : ""}`;
+          const rwNow = tp.levels && tp.levels.rNow != null ? ` · reward saat ini +${tp.levels.rNow.toFixed(2)}%` : "";
+          tpMeta.textContent = `Momentum ${tp.fs} · jarak lock ${adv}${rwNow} · ${ofiTxt}${pos}${tp.why.length ? " · " + tp.why.join(", ") : ""}`;
         }
       }
     }
@@ -2002,12 +2003,19 @@ function computeTradePlan(bias, ctx) {
   const adverse = isUp ? (ctx.lock - ctx.price) : (ctx.price - ctx.lock);   // >0 = against the bias
   const adverseStd = adverse / sigma;
   const favor = -adverse;                                                   // >0 = on the bias side
-  const levels = {
-    l1: isUp ? ctx.lock - 0.4 * sigma : ctx.lock + 0.4 * sigma,
-    l2: isUp ? ctx.lock - 0.8 * sigma : ctx.lock + 0.8 * sigma,
-    l3: isUp ? ctx.lock - 1.3 * sigma : ctx.lock + 1.3 * sigma,
-    target: ctx.lock,
-  };
+  // Entry levels are defined by REWARD = price distance from the lock (in %), because the
+  // payout comes from recapturing the lock. sigma is kept only as volatility context.
+  const RLV = [0.10, 0.25, 0.50];
+  // Reward only counts while price is CONTRA the bias (below the lock for UP): that is the
+  // distance it must travel back to recapture the lock.
+  const rewardOf = (px) => Math.max(0, isUp ? (ctx.lock - px) : (px - ctx.lock)) / px * 100;
+  const lvlPrice = (pct) => isUp ? ctx.lock * (1 - pct / 100) : ctx.lock * (1 + pct / 100);
+  const levels = { l1: lvlPrice(RLV[0]), l2: lvlPrice(RLV[1]), l3: lvlPrice(RLV[2]), target: ctx.lock };
+  levels.rNow = rewardOf(ctx.price);
+  levels.r1 = RLV[0]; levels.r2 = RLV[1]; levels.r3 = RLV[2];
+  const inZone1 = levels.rNow >= RLV[0];
+  const inZone2 = levels.rNow >= RLV[1];
+  const inZone3 = levels.rNow >= RLV[2];
   const h = ctx.health || {};
   const biasAtRisk = h.label === "HAMPIR PASTI BERBALIK" || h.label === "SUDAH BERBALIK";
   const biasWeakening = h.label === "WASPADA BERBALIK ARAH";
@@ -2039,9 +2047,9 @@ function computeTradePlan(bias, ctx) {
   fs = Math.min(100, fs);
 
   const entered = !!ctx.entered;
-  const ZONE = 0.4;                 // minimum retracement (in sigma) before an entry is allowed
   let state, action, cls, nowEntered = entered;
   const prog = `${turn.count}/4 bukti · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
+  const rNowTxt = levels.rNow.toFixed(2) + "%";
 
   if (!entered) {
     // ---------------- PHASE 1: no position ----------------
@@ -2051,15 +2059,15 @@ function computeTradePlan(bias, ctx) {
     } else if (favor >= 0) {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU — harga masih di sisi ${isUp ? "atas" : "bawah"} lock, tunggu contra ke ${isUp ? "bawah" : "atas"} ${fmtPrice(ctx.lock)}`;
-    } else if (adverseStd < ZONE) {
+    } else if (!inZone1) {
       state = "WAIT"; cls = "wait";
-      action = `TUNGGU — harga baru mundur ${(-adverseStd).toFixed(2)}σ (minimum ${ZONE}σ)`;
-    } else if (adverseStd >= 1.3 && ofiAgainst && biasWeakening) {
+      action = `TUNGGU — harga baru ${rNowTxt} dari lock (minimum ${RLV[0]}% untuk reward yang layak)`;
+    } else if (inZone3 && ofiAgainst && biasWeakening) {
       state = "NO_AVERAGE"; cls = "exit";
       action = "JANGAN MASUK — tren melawan terlalu kuat";
     } else if (turnReady) {
       state = "ENTRY"; cls = "entry";
-      action = `ENTRY ${bias.toUpperCase()} di zona ${(-adverseStd).toFixed(2)}σ — terkonfirmasi (${partList(turn.parts)})`;
+      action = `ENTRY ${bias.toUpperCase()} di zona ${rNowTxt} — terkonfirmasi (${partList(turn.parts)})`;
       nowEntered = true;
     } else {
       state = "WAIT_TURN"; cls = "wait";
@@ -2076,15 +2084,15 @@ function computeTradePlan(bias, ctx) {
       else if (fs < 45) { state = "CLOSE"; cls = "exit"; action = "CLOSE SEKARANG — momentum searah melemah"; }
       else if (fs < 65 || (fade.count >= 2 && dwellFade >= DWELL_CLOSE_MS / 2)) { state = "CAUTION"; cls = "wait"; action = `SIAP CLOSE — ${fade.count}/4 bukti melemah · ${Math.round(dwellFade / 1000)}s/${DWELL_CLOSE_MS / 1000}s`; }
       else { state = "HOLD"; cls = "entry"; action = "HOLD — momentum masih searah"; }
-    } else if (adverseStd >= 0.8 && avgReady) {
+    } else if (inZone2 && avgReady) {
       state = "AVERAGE"; cls = "entry";
-      action = `AVERAGE ${bias.toUpperCase()} di ${(-adverseStd).toFixed(2)}σ — terkonfirmasi (${partList(turn.parts)})`;
-    } else if (adverseStd >= 0.8) {
+      action = `AVERAGE ${bias.toUpperCase()} di ${rNowTxt} — terkonfirmasi (${partList(turn.parts)})`;
+    } else if (inZone2) {
       state = "HOLD_POS"; cls = "wait";
-      action = `TAHAN POSISI — di zona ${(-adverseStd).toFixed(2)}σ, konfirmasi average ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_AVG_MS / 1000}s`;
+      action = `TAHAN POSISI — di zona ${rNowTxt}, konfirmasi average ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_AVG_MS / 1000}s`;
     } else {
       state = "HOLD_POS"; cls = "wait";
-      action = `TAHAN POSISI — harga di zona ${(-adverseStd).toFixed(2)}σ, tunggu pembalikan`;
+      action = `TAHAN POSISI — harga ${rNowTxt} dari lock, tunggu pembalikan`;
     }
   }
   return { state, action, cls, levels, fs, adverseStd, favor, why, entered: nowEntered, turn, fade, dwellTurnMs: dwellTurn, dwellFadeMs: dwellFade };
@@ -2179,6 +2187,9 @@ function gradeWR(tf, grade) {
 }
 // Minimum volume pace for the FAIR tier, per interval (calibrated 30d).
 function fairMinVol(tf) { return tf === "5m" ? 1.2 : tf === "15m" ? 2.0 : 1.5; }
+// After this fraction of the session the price sits close to the lock, so the reward of a
+// recapture is tiny even if the direction is right -> those entries are suppressed.
+const LATE_FRAC = 0.7;
 
 // Universal signal cache - untuk background calculation semua coin & interval
 let _deskSigCache = {};  // key: `${sym}_${tf}_${roundStart}` -> LOCKED signal (only non-flat entries)
@@ -2418,10 +2429,16 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     mode = why;
     conf = 0;
   }
+  // LATE gate: after LATE_FRAC of the session the price is close to the lock, so the reward
+  // is tiny even when accurate. Those entries are suppressed (user avoids them by choice).
+  const late = elapsed >= LATE_FRAC * dur;
+  if (late && grade) { grade = null; verdict = "flat"; mode = "LATE"; conf = 0; }
   const expectedGradeWR = grade ? gradeWR(tf, grade) : null;
   const minuteIn = Math.floor(elapsed / 60000) + 1;                 // 1-based, matches the calibration
   const sessionMin = Math.round(dur / 60000);
-  const late = elapsed > 0 && minuteIn >= Math.ceil(0.8 * sessionMin);  // last ~20% of the session
+  // Potential reward = distance from the current price to the lock (what is gained on a
+  // full recapture). Drives the payout, and is why deep (contra) entries are preferred.
+  const rewardPct = Math.abs(lockPrice - C) / C * 100;
   const expectedWR = grade ? (minuteWR(tf, minuteIn) != null ? minuteWR(tf, minuteIn) : expectedGradeWR) : null;
   let reason = SignalCore.buildReason({
     verdict: verdict === "flat" && mode === "OFI contra" ? "flat" : verdict,
@@ -2431,6 +2448,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     tf, volMin: FAIR_MIN,
   });
   if (mode === "OFI contra") reason = "No entry. Executed order flow is against this direction.";
+  if (mode === "LATE") reason = `No entry. Late in the session (${Math.round((elapsed / dur) * 100)}% elapsed) — reward too small at this distance from the lock.`;
   
   return {
     roundStart: t0,
@@ -2447,6 +2465,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     expectedWR,
     minuteIn,
     late,
+    rewardPct,
     ofi,
     ofiAgree,
   };

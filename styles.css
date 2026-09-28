@@ -194,6 +194,9 @@ body {
 
 /* ---------- Wide screens: dual-coin monitor ---------- */
 .monitors { display: none; }
+/* Base (mobile): the dual detail is hidden. MUST be declared BEFORE the media query below,
+   otherwise it overrides the wide-screen `display: grid` in source order. */
+.dual { display: none; }
 .mon-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
   padding: 10px 12px; cursor: pointer; transition: border-color .15s, background .15s;
@@ -237,7 +240,6 @@ body {
 }
 
 /* ---------- Dual detail columns (wide screens) ---------- */
-.dual { display: none; }
 .dual-col {
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
   padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0;

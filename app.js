@@ -2424,7 +2424,12 @@ function trailOf(sym, t0Sec, nowSec, lock, isUp) {
   const ones = state.cache[sym]?.["1s"]?.candles || [];
   const sess = ones.filter((c) => c.time >= t0Sec && c.time < nowSec);
   if (sess.length < 5) return null;
-  const closes = sess.map((c) => c.c);
+  // candle 1s memakai {time,open,high,low,close,vol}; bacaan defensif agar tetap benar
+  // bila sumbernya mengirim {t,o,h,l,c,v} (sebelumnya salah baca c.c -> SMA NaN -> ladder
+  // tidak pernah aktif).
+  const px = (c) => (c.close != null ? c.close : c.c);
+  const closes = sess.map(px);
+  if (closes.some((v) => typeof v !== "number" || !isFinite(v))) return null;
   const sma = [];
   for (let i = 0; i < closes.length; i++) {
     const w = closes.slice(Math.max(0, i - 14), i + 1);

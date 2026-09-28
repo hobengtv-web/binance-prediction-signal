@@ -303,6 +303,8 @@ http.createServer(async (req, res) => {
           for (const r of recs) {
             if (!r || typeof r.k !== "string") continue;
             const prev = ledger.get(r.k) || { k: r.k };
+            // Tanpa vektor fitur (sig) record tidak berguna untuk learner -> jangan disimpan.
+            if (!r.sig && !prev.sig) continue;
             const merged = Object.assign({}, prev, r);
             // jangan menimpa hasil yang sudah tercatat dengan record sinyal yang lebih baru
             if (prev.res && !r.res) merged.res = prev.res;

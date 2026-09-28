@@ -2362,7 +2362,15 @@ const LEDGER = (() => {
   }
   return {
     addSignal(rec) { if (!rec || !rec.asset) return; const k = keyOf(rec.asset, rec.interval, rec.t0); upsert(k, { asset: rec.asset, interval: rec.interval, t0: rec.t0, sig: rec }); flush(); },
-    resolve(asset, interval, t0Sec, res) { if (!asset) return; const k = keyOf(asset, interval, t0Sec); upsert(k, { asset, interval, t0: t0Sec, res }); flush(); },
+    resolve(asset, interval, t0Sec, res) {
+      if (!asset) return;
+      const k = keyOf(asset, interval, t0Sec);
+      const prev = map.get(k);
+      // Tanpa vektor fitur (sig) hasilnya tidak bisa dipakai belajar -> jangan kirim record kosong.
+      if (!prev || !prev.sig) return;
+      upsert(k, { asset, interval, t0: t0Sec, res });
+      flush();
+    },
     flush,
     status: () => ({ local: map.size, pending: pending().length, uploaded, failed, serverTotal, lastAt }),
     _map: map,

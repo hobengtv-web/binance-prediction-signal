@@ -2523,8 +2523,6 @@ function renderLearnerStatus() {
       ${actsHtml}
     </div>`;
 }
-setInterval(loadLearnerStatus, 60000);
-
 /* ===== PHASE 2 LEDGER — catat setiap sinyal + vektor fitur lengkap + hasilnya =====
    Learner butuh data jangka panjang: Binance hanya menyediakan 1s klines 7 hari, jadi
    fitur skala detik (volRel2, surprise, gap, tier, MFE/MAE, waktu-ke-lock) harus

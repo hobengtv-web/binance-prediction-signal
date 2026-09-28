@@ -259,11 +259,32 @@ capture.start();
 // Jadwal: setiap jam, tapi hanya menjalankan re-fit sekali per hari pada REFIT_HOUR (default 03:00 WIB/server).
 const REFIT_HOUR = parseInt(process.env.REFIT_HOUR || "3", 10);
 let lastRefitDay = null;
+const REFIT_CHECK_MIN = Math.max(1, parseInt(process.env.REFIT_CHECK_MIN || "10", 10));
+// Kapan re-fit terakhir berjalan? Dibaca dari promote.jsonl supaya tahan restart container.
+function lastRefitTime() {
+  try {
+    if (!fs.existsSync(MODEL_LOG)) return 0;
+    const lines = fs.readFileSync(MODEL_LOG, "utf8").trim().split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try { const j = JSON.parse(lines[i]); if (j && j.at) return Date.parse(j.at); } catch (_) {}
+    }
+  } catch (_) {}
+  return 0;
+}
 setInterval(() => {
   const d = new Date();
   const day = d.toISOString().slice(0, 10);
-  if (d.getHours() === REFIT_HOUR && lastRefitDay !== day) { lastRefitDay = day; refit("jadwal").catch(() => {}); }
-}, 10 * 60 * 1000);
+  const last = lastRefitTime();
+  const stale = last > 0 && (Date.now() - last) > 26 * 3600000;   // jadwal harian terlewat
+  const onTime = d.getHours() === REFIT_HOUR && lastRefitDay !== day;
+  if (onTime || stale) {
+    lastRefitDay = day;
+    console.log(`[REFIT] memulai re-fit otomatis (${onTime ? "jadwal harian" : "menyusul: re-fit terakhir > 26 jam lalu"})`);
+    refit(stale && !onTime ? "jadwal-susulan" : "jadwal").catch(() => {});
+  }
+}, REFIT_CHECK_MIN * 60 * 1000);
+console.log(`[REFIT] otomatis: cek tiap ${REFIT_CHECK_MIN} menit · jadwal harian ${REFIT_HOUR}:00 (server) · menyusul sendiri bila terlewat (>26 jam)`);
+setTimeout(() => { try { const l = lastRefitTime(); if (l) console.log(`[REFIT] re-fit terakhir: ${new Date(l).toISOString()}`); } catch (_) {} }, 3000);
 
 const clients = new Set();
 let bnWs = null, bnPollTimer = null, bnHostIdx = 0;

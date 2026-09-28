@@ -2376,7 +2376,9 @@ function learnNote(L) {
   if (L.touch != null) p.push(`kembali-ke-lock ${(L.touch * 100).toFixed(0)}% (gap ${L.ctx.gap}, n=${L.touchN})`);
   if (!p.length) return "";
   const tag = L.label === "KUAT" ? " · konteks KUAT ✔" : L.label === "LEMAH" ? " · ⚠ konteks LEMAH" : L.label === "CAMPURAN" ? " · konteks CAMPURAN" : "";
-  return `BELAJAR 90d (uji): ${p.join(" · ")}${tag}.`;
+  // Sumber tabel belajar harus jujur: model hasil ledger, atau tabel backtest 90 hari.
+  const src = (LEARN.gate && LEARN.gate.source === "ledger") ? `MODEL BELAJAR${LEARN.gate.version ? " " + String(LEARN.gate.version).slice(0, 16) : ""}` : "BELAJAR 90d (backtest)";
+  return `${src} (diuji): ${p.join(" · ")}${tag}.`;
 }
 function renderLessons() {
   const el = document.getElementById("lessons-body"); if (!el) return;
@@ -2408,12 +2410,36 @@ window.learnStatus = () => ({ status: LEARN.status, block: LEARN_BLOCK, gateRule
 const LEARN_STATS = { signals: 0, strong: 0, mixed: 0, weak: 0, wouldBlock: 0 };
 let LEARNER_STATUS = null;
 let LEARNER_ERR = null;
+let _lastModelVersion = null;
 async function loadLearnerStatus() {
   try {
     const r = await fetch("/api/learner", { cache: "no-store" });
     if (r.ok) { LEARNER_STATUS = await r.json(); LEARNER_ERR = null; }
     else LEARNER_ERR = "HTTP " + r.status;
   } catch (e) { LEARNER_ERR = e && e.message ? e.message : "gagal memuat"; }
+  // --- Sinkronkan profil gate + deteksi model baru ---
+  // Supaya angka ambang di SEMUA panel sinyal ikut berubah begitu learner mempromosikan
+  // model baru, tanpa perlu reload halaman dan tanpa menunggu interval 30 menit.
+  try {
+    const S = LEARNER_STATUS;
+    if (S && S.gates && S.gates.tiers) {
+      GATES = S.gates;
+      renderGateLine();
+    }
+    // Tanda tangan model: versi model konteks + mode/ambang gate. Promosi bisa terjadi pada
+    // salah satu saja (mis. ambang belajar menang tapi model konteks belum) — keduanya harus
+    // memicu muat ulang supaya panel PELAJARAN dan baris BELAJAR di REASON ikut terupdate.
+    const sig = S ? `${S.model ? S.model.version : "-"}|${S.gates ? S.gates.mode : "-"}|${S.gates && S.gates.thresholds ? JSON.stringify(S.gates.thresholds) : "-"}` : null;
+    if (sig && sig !== _lastModelVersion) {
+      const first = _lastModelVersion === null;
+      _lastModelVersion = sig;
+      if (!first) {
+        console.log("[LEARN] model/ambang berubah ->", sig.slice(0, 80), "· memuat ulang tabel & pelajaran");
+        loadLearn();          // tabel konteks + pelajaran (panel PELAJARAN & baris BELAJAR di REASON)
+        renderGateLine();
+      }
+    }
+  } catch (_) {}
   renderLearnerStatus();
 }
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -2701,10 +2727,16 @@ function fairMinVol(tf) {
 function gatesSummary() {
   const T = (GATES && GATES.tiers) || null;
   if (!T) return "—";
-  const th = (GATES.thresholds && GATES.thresholds.length)
-    ? " · ambang: " + GATES.thresholds.map((t) => `${t.f}${t.op}${t.t}`).join(" & ")
-    : "";
-  return `tier STRONG volRel2≥${T.STRONG.volRel2}${T.STRONG.surprise ? " & surprise≥" + T.STRONG.surprise : ""} · GOOD ≥${T.GOOD.volRel2}${T.GOOD.surprise ? " & surprise≥" + T.GOOD.surprise : ""} · FAIR ≥${T.FAIR.volRel2} · floor likuiditas ×${GATES.liqFloorMul} · batas telat ${(GATES.lateFrac * 100).toFixed(0)}%${th} · mode ${GATES.mode}`;
+  const thTxt = (GATES.thresholds && GATES.thresholds.length)
+    ? GATES.thresholds.map((t) => `${t.f}${t.op}${t.t}`).join(" & ") : "";
+  const learned = GATES.mode === "learned";
+  const tierTxt = `${learned ? "label tier" : "tier"} STRONG volRel2≥${T.STRONG.volRel2}${T.STRONG.surprise ? " & surprise≥" + T.STRONG.surprise : ""}` +
+    ` · GOOD ≥${T.GOOD.volRel2}${T.GOOD.surprise ? " & surprise≥" + T.GOOD.surprise : ""} · FAIR ≥${T.FAIR.volRel2}`;
+  const tail = `floor likuiditas ×${GATES.liqFloorMul} · batas telat ${(GATES.lateFrac * 100).toFixed(0)}% · mode ${GATES.mode}`;
+  // Saat mode learned, yang MENGIKAT adalah daftar ambang hasil belajar — tampilkan lebih dulu.
+  return learned && thTxt
+    ? `ambang efektif: ${thTxt} · ${tierTxt} · ${tail}`
+    : `${tierTxt}${thTxt ? " · ambang: " + thTxt : ""} · ${tail}`;
 }
 // After this fraction of the session the price sits close to the lock, so the reward of a
 // recapture is tiny even if the direction is right -> those entries are suppressed.
@@ -4267,9 +4299,9 @@ function start() {
   loadLearnerStatus();
   setInterval(loadGate, 10 * 60 * 1000);
   setInterval(loadTiers, 10 * 60 * 1000);
-  setInterval(loadLearn, 30 * 60 * 1000);   // pelajaran di-refresh tiap 30 menit
+  setInterval(loadLearn, 5 * 60 * 1000);    // pelajaran/tabel: cadangan; model baru sudah otomatis terdeteksi tiap 60s
   setInterval(loadLearnerStatus, 60 * 1000);   // status learner di-refresh tiap menit
-  setInterval(loadGates, 30 * 60 * 1000);      // profil gate di-refresh tiap 30 menit
+  setInterval(loadGates, 5 * 60 * 1000);       // profil gate: cadangan (sinkron utama via /api/learner tiap 60s)
   setTimeout(rescoreAll, 8000);        // after history candles are loaded
   setTimeout(rescoreAll, 25000);
   // timers — use rAF for smooth timer, updateProjection only on data events

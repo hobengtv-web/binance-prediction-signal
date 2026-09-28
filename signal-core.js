@@ -126,7 +126,7 @@
     noEntry: [
       "MENUNGGU (session just started, no candle yet)",
       "WARMUP (elapsed below 15 seconds, or desktop below 180 seconds)",
-      "LOWVOL (volume below 1.05x minimum)",
+      "LOWVOL (volume below the interval minimum: 1.2x 5m / 2x 15m / 1.5x 1h)",
       "WEAK-TREND (trend strength below 35, volume below minimum)",
       "FILTERED (volume ok but direction not aligned)",
       "FILTERED-REVERSAL (reversal not confirmed by peak/trend/volume/RSI)",
@@ -144,6 +144,8 @@
     const strength = input.strength;
     const momentum = input.momentum;
     const elapsedSec = input.elapsedSec;
+    const tf = input.tf;
+    const volMin = (input.volMin == null) ? 1.05 : input.volMin;
 
     const rsiTxt = (rsi == null) ? "not available" : rsi.toFixed(1);
     const volTxt = (volRel == null || !isFinite(volRel)) ? "not available" : volRel.toFixed(2) + "x";
@@ -178,7 +180,7 @@
       case "WARMUP":
         return `No entry. Warmup in progress: ${secs} seconds elapsed, the minimum is 15 seconds.`;
       case "LOWVOL":
-        return `No entry. Volume (5m pace) ${volTxt} is below the 1.05x minimum, the market is too thin to trade.`;
+        return `No entry. Volume (5m pace) ${volTxt} is below the ${volMin}x minimum for the ${tf || "this"} session, the market is too thin to trade.`;
       case "WEAK-TREND":
         return `No entry. No clear historical trend: strength ${strTxt} of 100 is below 35, and volume is ${volTxt}.`;
       case "FILTERED":

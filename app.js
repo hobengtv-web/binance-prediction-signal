@@ -1233,6 +1233,7 @@ function applyType() {
         verdict: finalVerdict, mode: fbMode, rsi: rsi,
         volRel: hasVolData ? rel : null, strength: histTrend?.strength,
         momentum: histTrend?.momentum, elapsedSec: elapsed / 1000,
+        tf: state.interval, volMin: fairMinVol(state.interval),
       });
     }
     // Keep the quality grade visible in the reason (it no longer fits in the short recommendation).
@@ -2404,6 +2405,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     mode: mode === "OFI contra" ? "FILTERED" : mode,
     rsi, volRel, strength: histStr,
     momentum: histTrend?.momentum, elapsedSec: elapsed / 1000,
+    tf, volMin: FAIR_MIN,
   });
   if (mode === "OFI contra") reason = "No entry. Executed order flow is against this direction.";
   

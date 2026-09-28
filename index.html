@@ -90,18 +90,14 @@
     <!-- Trade Assistant: entry zone / averaging levels / hold / close -->
     <div class="trade-plan">
       <div class="tp-head">TRADE ASSISTANT (ENTRY &amp; CLOSE)</div>
+      <!-- STATUS: apakah ENTRY dan EARLY CLOSE sudah terjadi (diisi dari state Trade Assistant) -->
+      <div class="tp-status">
+        <span class="tp-st wait" id="tp-st-entry">ENTRY: <b>WAITING…</b></span>
+        <span class="tp-st wait" id="tp-st-close">EARLY CLOSE: <b>WAITING…</b></span>
+      </div>
       <div class="tp-action" id="tp-action">—</div>
       <div class="tp-levels" id="tp-levels"></div>
       <div class="tp-meta" id="tp-meta"></div>
-    </div>
-    
-    <!-- Entry Reason Section -->
-    <div style="padding-top: 8px; margin-top: 12px; border-top: 1px solid var(--border);">
-      <div style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">REASON</div>
-      <div id="calcStatus" style="font-size: 11px; color: var(--muted); margin-bottom: 6px;">Evaluating session…</div>
-      <div id="entryReason" style="font-size: 13px; color: var(--text); line-height: 1.3;">
-        <span class="dot" style="opacity:0.5;">•</span> No Entry for this round
-      </div>
     </div>
     
      <!-- Volume & Liquidity Section -->
@@ -130,6 +126,15 @@
     <div style="padding-top:8px; margin-top:12px; border-top:1px solid var(--border);">
       <div style="font-size:11px; color:var(--muted); margin-bottom:4px;">AMBANG AKTIF (profil gate)</div>
       <div id="gate-line" style="font-size:10.5px;color:var(--muted);line-height:1.5;">AMBANG AKTIF: memuat…</div>
+    </div>
+    
+    <!-- Entry Reason Section -->
+    <div style="padding-top: 8px; margin-top: 12px; border-top: 1px solid var(--border);">
+      <div style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">REASON</div>
+      <div id="calcStatus" style="font-size: 11px; color: var(--muted); margin-bottom: 6px;">Evaluating session…</div>
+      <div id="entryReason" style="font-size: 13px; color: var(--text); line-height: 1.3;">
+        <span class="dot" style="opacity:0.5;">•</span> No Entry for this round
+      </div>
     </div>
     
     <!-- Signal Info Section -->

@@ -689,8 +689,20 @@ function applyType() {
     const tpAction = document.getElementById("tp-action");
     const tpLevels = document.getElementById("tp-levels");
     const tpMeta = document.getElementById("tp-meta");
+    const tpStEntry = document.getElementById("tp-st-entry");
+    const tpStClose = document.getElementById("tp-st-close");
+
     if (tpAction) {
       const tp = o.tradePlan;
+      const se = tp && tp.statusEntry, sc = tp && tp.statusClose;
+      if (tpStEntry) {
+        tpStEntry.className = "tp-st" + (se && se.ok ? " ok" : " wait");
+        tpStEntry.innerHTML = `ENTRY: <b>${se && se.ok ? `SUCCESS · ${fmtClock(se.at)}${se.price != null ? " @ " + fmtPrice(se.price) : ""}` : `WAITING… <i>${se && se.waiting ? se.waiting : ""}</i>`}</b>`;
+      }
+      if (tpStClose) {
+        tpStClose.className = "tp-st" + (sc && sc.ok ? " ok" : " wait");
+        tpStClose.innerHTML = `EARLY CLOSE: <b>${sc && sc.ok ? `SUCCESS · ${fmtClock(sc.at)}` : `WAITING… <i>${se && se.ok ? "posisi terbuka — menunggu sinyal close" : "belum ada posisi"}</i>`}</b>`;
+      }
       if (!tp) {
         tpAction.textContent = "—"; tpAction.className = "tp-action wait";
         if (tpLevels) tpLevels.textContent = "";
@@ -1177,8 +1189,25 @@ function applyType() {
       _tradeEntered[uniKey] = { entered: true, since: now, price: C };
       console.log(`[TRADE] position opened ${state.asset}/${state.interval} @ ${fmtPrice(C)}`);
     }
-    if (!tradePlan.entered) delete _tradeEntered[uniKey];   // no position yet / stand down
+    if (!tradePlan.entered) { delete _tradeEntered[uniKey]; delete _tradeClosed[uniKey]; }   // no position yet / stand down
     tradePlan.entryPrice = _tradeEntered[uniKey] ? _tradeEntered[uniKey].price : null;
+    // Catat kapan early-close (state CLOSE) pertama kali muncul pada sesi ini, lalu tempelkan
+    // STATUS ke plan supaya panel Trade Assistant bisa menampilkan ENTRY / EARLY CLOSE:
+    //   SUCCESS (sudah terjadi, dengan jam) atau WAITING (belum).
+    if (tradePlan.state === "CLOSE" && !_tradeClosed[uniKey]) {
+      _tradeClosed[uniKey] = { at: now, price: C };
+      console.log(`[TRADE] early close disinyalkan ${state.asset}/${state.interval} @ ${fmtPrice(C)}`);
+    }
+    {
+      const ent = _tradeEntered[uniKey], clo = _tradeClosed[uniKey];
+      tradePlan.statusEntry = {
+        ok: !!ent, at: ent ? ent.since : null, price: ent ? ent.price : null,
+        waiting: tradePlan.state === "STAND_DOWN"
+          ? "reversal terdeteksi — tunggu setup baru"
+          : (tradePlan.state === "WAIT" && /TUNGGU PEAK/.test(tradePlan.action) ? "konfirmasi peak contra (2/4 bagian + 4s)" : "harga belum contra / belum kembali ke lock"),
+      };
+      tradePlan.statusClose = { ok: !!clo, at: clo ? clo.at : null, price: clo ? clo.price : null };
+    }
     // State-transition alerts with DISTINCT sounds:
     //   entry/average -> rising chirp ; close/cut -> descending chime ; signal entry -> pulsing (existing)
     // First observation of a combo is silent, so switching tabs does not replay a sound.
@@ -2009,6 +2038,7 @@ function emphasizeVolume(text, vol) {
      HOLD while momentum stays with us, CLOSE when momentum fades or price retreats. */
 const _tradePeak = {};     // key -> max favourable excursion after recovery
 const _tradeEntered = {};  // key -> { entered, since, price }
+const _tradeClosed = {};   // key -> { at, price }  (kapan EARLY CLOSE pertama kali disinyalkan)
 const _tradeDwell = {};    // key -> { turnSince, fadeSince }
 function computeTradePlan(bias, ctx) {
   if (bias !== "up" && bias !== "down") {
@@ -2889,6 +2919,7 @@ function buildDual() {
       <div class="dc-chart" id="dc-${a}-chart"></div>
       <div class="dc-recrow"><span class="dc-rec" id="dc-${a}-rec">—</span><span class="rec-status" id="dc-${a}-badge"></span></div>
       <div class="dc-act" id="dc-${a}-act">—</div>
+      <div class="tp-status"><span class="tp-st wait" id="dc-${a}-st-entry">ENTRY: <b>WAITING…</b></span><span class="tp-st wait" id="dc-${a}-st-close">EARLY CLOSE: <b>WAITING…</b></span></div>
       <div class="dc-levels" id="dc-${a}-levels"></div>
       <div class="dc-grid" id="dc-${a}-grid"></div>
       <div class="dc-grid" id="dc-${a}-rows"></div>
@@ -2906,6 +2937,9 @@ function buildDual() {
     dualCharts[a].fit();
   }
 }
+// jam lokal untuk status ENTRY / EARLY CLOSE (dipakai panel TA dan kolom dual)
+function fmtClock(t) { return t ? new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""; }
+
 function renderDual(force) {
   const el = document.getElementById("dual");
   if (!el) return;
@@ -2940,6 +2974,17 @@ function renderDual(force) {
     const bEl = g("badge");
     if (bEl) { const hl = m && m.health ? m.health.label : ""; bEl.textContent = hl; bEl.className = "rec-status " + (m && m.health ? healthClass(m.health.label) : ""); }
     const aEl = g("act"); if (aEl) { aEl.textContent = plan ? plan.action : "—"; aEl.className = "dc-act " + (plan ? plan.cls : "wait"); }
+    // STATUS ENTRY / EARLY CLOSE per koin (sumber sama: state Trade Assistant)
+    const seEl = g("st-entry"), scEl = g("st-close");
+    const se = plan && plan.statusEntry, sc = plan && plan.statusClose;
+    if (seEl) {
+      seEl.className = "tp-st" + (se && se.ok ? " ok" : " wait");
+      seEl.innerHTML = `ENTRY: <b>${se && se.ok ? `SUCCESS · ${fmtClock(se.at)}${se.price != null ? " @ " + fmtPrice(se.price) : ""}` : "WAITING…"}</b>`;
+    }
+    if (scEl) {
+      scEl.className = "tp-st" + (sc && sc.ok ? " ok" : " wait");
+      scEl.innerHTML = `EARLY CLOSE: <b>${sc && sc.ok ? `SUCCESS · ${fmtClock(sc.at)}` : "WAITING…"}</b>`;
+    }
     const lvEl = g("levels");
     if (lvEl) lvEl.innerHTML = (plan && plan.levels)
       ? `ENTRY L1 <b>${fmtPrice(plan.levels.l1)}</b> (+${plan.levels.r1.toFixed(2)}%) · L2 <b>${fmtPrice(plan.levels.l2)}</b> (+${plan.levels.r2.toFixed(2)}%) · L3 <b>${fmtPrice(plan.levels.l3)}</b> (+${plan.levels.r3.toFixed(2)}%) · TARGET <b>${fmtPrice(plan.levels.target)}</b>`
@@ -3137,6 +3182,10 @@ function updateProjectionUniversal() {
   for (const k in _tradeDwell) {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) delete _tradeDwell[k];
+  }
+  for (const k in _tradeClosed) {
+    const t = parseInt(k.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) delete _tradeClosed[k];
   }
   for (const k of _warnedKeys) {
     const t = parseInt(k.split("_")[2]);

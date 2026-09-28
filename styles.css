@@ -405,3 +405,12 @@ body {
 .learn-chip.learned { background: rgba(14,203,129,.16); color: var(--up); border-color: rgba(14,203,129,.35); }
 .learn-chip.bootstrap { background: rgba(246,70,93,.12); color: var(--down); border-color: rgba(246,70,93,.3); }
 .learn-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ===== STATUS ENTRY / EARLY CLOSE di kartu TRADE ASSISTANT ===== */
+.tp-status { display: flex; gap: 8px; margin: 5px 0 6px; flex-wrap: wrap; }
+.tp-st { flex: 1 1 auto; min-width: 0; padding: 5px 8px; border-radius: 7px; font-size: 11px; font-weight: 700;
+  letter-spacing: .02em; background: var(--panel-2); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.tp-st b { font-weight: 800; }
+.tp-st i { font-style: normal; font-weight: 500; opacity: .75; }
+.tp-st.ok { background: rgba(14,203,129,.14); border-color: rgba(14,203,129,.35); color: var(--up); }
+.tp-st.wait { color: var(--muted); }

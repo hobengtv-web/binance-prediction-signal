@@ -1059,11 +1059,46 @@ function applyType() {
   }
   const elapsedSec = Math.round((now - sessionStart) / 1000);
   // Live validity of the LOCKED signal (display only — the locked direction never changes).
+  // Includes a LEADING early-warning using several reversal precursors.
   let lockSuffix = "";
+  let riskInfo = null;
   if (uni) {
     const st = computeLockStatus(uniKey, uni.verdict, O, C, now);
-    const t = lockStatusText(st, now);
-    if (t) lockSuffix = ` · ${t}`;
+    if (st && st.state === "AGAINST") {
+      lockSuffix = ` · ${lockStatusText(st, now)}`;
+    } else {
+      const isUp = uni.verdict === "up";
+      const scale = Math.max(tol, std * 0.5, 1e-9);
+      const margin = isUp ? (C - O) : (O - C);                 // >0 = still on our side
+      const seg = win.slice(-Math.max(3, Math.ceil(winLen / 3)));
+      const regRecent = seg.length >= 3 ? linreg(seg) : null;
+      const slopeRecent = regRecent ? regRecent.b : slope;
+      riskInfo = reversalRisk(uni.verdict, {
+        nearLock: margin <= scale,
+        momentumAgainst: isUp ? slope < 0 : slope > 0,
+        decel: isUp ? (slopeRecent < 0 && slopeRecent < slope) : (slopeRecent > 0 && slopeRecent > slope),
+        peakAgainst: isUp ? (isTopPeak && peakConf) : (isBotPeak && peakConf),
+        droppedAgainst: isUp ? droppedFromPeak : roseFromPeak,
+        rsi: rsi,
+        z: z,
+        histTrend: histTrend,
+      });
+      lockSuffix = ` · ${riskLabel(riskInfo.risk)}${riskInfo.risk >= 45 ? ` (risk ${riskInfo.risk})` : ""}`;
+      // Early-warning alert: notify once per session when risk becomes high (before the flip).
+      if (riskInfo.risk >= 70 && !_warnedKeys.has(uniKey)) {
+        _warnedKeys.add(uniKey);
+        console.warn(`[WASPADA] ${state.asset}/${state.interval} ${uni.verdict.toUpperCase()} berisiko berbalik — ${riskInfo.fired.join(", ")}`);
+        flashTitle(`⚠ WASPADA ${uni.verdict.toUpperCase()} ${state.asset}/${state.interval}`);
+        try {
+          if (typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
+            new Notification(`Waspada berbalik arah · ${state.asset}/${state.interval}`, {
+              body: `Signal ${uni.verdict.toUpperCase()} berisiko berbalik · risk ${riskInfo.risk} · ${riskInfo.fired.join(", ")}`,
+              tag: `warn_${uniKey}`,
+            });
+          }
+        } catch (_) {}
+      }
+    }
   }
   const calcStatus = (uni
     ? `Signal locked ${elapsedSec - Math.round((now - uni.lockedAt) / 1000)}s after session open · mode ${uni.mode}`
@@ -1718,6 +1753,31 @@ function lockStatusText(st, now) {
   return "DI HARGA LOCK";
 }
 
+/* Leading (early-warning) reversal risk for a LOCKED signal.
+   Combines several precursors that typically appear BEFORE price crosses the lock.
+   Advisory only — never changes the locked direction or the score. */
+const _warnedKeys = new Set();   // one "waspada" alert per combo per session
+function reversalRisk(dir, ctx) {
+  if (dir !== "up" && dir !== "down") return { risk: 0, fired: [] };
+  const isUp = dir === "up";
+  let risk = 0; const fired = [];
+  const add = (cond, w, label) => { if (cond) { risk += w; fired.push(label); } };
+  if (ctx.nearLock != null) add(ctx.nearLock, 25, "harga mendekati lock");
+  if (ctx.momentumAgainst != null) add(ctx.momentumAgainst, 20, "momentum melawan");
+  if (ctx.decel != null) add(ctx.decel, 15, "momentum melambat");
+  if (ctx.peakAgainst != null) add(ctx.peakAgainst, 25, "peak lawan terkonfirmasi");
+  if (ctx.droppedAgainst != null) add(ctx.droppedAgainst, 10, "menjauh dari peak");
+  if (ctx.rsi != null) add(isUp ? ctx.rsi >= 70 : ctx.rsi <= 30, 15, "RSI ekstrem");
+  if (ctx.z != null) add(isUp ? ctx.z >= 1.6 : ctx.z <= -1.6, 10, "harga terlalu stretch");
+  if (ctx.histTrend) add(ctx.histTrend.predictDir !== "flat" && ctx.histTrend.predictDir !== dir && ctx.histTrend.strength >= 35, 20, "trend historis berbalik");
+  return { risk: Math.min(100, risk), fired };
+}
+function riskLabel(risk) {
+  if (risk >= 70) return "WASPADA BERBALIK ARAH";
+  if (risk >= 45) return "AWAS MELEMAH";
+  return "MASIH SESUAI";
+}
+
 /* Signals locked during a running session are held here (persisted) and only written to
    history when the round ENDS. Prevents history entries appearing before a round finishes,
    and prevents duplicates across page reloads. */
@@ -1854,6 +1914,10 @@ function updateProjectionUniversal() {
   for (const k of _alertedKeys) {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) _alertedKeys.delete(k);
+  }
+  for (const k of _warnedKeys) {
+    const t = parseInt(k.split("_")[2]);
+    if (!isNaN(t) && t < CUTOFF) _warnedKeys.delete(k);
   }
   
   for (const sym of ["BTC", "ETH"]) {
@@ -2711,10 +2775,31 @@ window.__comboStatus = function () {
       const ev = hist.filter((e) => e.won !== undefined);
       const wins = ev.reduce((a, e) => a + e.won, 0);
       let status = "—";
+      let risk = "—";
       if (locked) {
         const lock = sessionLock(sym, dur, now);
         const price = (state.cache[sym]?.["5s"]?.candles || []).slice(-1)[0]?.close ?? (state.ticker[sym] ? state.ticker[sym].last : null);
-        status = lockStatusText(computeLockStatus(key, locked.verdict, lock, price, now), now) || "—";
+        const st = computeLockStatus(key, locked.verdict, lock, price, now);
+        status = lockStatusText(st, now) || "—";
+        if (!st || st.state !== "AGAINST") {
+          const five = state.cache[sym]?.["5s"]?.candles || [];
+          const w = five.slice(-24);
+          const reg = w.length >= 3 ? linreg(w) : null;
+          const sl = reg ? reg.b : 0;
+          const cl = w.map((c) => c.close);
+          const mu = cl.length ? cl.reduce((a, b) => a + b, 0) / cl.length : price;
+          const sd = cl.length ? Math.sqrt(cl.reduce((a, b) => a + (b - mu) * (b - mu), 0) / cl.length) : 0;
+          const tl = Math.max((lock || 0) * 0.0005, sd * 0.5, 1e-9);
+          const isUp = locked.verdict === "up";
+          const mg = isUp ? (price - lock) : (lock - price);
+          const rr = reversalRisk(locked.verdict, {
+            nearLock: mg <= tl,
+            momentumAgainst: isUp ? sl < 0 : sl > 0,
+            rsi: rsiFromSeries((state.cache[sym]?.["5m"]?.candles || []).slice(-50), 14),
+            histTrend: analyzeHistoricalTrend(sym, tf, 50),
+          });
+          risk = `${rr.risk} ${riskLabel(rr.risk)}`;
+        }
       }
       rows.push({
         combo: `${sym}/${tf}`,
@@ -2722,6 +2807,7 @@ window.__comboStatus = function () {
         live: live ? live.mode + (live.verdict !== "flat" ? " " + live.verdict : "") : "—",
         locked: locked ? locked.mode + " " + locked.verdict : "—",
         status: status,
+        risk: risk,
         pending: PendingSig.has(key) ? "yes" : "no",
         rounds: hist.length,
         evaluated: ev.length,

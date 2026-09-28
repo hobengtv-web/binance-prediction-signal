@@ -2909,7 +2909,7 @@ function buildDual() {
   if (!el || dualCharts) return;
   el.innerHTML = ["BTC", "ETH"].map((a) => `
     <div class="dual-col">
-      <div class="dc-head"><span class="dc-coin">${a}</span><span class="dc-price" id="dc-${a}-price">—</span><span class="dc-chg" id="dc-${a}-chg"></span></div>
+      <div class="dc-head"><span class="dc-coin">${a}</span><span class="dc-price" id="dc-${a}-price">—</span><span class="dc-chg" id="dc-${a}-chg"></span><span class="dc-dusd" id="dc-${a}-dusd"></span><span class="dc-chg24" id="dc-${a}-chg24"></span></div>
       <div class="dc-chart" id="dc-${a}-chart"></div>
       <div class="dc-recrow"><span class="dc-rec" id="dc-${a}-rec">—</span><span class="rec-status" id="dc-${a}-badge"></span></div>
       <div class="dc-act" id="dc-${a}-act">—</div>
@@ -2931,6 +2931,16 @@ function buildDual() {
     dualCharts[a].fit();
   }
 }
+// Selisih harga dari LOCK dalam dolar, mis. -$4.23 / $0.00 / +$1.05
+// (desimal menyesuaikan besar nilai: ratusan -> 0 desimal, puluhan -> 1, sisanya -> 2)
+function fmtUsdDelta(d) {
+  if (d == null || !isFinite(d)) return "";
+  const a = Math.abs(d);
+  const dec = a >= 100 ? 0 : a >= 10 ? 1 : 2;
+  const sign = d > 0 ? "+" : d < 0 ? "-" : "";
+  return `${sign}$${a.toFixed(dec)}`;
+}
+
 // jam lokal untuk status ENTRY / EARLY CLOSE (dipakai panel TA dan kolom dual)
 function fmtClock(t) { return t ? new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""; }
 // versi pendek (tanpa detik) untuk chip — supaya ENTRY & EARLY CLOSE muat 1 baris di mobile
@@ -3038,8 +3048,28 @@ function renderDual(force) {
     }
 
     const pEl = g("price"); if (pEl) pEl.textContent = fmtPrice(px);
+    // dc-chg = selisih harga dari LOCK (%), dc-dusd = selisih yang sama dalam $ (permintaan user),
+    // dc-chg24 = perubahan 24 jam dari ticker (dibedakan agar tidak tertukar).
     const cEl = g("chg");
-    if (cEl) { cEl.textContent = chg != null ? `${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%` : ""; cEl.className = "dc-chg " + (chg != null ? (chg >= 0 ? "up" : "down") : ""); }
+    const lockDeltaUsd = (m && m.O) ? (px - m.O) : null;
+    const lockDeltaPct = (m && m.O) ? ((px - m.O) / m.O) * 100 : null;
+    if (cEl) {
+      cEl.textContent = lockDeltaPct != null ? `${lockDeltaPct >= 0 ? "+" : ""}${lockDeltaPct.toFixed(3)}%` : "";
+      cEl.className = "dc-chg " + (lockDeltaPct != null ? (lockDeltaPct >= 0 ? "up" : "down") : "");
+      cEl.title = lockDeltaPct != null
+        ? `Selisih harga dari LOCK (open sesi): ${fmtUsdDelta(lockDeltaUsd)} (${lockDeltaPct >= 0 ? "+" : ""}${lockDeltaPct.toFixed(3)}%)`
+        : "LOCK belum tersedia";
+    }
+    const dEl = g("dusd");
+    if (dEl) {
+      dEl.textContent = lockDeltaUsd != null ? fmtUsdDelta(lockDeltaUsd) : "";
+      dEl.className = "dc-dusd " + (lockDeltaUsd != null ? (lockDeltaUsd > 0 ? "up" : lockDeltaUsd < 0 ? "down" : "flat") : "");
+      dEl.title = lockDeltaUsd != null
+        ? `Selisih harga dari LOCK dalam dolar: ${fmtUsdDelta(lockDeltaUsd)} · LOCK ${fmtPrice(m.O)} → sekarang ${fmtPrice(px)}`
+        : "LOCK belum tersedia";
+    }
+    const hEl = g("chg24");
+    if (hEl) hEl.textContent = chg != null ? `24h ${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%` : "";
     const rEl = g("rec");
     if (rEl) {
       rEl.textContent = graded

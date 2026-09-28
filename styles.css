@@ -421,3 +421,9 @@ body {
   .tp-status { gap: 5px; }
   .tp-st { font-size: 10px; padding: 4px 6px; letter-spacing: 0; }
 }
+
+/* ===== Header kolom DUAL: selisih dari LOCK (dalam % dan $) + perubahan 24 jam ===== */
+.dc-dusd { font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; padding: 0 2px; }
+.dc-dusd.up { color: var(--up); } .dc-dusd.down { color: var(--down); } .dc-dusd.flat { color: var(--muted); }
+.dc-chg24 { font-size: 10px; font-weight: 600; color: var(--muted); opacity: .85; margin-left: 2px; font-variant-numeric: tabular-nums; }
+@media (max-width: 1240px) { .dc-chg24 { display: none; } }   /* layar sempit: 24h masuk tooltip harga saja */

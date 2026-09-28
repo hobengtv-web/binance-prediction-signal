@@ -2363,6 +2363,9 @@ function renderLearnerStatus() {
       <div class="lstat-bar"><i style="width:${Math.min(100, pctv)}%"></i></div>
       <div class="lstat-line"><b>${L.canonicalWithRes || 0}</b> / ${L.target || 120} sinyal kanonik berhasil
         (${pctv}%) · ${L.canonicalWithRes >= (L.target || 120) ? "target tercapai — re-fit otomatis berjalan" : "mengumpulkan, re-fit otomatis tiap hari 03:00"}</div>
+      <div class="lstat-line">${(S.capture && S.capture.enabled)
+        ? `capture otomatis server: <span class="lstat-badge ok">AKTIF</span> · <b>${S.capture.captured || 0}</b> sinyal kanonik tersimpan · ${S.capture.skipped || 0} dilewati (pasar sepi/tanpa sinyal)${S.capture.errors ? ` · <span class="lstat-warn">${S.capture.errors} error</span>` : ""}${S.capture.lastAt ? ` · terakhir ${new Date(S.capture.lastAt).toLocaleTimeString()}` : ""}`
+        : `capture otomatis server: <span class="lstat-badge def">MATI</span> — data hanya terkumpul saat ada browser terbuka`}</div>
       <div class="lstat-grid">
         <span><i>total record</i><b>${L.total || 0}</b></span>
         <span><i>dengan fitur</i><b>${L.withSig || 0}</b></span>

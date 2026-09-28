@@ -57,7 +57,7 @@ function ledgerStats() {
   };
 }
 loadLedger();
-setInterval(() => { if (ledgerDirty > 0) { compactLedger(); ledgerDirty = 0; } }, 60000);
+setInterval(() => { if (ledgerDirty > 0) { compactLedger(); ledgerDirty = 0; } }, 300000);   // kompaksi tiap 5 menit
 
 /* Self-healing: lengkapi hasil ronde yang belum tercatat (mis. browser ditutup sebelum ronde
    selesai) memakai klines 1m Binance. Arah/jenis hasil = tepat; sentuh-lock/MFE/MAE dihitung
@@ -119,7 +119,36 @@ setInterval(() => resolveMissing().catch(() => {}), 5 * 60 * 1000);
    /api/model/*. Re-fit dijalankan otomatis sekali sehari: bangun kandidat dari ledger,
    uji pada jendela uji, dan HANYA ganti model bila kandidat menang out-of-sample
    (lihat learner.js shouldPromote). Kalau tidak menang, model lama tetap dipakai. */
+/* Gabungkan satu record ke ledger. Aturan penting:
+   - slot `sig` diisi oleh capture yang paling dekat ke detik ke-2 (capOffsetMs terkecil),
+     BUKAN yang ter-upload lebih dulu; snapshot lain disimpan di `alts` (audit).
+   - `res` tidak pernah ditimpa oleh record tanpa res; hasil yang lebih baru boleh menggantikan
+     (mis. perkiraan 1m server -> jalur 1s klien yang lebih presisi). */
+function mergeRecord(r) {
+  if (!r || typeof r.k !== "string") return false;
+  const prev = ledger.get(r.k) || { k: r.k };
+  if (!r.sig && !prev.sig) return false;                 // tanpa fitur -> tidak berguna
+  const merged = Object.assign({}, prev, r);
+  const off = (s) => (s && typeof s.capOffsetMs === "number" ? s.capOffsetMs : Infinity);
+  if (prev.sig && r.sig) {
+    if (off(r.sig) < off(prev.sig)) {
+      merged.sig = r.sig;
+      merged.alts = (prev.alts || []).concat([{ capOffsetMs: off(prev.sig), sig: prev.sig }]).slice(-6);
+    } else {
+      merged.sig = prev.sig;
+      merged.alts = (prev.alts || []).concat([{ capOffsetMs: off(r.sig), sig: r.sig }]).slice(-6);
+    }
+  } else if (prev.sig) merged.sig = prev.sig;
+  if (prev.res && !r.res) merged.res = prev.res;
+  merged.upd = Date.now();
+  ledger.set(r.k, merged);
+  appendLedger(merged);
+  ledgerDirty++;
+  return true;
+}
+
 const LEARNER = require("./learner");
+const { createCapture } = require("./capture");
 const MODEL_DIR = path.join(LEDGER_DIR, "..", "models");
 const MODEL_CUR = path.join(MODEL_DIR, "current");
 const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
@@ -187,6 +216,15 @@ async function refit(trigger = "manual") {
   } finally { refitting = false; }
 }
 ensureModelDirs(); loadModelMeta();
+
+// ---- Capture kanonik server-side: snapshot 2 detik tiap sesi 5m/15m tanpa perlu browser ----
+const capture = createCapture({
+  getKlines, SignalCore: require("./signal-core.js"), learner: LEARNER,
+  getModel: (part) => readModelPart(part),
+  save: (rec) => mergeRecord(rec),
+  log: console.log,
+});
+capture.start();
 // Jadwal: setiap jam, tapi hanya menjalankan re-fit sekali per hari pada REFIT_HOUR (default 03:00 WIB/server).
 const REFIT_HOUR = parseInt(process.env.REFIT_HOUR || "3", 10);
 let lastRefitDay = null;
@@ -382,34 +420,8 @@ http.createServer(async (req, res) => {
         try {
           const j = JSON.parse(body || "{}");
           const recs = Array.isArray(j.records) ? j.records : (j.record ? [j.record] : []);
-          for (const r of recs) {
-            if (!r || typeof r.k !== "string") continue;
-            const prev = ledger.get(r.k) || { k: r.k };
-            // Tanpa vektor fitur (sig) record tidak berguna untuk learner -> jangan disimpan.
-            if (!r.sig && !prev.sig) continue;
-            const merged = Object.assign({}, prev, r);
-            const off = (s) => (s && typeof s.capOffsetMs === "number" ? s.capOffsetMs : Infinity);
-            // Satu sesi = satu record. Siapa yang boleh mengisi slot `sig`?
-            // Bukan yang ter-upload lebih dulu, tapi yang CAPTURE-NYA paling dekat ke detik ke-2
-            // (capOffsetMs terkecil) — itulah sinyal kanonik. Snapshot lain disimpan di `alts`
-            // sebagai pembanding/audit (termasuk capture tengah sesi dari browser yang baru dibuka).
-            if (prev.sig && r.sig) {
-              if (off(r.sig) < off(prev.sig)) {
-                merged.sig = r.sig;
-                merged.alts = (prev.alts || []).concat([{ capOffsetMs: off(prev.sig), sig: prev.sig }]).slice(-6);
-              } else {
-                merged.sig = prev.sig;
-                merged.alts = (prev.alts || []).concat([{ capOffsetMs: off(r.sig), sig: r.sig }]).slice(-6);
-              }
-            } else if (prev.sig) merged.sig = prev.sig;
-            // jangan menimpa hasil yang sudah tercatat dengan record sinyal yang lebih baru
-            if (prev.res && !r.res) merged.res = prev.res;
-            merged.upd = Date.now();
-            ledger.set(r.k, merged);
-            appendLedger(merged);
-            saved++;
-          }
-          if (saved) ledgerDirty += saved;
+          for (const r of recs) { if (mergeRecord(r)) saved++; }
+          if (saved) { /* ledgerDirty sudah ditambah di mergeRecord */ }
         } catch (e) { console.warn("[LEDGER] bad POST:", e.message); }
         res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
         res.end(JSON.stringify({ saved, total: ledger.size }));
@@ -492,6 +504,7 @@ http.createServer(async (req, res) => {
         why: modelMeta.why || null,
       },
       blockers: { gate: single(g && g.suppress, "interval="), touch: single(t && t.suppress, "gap=") },
+      capture: capture.status(),
       history,
     }));
     return;

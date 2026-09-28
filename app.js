@@ -750,10 +750,10 @@ function applyType() {
         tpAction.className = "tp-action " + (tp.cls || "wait");
         if (tpLevels) {
           tpLevels.innerHTML = tp.levels
-            ? `<span>ENTRY L1 <b>${fmtPrice(tp.levels.l1)}</b> <i>(+${tp.levels.r1.toFixed(2)}%)</i></span>` +
-              `<span>L2 <b>${fmtPrice(tp.levels.l2)}</b> <i>(+${tp.levels.r2.toFixed(2)}%)</i></span>` +
-              `<span>L3 <b>${fmtPrice(tp.levels.l3)}</b> <i>(+${tp.levels.r3.toFixed(2)}%)</i></span>` +
-              `<span>TARGET <b>${fmtPrice(tp.levels.target)}</b></span>`
+            ? `<span title="Zona entry (${tp.levels.r1.toFixed(2)}% dari LOCK, sisi contra) — entry boleh dilakukan begitu harga melewati LOCK, tidak perlu menunggu level ini">ENTRY L1 <b>${fmtPrice(tp.levels.l1)}</b> <i>(+${tp.levels.r1.toFixed(2)}%)</i></span>` +
+              `<span title="Zona TAMBAH 1 (${tp.levels.r2.toFixed(2)}% dari LOCK) — hanya bila harga turun/naik lebih jauh">TAMBAH L2 <b>${fmtPrice(tp.levels.l2)}</b> <i>(+${tp.levels.r2.toFixed(2)}%)</i></span>` +
+              `<span title="Zona TAMBAH 2 (${tp.levels.r3.toFixed(2)}% dari LOCK)">TAMBAH L3 <b>${fmtPrice(tp.levels.l3)}</b> <i>(+${tp.levels.r3.toFixed(2)}%)</i></span>` +
+              `<span title="Target = LOCK (harga open sesi)">TARGET (LOCK) <b>${fmtPrice(tp.levels.target)}</b></span>`
             : "";
         }
         if (tpMeta) {
@@ -2084,7 +2084,12 @@ function computeTradePlan(bias, ctx) {
   const favor = -adverse;                                                   // >0 = on the bias side
   // Entry levels are defined by REWARD = price distance from the lock (in %), because the
   // payout comes from recapturing the lock. sigma is kept only as volatility context.
-  const RLV = [0.10, 0.25, 0.50];
+  // Level zona entry/average (% jarak dari LOCK, di sisi CONTRA). Nilai lama 0.10/0.25/0.50
+  // terlalu jauh: terukur (BTC+ETH, 7d, gate bootstrap) kedalaman contra setelah melewati LOCK
+  //   p10 0.011% · p25 0.033% · p50 0.079% · p75 0.161% · p90 0.279%
+  // sehingga L1=0.10% hanya tercapai ~43% (L2/L3 jauh lebih jarang) -> entry terasa mustahil.
+  // Nilai baru dipilih agar L1 ~90% tercapai, L2 ~75%, L3 ~50%:
+  const RLV = [0.01, 0.03, 0.08];
   // Reward only counts while price is CONTRA the bias (below the lock for UP): that is the
   // distance it must travel back to recapture the lock.
   const rewardOf = (px) => Math.max(0, isUp ? (ctx.lock - px) : (px - ctx.lock)) / px * 100;
@@ -2888,6 +2893,30 @@ function analyzeCoin(asset, tf, now) {
         histTrend,
       })
     : null;
+
+  // STATUS ENTRY / EARLY CLOSE untuk kartu DUAL (dan monitor). Sebelumnya status hanya direkam
+  // di jalur utama (koin aktif) sehingga kartu dual selalu menampilkan WAITING walau posisi
+  // sudah dibuka. Key-nya SAMA (asset_tf_sessionStart-ms) sehingga state dibagi dengan jalur
+  // utama; penjaga 'belum ada' mencegah pencatatan ganda.
+  if (plan) {
+    if (plan.entered && !_tradeEntered[key]) {
+      _tradeEntered[key] = { entered: true, since: now, price: C };
+      console.log(`[TRADE] position opened ${asset}/${tf} @ ${fmtPrice(C)}`);
+    }
+    if (!plan.entered) { delete _tradeEntered[key]; delete _tradeClosed[key]; }
+    if (plan.state === "CLOSE" && !_tradeClosed[key]) {
+      _tradeClosed[key] = { at: now, price: C };
+      console.log(`[TRADE] early close disinyalkan ${asset}/${tf} @ ${fmtPrice(C)}`);
+    }
+    const _ent = _tradeEntered[key], _clo = _tradeClosed[key];
+    plan.entryPrice = _ent ? _ent.price : null;
+    plan.statusEntry = {
+      ok: !!_ent, at: _ent ? _ent.since : null, price: _ent ? _ent.price : null,
+      waiting: plan.state === "STAND_DOWN" ? "reversal terdeteksi — tunggu setup baru"
+        : (plan.state === "WAIT" && /TUNGGU PEAK/.test(plan.action) ? "konfirmasi peak contra (2/4 bagian + 4s)" : "harga belum contra / belum kembali ke lock"),
+    };
+    plan.statusClose = { ok: !!_clo, at: _clo ? _clo.at : null, price: _clo ? _clo.price : null };
+  }
   return { key, C, O, std, slope, slopeRecent, rsi, z, sig, health, plan, ofi, ofiShort, histTrend,
     liveMode: liveSig ? liveSig.mode : null };   // mode live (utk teks status saat tidak ada sinyal graded)
 }
@@ -3195,7 +3224,7 @@ function renderDual(force) {
     }
     const lvEl = g("levels");
     if (lvEl) lvEl.innerHTML = (plan && plan.levels)
-      ? `<b class="dc-arahtrade ${plan.tradeDir}">ARAH ${String(plan.tradeDir || "").toUpperCase()} · entry contra-lock</b> · ENTRY L1 <b>${fmtPrice(plan.levels.l1)}</b> (+${plan.levels.r1.toFixed(2)}%) · L2 <b>${fmtPrice(plan.levels.l2)}</b> (+${plan.levels.r2.toFixed(2)}%) · L3 <b>${fmtPrice(plan.levels.l3)}</b> (+${plan.levels.r3.toFixed(2)}%) · TARGET <b>${fmtPrice(plan.levels.target)}</b>`
+      ? `<b class="dc-arahtrade ${plan.tradeDir}">ARAH ${String(plan.tradeDir || "").toUpperCase()} · entry contra-lock</b> · L1 <b>${fmtPrice(plan.levels.l1)}</b> (+${plan.levels.r1.toFixed(2)}%) · TAMBAH L2 <b>${fmtPrice(plan.levels.l2)}</b> (+${plan.levels.r2.toFixed(2)}%) · TAMBAH L3 <b>${fmtPrice(plan.levels.l3)}</b> (+${plan.levels.r3.toFixed(2)}%) · TARGET (LOCK) <b>${fmtPrice(plan.levels.target)}</b>`
       : "";
     const grEl = g("grid");
     if (grEl) {

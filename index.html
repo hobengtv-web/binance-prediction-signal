@@ -161,6 +161,17 @@
      <div id="conf-debug-body" class="cd-body"></div>
    </section>
 
+  <!-- STATUS LEARNER: progress data belajar, model yang dipakai, penyesuaian, riwayat -->
+  <details class="learn-status" id="learn-status" open>
+    <summary>STATUS LEARNER · PROGRESS, PELAJARAN &amp; PENYESUAIAN ▾</summary>
+    <div class="lstat-hint">
+      Panel ini menunjukkan apa yang sedang dipelajari sistem dari sinyal nyata dan penyesuaian apa
+      yang sudah/akan diterapkan. Model belajar hanya menggantikan tabel backtest bila
+      <b>menang pada jendela uji</b> (split berurutan waktu + Wilson bound) — tidak ada promosi tanpa bukti.
+    </div>
+    <div id="lstat-body" class="lstat-body">memuat…</div>
+  </details>
+
   <!-- PHASE 1 LEARNER: pelajaran dari sinyal yang sudah berlalu (lihat backtest/learn.js) -->
   <details class="lessons" id="lessons">
     <summary>PELAJARAN DARI SINYAL LALU · LEARNER 90d ▾</summary>

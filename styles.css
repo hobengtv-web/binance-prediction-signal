@@ -364,3 +364,31 @@ body {
 .ls-sup .ls-k { color: var(--down); }
 .ls-foot { padding: 6px 12px 10px; font-size: 10px; color: var(--muted); border-top: 1px solid var(--border); }
 .ls-foot code { color: var(--accent); background: var(--panel-2); padding: 1px 4px; border-radius: 4px; }
+
+/* ===== STATUS LEARNER (progress, pelajaran, penyesuaian) ===== */
+.learn-status { margin: 10px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.learn-status summary { cursor: pointer; padding: 10px 12px; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--accent); list-style: none; }
+.learn-status summary::-webkit-details-marker { display: none; }
+.lstat-hint { padding: 0 12px 8px; font-size: 10.5px; line-height: 1.5; color: var(--muted); }
+.lstat-hint b { color: var(--text); }
+.lstat-body { padding: 0 12px 10px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.lstat-sec { padding: 8px 0; border-top: 1px solid var(--border); }
+.lstat-sec:first-child { border-top: none; }
+.lstat-sec > b { display: block; margin-bottom: 5px; font-size: 10.5px; letter-spacing: .05em; color: var(--muted); }
+.lstat-bar { height: 8px; border-radius: 5px; background: var(--panel-2); overflow: hidden; margin-bottom: 5px; }
+.lstat-bar > i { display: block; height: 100%; background: linear-gradient(90deg, #0ecb81, #12d98b); border-radius: 5px; transition: width .4s; }
+.lstat-line { line-height: 1.6; margin-bottom: 3px; }
+.lstat-line b { color: var(--text); }
+.lstat-dim { color: var(--muted); }
+.lstat-warn { color: var(--accent); }
+.lstat-line code, .lstat-row code { background: var(--panel-2); padding: 1px 4px; border-radius: 4px; color: var(--accent); }
+.lstat-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 4px 8px; margin-top: 5px; }
+.lstat-grid > span { display: flex; flex-direction: column; background: var(--panel-2); border-radius: 6px; padding: 4px 6px; }
+.lstat-grid i { font-style: normal; font-size: 9.5px; color: var(--muted); }
+.lstat-grid b { font-size: 12px; }
+.lstat-badge { display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; padding: 1px 6px; border-radius: 5px; }
+.lstat-badge.ok { background: rgba(14,203,129,.16); color: var(--up); }
+.lstat-badge.def { background: var(--panel-2); color: var(--muted); }
+.lstat-badge.sup { background: rgba(246,70,93,.16); color: var(--down); }
+.lstat-row { display: grid; grid-template-columns: 70px 1fr; gap: 4px 8px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+.lstat-row > span:nth-child(3) { grid-column: 1 / -1; color: var(--muted); }

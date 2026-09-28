@@ -453,6 +453,50 @@ http.createServer(async (req, res) => {
     return;
   }
 
+  // ---- STATUS LEARNER (dipakai panel UI agar user bisa memantau proses belajar) ----
+  if (u.pathname === "/api/learner") {
+    const CANON_MS = 6000, TARGET = 120;
+    let total = 0, withSig = 0, withRes = 0, canon = 0, canonRes = 0, late = 0, sincePromote = 0;
+    const promotedTs = modelMeta && modelMeta.promotedAt ? Date.parse(modelMeta.promotedAt) : null;
+    let lastUpd = 0;
+    for (const r of ledger.values()) {
+      total++;
+      if (r.upd && r.upd > lastUpd) lastUpd = r.upd;
+      if (promotedTs && r.upd && r.upd > promotedTs) sincePromote++;
+      if (!r.sig) continue;
+      withSig++;
+      if (r.res) withRes++;
+      const s = r.sig;
+      const off = typeof s.capOffsetMs === "number" ? s.capOffsetMs : null;
+      const isCanon = off != null ? off <= CANON_MS : (s.minuteIn == null || s.minuteIn <= 1);
+      if (isCanon) { canon++; if (r.res) canonRes++; } else late++;
+    }
+    const g = readModelPart("gate"), t = readModelPart("touch");
+    const single = (rules, prefix) => (rules || []).filter((k) => typeof k === "string" && k.indexOf("&") === -1 && k.indexOf(prefix) === 0);
+    let history = [];
+    try {
+      if (fs.existsSync(MODEL_LOG)) {
+        history = fs.readFileSync(MODEL_LOG, "utf8").split("\n").filter(Boolean).slice(-8).map((l) => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean);
+      }
+    } catch (_) {}
+    const learned = !!(modelMeta && modelMeta.version && modelMeta.version !== "default");
+    res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+    res.end(JSON.stringify({
+      ledger: { total, withSig, withRes, canonical: canon, canonicalWithRes: canonRes, late, target: TARGET, pct: +Math.min(1, canonRes / TARGET).toFixed(3), lastUpd: lastUpd || null, sincePromote },
+      model: {
+        source: learned ? "learned" : "default",
+        version: modelMeta.version || "default", promotedAt: modelMeta.promotedAt || null, trigger: modelMeta.trigger || null,
+        rows: modelMeta.rows || (g && g.rows) || null,
+        metrics: modelMeta.metrics || (g && g.metrics) || null,
+        baseline: (g && g.baseline) || null,
+        why: modelMeta.why || null,
+      },
+      blockers: { gate: single(g && g.suppress, "interval="), touch: single(t && t.suppress, "gap=") },
+      history,
+    }));
+    return;
+  }
+
   if (u.pathname === "/api/stats") {
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
     res.end(JSON.stringify({ activeUsers: activeVisitors.size }));

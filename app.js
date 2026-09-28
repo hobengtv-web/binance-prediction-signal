@@ -2329,6 +2329,75 @@ function renderLessons() {
 window.setLearnBlock = (v) => { LEARN_BLOCK = !!v; console.log("[LEARN] tahan konteks lemah =", LEARN_BLOCK); return LEARN_BLOCK; };
 window.learnStatus = () => ({ status: LEARN.status, block: LEARN_BLOCK, gateRules: LEARN.gate ? LEARN.gate.rules.length : 0, touchRules: LEARN.touch ? LEARN.touch.rules.length : 0 });
 
+/* ===== STATUS LEARNER (panel UI): progress, pelajaran, penahan aktif, riwayat penyesuaian =====
+   Dihitung dari /api/learner (server) + penghitung sesi ini di browser. Tujuannya agar user bisa
+   memantau: (1) sudah berapa data belajar terkumpul, (2) pelajaran apa yang didapat,
+   (3) penyesuaian apa yang sedang berlaku pada sinyal. */
+const LEARN_STATS = { signals: 0, strong: 0, mixed: 0, weak: 0, wouldBlock: 0 };
+let LEARNER_STATUS = null;
+let LEARNER_ERR = null;
+async function loadLearnerStatus() {
+  try {
+    const r = await fetch("/api/learner", { cache: "no-store" });
+    if (r.ok) { LEARNER_STATUS = await r.json(); LEARNER_ERR = null; }
+    else LEARNER_ERR = "HTTP " + r.status;
+  } catch (e) { LEARNER_ERR = e && e.message ? e.message : "gagal memuat"; }
+  renderLearnerStatus();
+}
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function renderLearnerStatus() {
+  const el = document.getElementById("lstat-body"); if (!el) return;
+  if (LEARNER_ERR || !LEARNER_STATUS) { el.innerHTML = `<div class="cd-empty">status learner belum tersedia${LEARNER_ERR ? " (" + esc(LEARNER_ERR) + ")" : ""}</div>`; return; }
+  const S = LEARNER_STATUS, L = S.ledger || {}, M = S.model || {}, B = S.blockers || {};
+  const pctv = Math.round((L.pct || 0) * 1000) / 10;
+  const learned = M.source === "learned";
+  const mt = M.metrics || {};
+  const bs = M.baseline || {};
+  const baseTxt = bs.test != null ? bs.test : (bs.dirTest != null ? bs.dirTest : null);
+  const blockers = [...(B.gate || []), ...(B.touch || [])];
+  const hist = S.history || [];
+  const badge = learned ? '<span class="lstat-badge ok">BELAJAR DARI LEDGER</span>' : '<span class="lstat-badge def">DEFAULT (BACKTEST 90d)</span>';
+  el.innerHTML = `
+    <div class="lstat-sec">
+      <b>1 · PROGRESS DATA BELAJAR</b>
+      <div class="lstat-bar"><i style="width:${Math.min(100, pctv)}%"></i></div>
+      <div class="lstat-line"><b>${L.canonicalWithRes || 0}</b> / ${L.target || 120} sinyal kanonik berhasil
+        (${pctv}%) · ${L.canonicalWithRes >= (L.target || 120) ? "target tercapai — re-fit otomatis berjalan" : "mengumpulkan, re-fit otomatis tiap hari 03:00"}</div>
+      <div class="lstat-grid">
+        <span><i>total record</i><b>${L.total || 0}</b></span>
+        <span><i>dengan fitur</i><b>${L.withSig || 0}</b></span>
+        <span><i>dengan hasil</i><b>${L.withRes || 0}</b></span>
+        <span><i>kanonik (detik-2)</i><b>${L.canonical || 0}</b></span>
+        <span><i>tengah sesi (dibuang)</i><b>${L.late || 0}</b></span>
+        <span><i>terakhir dapat data</i><b>${L.lastUpd ? new Date(L.lastUpd).toLocaleTimeString() : "—"}</b></span>
+      </div>
+    </div>
+    <div class="lstat-sec">
+      <b>2 · MODEL YANG SEDANG DIPAKAI UNTUK SINYAL</b>
+      <div class="lstat-line">${badge}${M.version && M.version !== "default" ? ` <span class="lstat-dim">versi ${esc(String(M.version).slice(0, 19))}</span>` : ""}</div>
+      <div class="lstat-line lstat-dim">${learned
+        ? `dipromosikan ${M.promotedAt ? new Date(M.promotedAt).toLocaleString() : "—"} · pemicu: ${esc(M.trigger || "—")} · data latih ${M.rows || "—"} baris · data baru sejak promosi: ${L.sincePromote || 0}`
+        : `belum ada model hasil belajar — masih memakai tabel backtest 90 hari. Model belajar otomatis menggantikan hanya bila menang pada jendela uji.`}</div>
+      <div class="lstat-line">${mt.score != null
+        ? `metrik uji: cakupan <b>${((mt.coverage || 0) * 100).toFixed(0)}%</b> · winrate sinyal diambil <b>${((mt.takenWinrate || 0) * 100).toFixed(1)}%</b> · skor <b>${mt.score}</b>${baseTxt != null ? ` · baseline arah ${(baseTxt * 100).toFixed(1)}%` : ""}`
+        : `metrik uji: — (belum ada model belajar)`}</div>
+      <div class="lstat-line">penahan aktif: ${blockers.length ? blockers.map((k) => `<code>${esc(k)}</code>`).join(" · ") : '<span class="lstat-dim">tidak ada</span>'}</div>
+    </div>
+    <div class="lstat-sec">
+      <b>3 · EFEK DI BROWSER INI (sejak halaman dibuka)</b>
+      <div class="lstat-line">sinyal diamati <b>${LEARN_STATS.signals}</b> · konteks kuat <b>${LEARN_STATS.strong}</b> · campuran <b>${LEARN_STATS.mixed}</b> · lemah <b>${LEARN_STATS.weak}</b> · <span class="${LEARN_STATS.wouldBlock ? "lstat-warn" : "lstat-dim"}">akan ditahan <b>${LEARN_STATS.wouldBlock}</b></span>${LEARN_BLOCK ? ' <span class="lstat-badge sup">TAHAN AKTIF</span>' : ' <span class="lstat-badge def">TAHAN MATI</span>'}</div>
+      <div class="lstat-line lstat-dim">aktifkan penahanan: <code>window.setLearnBlock(true)</code></div>
+    </div>
+    <div class="lstat-sec">
+      <b>4 · RIWAYAT PENYESUAIAN MODEL</b>
+      ${hist.length ? hist.slice().reverse().map((h) => `<div class="lstat-row">
+        <span class="lstat-badge ${h.promote ? "ok" : "def"}">${h.promote ? "PROMOTE" : "KEEP"}</span>
+        <span class="lstat-dim">${h.at ? new Date(h.at).toLocaleString() : ""} · pemicu ${esc(h.trigger || "—")} · data ${h.rows != null ? h.rows : "—"}</span>
+        <span>${esc(h.why || "")}</span></div>`).join("") : '<div class="lstat-dim">belum ada keputusan (menunggu data cukup)</div>'}
+    </div>`;
+}
+setInterval(loadLearnerStatus, 60000);
+
 /* ===== PHASE 2 LEDGER — catat setiap sinyal + vektor fitur lengkap + hasilnya =====
    Learner butuh data jangka panjang: Binance hanya menyediakan 1s klines 7 hari, jadi
    fitur skala detik (volRel2, surprise, gap, tier, MFE/MAE, waktu-ke-lock) harus
@@ -2861,6 +2930,18 @@ function captureDesktopSignal() {
               learn: L ? { label: L.label, touch: L.touch, dirWR: L.dirWR, intervalWR: L.intervalWR ? L.intervalWR.wr : null, gap: L.ctx ? L.ctx.gap : null, hour: L.ctx ? L.ctx.hour : null, trend: L.ctx ? L.ctx.trend : null, blocking: (L.blockable || []).length > 0 } : null,
             });
           } catch (e) { console.warn("[LEDGER] addSignal failed:", e && e.message); }
+          // Hitung efek learner untuk panel STATUS LEARNER (sekali per sesi per combo).
+          try {
+            const L2 = cached.learn;
+            if (L2) {
+              LEARN_STATS.signals++;
+              if (L2.label === "LEMAH") LEARN_STATS.weak++;
+              else if (L2.label === "CAMPURAN") LEARN_STATS.mixed++;
+              else if (L2.label === "KUAT") LEARN_STATS.strong++;
+              if (L2.blockable && L2.blockable.length) LEARN_STATS.wouldBlock++;
+              renderLearnerStatus();
+            }
+          } catch (_) {}
           console.log("[DESK-SIG] pending:", entry);
         }
         
@@ -4018,9 +4099,11 @@ function start() {
   loadGate();
   loadTiers();
   loadLearn();
+  loadLearnerStatus();
   setInterval(loadGate, 10 * 60 * 1000);
   setInterval(loadTiers, 10 * 60 * 1000);
   setInterval(loadLearn, 30 * 60 * 1000);   // pelajaran di-refresh tiap 30 menit
+  setInterval(loadLearnerStatus, 60 * 1000);   // status learner di-refresh tiap menit
   setTimeout(rescoreAll, 8000);        // after history candles are loaded
   setTimeout(rescoreAll, 25000);
   // timers — use rAF for smooth timer, updateProjection only on data events

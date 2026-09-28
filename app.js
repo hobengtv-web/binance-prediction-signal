@@ -2131,7 +2131,7 @@ async function loadGate() {
    first-minute price direction + volume pace + executed order flow (OFI):
       STRONG = OFI strongly agrees and volume pace >= 3x
       GOOD   = OFI agrees and volume pace >= 3x
-      FAIR   = OFI agrees and volume pace >= 1.5x
+      FAIR   = OFI agrees and volume pace >= 1.2x (5m) / 2.0x (15m) / 1.5x (1h)
    Anything else = no entry. */
 let TIERS = null;
 let TIER_STATUS = "loading";
@@ -2144,12 +2144,21 @@ async function loadTiers() {
     console.log(`[TIERS] early tiers loaded · ${TIERS.windowDays}d window`);
   } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
 }
-const GRADE_VARIANT = { STRONG: "OFI strong+vol>=3", GOOD: "OFI agree+vol>=3", FAIR: "OFI agree+vol>=1.5" };
+function gradeVariant(tf, grade) {
+  if (grade === "STRONG") return "OFI strong+vol>=3";
+  if (grade === "GOOD") return "OFI agree+vol>=3";
+  if (grade === "FAIR") return tf === "5m" ? "OFI agree+vol>=1.2" : tf === "15m" ? "OFI agree+vol>=2" : "OFI agree+vol>=1.5";
+  return null;
+}
 function gradeWR(tf, grade) {
   if (!TIERS || !TIERS.tiers) return null;
-  const o = TIERS.tiers[`${tf}|${GRADE_VARIANT[grade]}`];
+  const v = gradeVariant(tf, grade);
+  if (!v) return null;
+  const o = TIERS.tiers[`${tf}|${v}`];
   return o ? o.wr : null;
 }
+// Minimum volume pace for the FAIR tier, per interval (calibrated 30d).
+function fairMinVol(tf) { return tf === "5m" ? 1.2 : tf === "15m" ? 2.0 : 1.5; }
 
 // Universal signal cache - untuk background calculation semua coin & interval
 let _deskSigCache = {};  // key: `${sym}_${tf}_${roundStart}` -> LOCKED signal (only non-flat entries)
@@ -2373,16 +2382,18 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   const ofiStrong = ofi != null && Math.abs(ofi) >= 0.2;
   // EARLY grade — the signal is produced at the start of the session. Only these grade
   // produce an entry; everything else becomes "no entry".
-  //   STRONG = OFI strongly agrees + volume pace >= 3x   (~75% 5m / ~64% 15m)
-  //   GOOD   = OFI agrees + volume pace >= 3x            (~74% / ~64%)
-  //   FAIR   = OFI agrees + volume pace >= 1.5x          (~72% / ~66%)
+  //   STRONG = OFI strongly agrees + volume pace >= 3x          (~75% 5m / ~64% 15m)
+  //   GOOD   = OFI agrees + volume pace >= 3x                   (~74% / ~64%)
+  //   FAIR   = OFI agrees + volume pace >= 1.2x (5m) / 2.0x (15m) / 1.5x (1h)
+  //                                                            (~71% / ~67% / ~65%)
   let grade = null;
+  const FAIR_MIN = fairMinVol(tf);
   if (verdict !== "flat" && ofiAgree !== false) {
     if (volRel >= 3) grade = ofiStrong ? "STRONG" : "GOOD";
-    else if (volRel >= 1.5) grade = "FAIR";
+    else if (volRel >= FAIR_MIN) grade = "FAIR";
   }
   if (!grade) {
-    const why = ofiAgree === false ? "OFI contra" : (volRel < 1.5 ? "LOWVOL" : "FILTERED");
+    const why = ofiAgree === false ? "OFI contra" : (volRel < FAIR_MIN ? "LOWVOL" : "FILTERED");
     verdict = "flat";
     mode = why;
     conf = 0;

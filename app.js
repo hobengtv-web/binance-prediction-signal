@@ -3257,84 +3257,69 @@ function analyzeHistoricalTrend(sym, tf, sessionCount) {
 
 /* ======================= Audio Alert (Web Audio API) ======================= */
 let audioCtx = null;
-function playSoundAlert() {
-  try {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const ctx = audioCtx;
-    if (ctx.state === 'suspended') ctx.resume();
-    
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(440, ctx.currentTime);
-    
-    // Pulsing pattern - 8 beats over 2 seconds
-    const pattern = [
-      [0.00, 0.25, 0.30],
-      [0.25, 0.50, 0.30],
-      [0.50, 0.75, 0.35],
-      [0.75, 1.00, 0.35],
-      [1.00, 1.25, 0.40],
-      [1.25, 1.50, 0.40],
-      [1.50, 1.75, 0.40],
-      [1.75, 2.00, 0.40]
-    ];
-    
-    gain.gain.setValueAtTime(0, ctx.currentTime);
-    pattern.forEach(([start, end, vol]) => {
-      gain.gain.setValueAtTime(0, ctx.currentTime + start);
-      gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + start + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + end);
-    });
-    
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 2.00);
-    console.log("[SOUND] 2-second pulsing alert played");
-  } catch (e) {
-    console.log("[SOUND] failed:", e.message);
-  }
-}
 
-// Generic tone-sequence player so each alert type has its own distinct sound.
-function playSequence(notes) {
+// Shared tone sequencer with a GENTLE timbre: sine/triangle only, a low-pass filter and
+// smooth attack/release. A square wave + hard on/off (the old signal sound) is the harshest
+// possible waveform for a small speaker and can make the membrane rattle.
+function playSequence(notes, opts) {
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const ctx = audioCtx;
     if (ctx.state === "suspended") ctx.resume();
+    const master = ctx.createGain();
+    master.gain.value = (opts && opts.vol != null) ? opts.vol : 0.55;
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = (opts && opts.cutoff) || 2000;   // strip the harsh upper harmonics
+    lp.Q.value = 0.7;
+    master.connect(lp);
+    lp.connect(ctx.destination);
     for (const n of notes) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = n.type || "sine";
-      osc.frequency.setValueAtTime(n.f, ctx.currentTime + n.t);
-      gain.gain.setValueAtTime(0, ctx.currentTime + n.t);
-      gain.gain.linearRampToValueAtTime(n.vol || 0.3, ctx.currentTime + n.t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + n.t + n.d);
+      const t0 = ctx.currentTime + n.t;
+      osc.frequency.setValueAtTime(n.f, t0);
+      const peak = n.vol != null ? n.vol : 0.22;
+      const atk = 0.05, rel = Math.min(0.12, Math.max(0.06, n.d * 0.4));
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(peak, t0 + atk);          // soft attack (no click)
+      gain.gain.setValueAtTime(peak, t0 + Math.max(atk, n.d - rel));
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.d);        // soft release
       osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(ctx.currentTime + n.t);
-      osc.stop(ctx.currentTime + n.t + n.d + 0.03);
+      gain.connect(master);
+      osc.start(t0);
+      osc.stop(t0 + n.d + 0.06);
     }
   } catch (e) { console.log("[SOUND] failed:", e.message); }
 }
-// TRADE ASSISTANT: entry / average -> bright rising two-note chirp (twice).
+// Signal entry — soft two-note chime (was a harsh 440Hz square pulse). No square waves,
+// nothing above ~520Hz, low gain, filtered.
+function playSoundAlert() {
+  playSequence([
+    { f: 392, t: 0.00, d: 0.22, type: "sine", vol: 0.22 },   // G4
+    { f: 523, t: 0.26, d: 0.30, type: "sine", vol: 0.24 },   // C5
+    { f: 392, t: 0.72, d: 0.20, type: "sine", vol: 0.18 },   // G4
+    { f: 523, t: 0.96, d: 0.34, type: "sine", vol: 0.20 },   // C5
+  ], { vol: 0.55, cutoff: 1800 });
+  console.log("[SOUND] soft signal chime played");
+}
+// TRADE ASSISTANT: entry / average -> gentle rising two-note chirp (twice), max 659Hz.
 function playTradeEntrySound() {
   playSequence([
-    { f: 660, t: 0.00, d: 0.16, type: "triangle", vol: 0.38 },
-    { f: 990, t: 0.18, d: 0.22, type: "triangle", vol: 0.42 },
-    { f: 660, t: 0.48, d: 0.16, type: "triangle", vol: 0.38 },
-    { f: 990, t: 0.66, d: 0.26, type: "triangle", vol: 0.42 },
-  ]);
+    { f: 523, t: 0.00, d: 0.18, type: "triangle", vol: 0.24 },
+    { f: 659, t: 0.20, d: 0.26, type: "triangle", vol: 0.26 },
+    { f: 523, t: 0.52, d: 0.16, type: "triangle", vol: 0.20 },
+    { f: 659, t: 0.70, d: 0.30, type: "triangle", vol: 0.22 },
+  ], { vol: 0.5, cutoff: 2000 });
 }
-// TRADE ASSISTANT: close / cut -> descending three-note chime.
+// TRADE ASSISTANT: close / cut -> soft descending three-note chime, max 659Hz.
 function playCloseSound() {
   playSequence([
-    { f: 1046, t: 0.00, d: 0.18, type: "sine", vol: 0.42 },
-    { f: 784, t: 0.20, d: 0.20, type: "sine", vol: 0.40 },
-    { f: 523, t: 0.42, d: 0.34, type: "sine", vol: 0.36 },
-  ]);
+    { f: 659, t: 0.00, d: 0.20, type: "sine", vol: 0.24 },
+    { f: 523, t: 0.24, d: 0.24, type: "sine", vol: 0.22 },
+    { f: 392, t: 0.52, d: 0.36, type: "sine", vol: 0.20 },
+  ], { vol: 0.5, cutoff: 1800 });
 }
 
 // Preload audio context on first user interaction
@@ -3533,7 +3518,7 @@ function start() {
   if (audioTestBtn) {
     audioTestBtn.addEventListener("click", () => {
       try {
-        playSoundAlert();                          // 1) signal entry (pulsing)
+        playSoundAlert();                          // 1) signal entry (soft chime)
         setTimeout(playTradeEntrySound, 2200);     // 2) trade entry/average (rising)
         setTimeout(playCloseSound, 3800);          // 3) close/cut (descending)
         audioTestBtn.textContent = "✓ 3 sounds";

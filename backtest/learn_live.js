@@ -32,9 +32,13 @@ async function loadLedger() {
 async function main() {
   const raw = await loadLedger();
   const rows = L.rowsFrom(raw);
+  const sk = rows.skipped || {};
   const withRes = rows.length, all = raw.filter((r) => r && r.sig).length;
+  const alts = raw.reduce((a, r) => a + ((r.alts && r.alts.length) || 0), 0);
   console.log(`=== LEARNER LIVE (dari ledger) ===`);
-  console.log(`record: ${raw.length} · punya fitur: ${all} · punya fitur+hasil: ${withRes}`);
+  console.log(`record: ${raw.length} · punya fitur: ${all} · siap dipakai (kanonik + ada hasil): ${withRes}`);
+  console.log(`dikecualikan: ${sk.late || 0} capture tengah sesi (capOffsetMs > ${L.CANONICAL_MAX_MS || 6000}ms) · ${sk.noRes || 0} belum ada hasil · ${sk.noSig || 0} tanpa fitur`);
+  if (alts) console.log(`snapshot alternatif tersimpan (capture lain di sesi yang sama): ${alts}`);
   const model = L.buildModel(rows);
   if (!model.ok) {
     console.log(`\nBelum cukup data: ${model.reason}.`);

@@ -180,6 +180,12 @@
       Tombol <b>reset</b> di panel DESKTOP SIGNAL ACCURACY hanya menghapus tampilan akurasi lokal di browser ini.
       Ledger belajar tersimpan di server (volume persisten) dan <b>tidak terhapus</b>.
     </div>
+    <div class="ls-foot" style="border-top:none;padding-top:0;">
+      <b>Satu sesi = satu sinyal kanonik.</b> Kalau ada beberapa user, yang disimpan sebagai sinyal
+      belajar adalah capture yang <b>paling dekat ke detik ke-2</b> (capOffset terkecil) — bukan yang
+      kebetulan ter-upload lebih dulu. Capture dari user yang membuka link di tengah sesi disimpan
+      sebagai <code>alts</code> (pembanding) dan <b>tidak</b> dipakai melatih model 2 detik.
+    </div>
   </details>
 
   <details class="help">

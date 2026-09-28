@@ -29,12 +29,24 @@ const bGap = (g) => (g == null ? "na" : g < 0.005 ? "<0.005" : g < 0.01 ? "0.005
 const isBucket = (v) => typeof v === "string" && /[<>\-]/.test(v);
 
 /* ---------- record ledger -> baris fitur ---------- */
-function rowsFrom(records, minT0 = 1700000000) {
+// CANONICAL_MAX_MS: sinyal yang dipakai belajar = capture paling dekat ke detik ke-2.
+// Browser yang dibuka di tengah sesi menghasilkan capOffsetMs besar -> DIKECUALIKAN dari
+// pelatihan (bukan dihapus; tetap ada di record sebagai `alts` untuk studi entry telat).
+const CANONICAL_MAX_MS = 6000;
+function rowsFrom(records, minT0 = 1700000000, opts = {}) {
+  const includeLate = !!opts.includeLate;
   const out = [];
+  const skipped = { noSig: 0, noRes: 0, late: 0, badDir: 0, old: 0 };
   for (const r of records || []) {
-    if (!r || !r.sig || !r.res || !r.t0 || r.t0 < minT0) continue;
+    if (!r || !r.t0 || r.t0 < minT0) { skipped.old++; continue; }
+    if (!r.sig) { skipped.noSig++; continue; }
+    if (!r.res) { skipped.noRes++; continue; }
     const s = r.sig, dir = s.dir;
-    if (dir !== "up" && dir !== "down") continue;
+    if (dir !== "up" && dir !== "down") { skipped.badDir++; continue; }
+    // kanonik: capOffsetMs ada -> wajib <= 6s; record lama (tanpa capOffsetMs) -> pakai minuteIn
+    const off = typeof s.capOffsetMs === "number" ? s.capOffsetMs : null;
+    const canonical = off != null ? off <= CANONICAL_MAX_MS : (s.minuteIn == null || s.minuteIn <= 1);
+    if (!canonical && !includeLate) { skipped.late++; continue; }
     const gapRaw = (s.learn && isBucket(s.learn.gap)) ? s.learn.gap : bGap(s.rewardPct != null ? Math.abs(s.rewardPct) : null);
     out.push({
       t0: r.t0, asset: r.asset, interval: r.interval,
@@ -45,12 +57,15 @@ function rowsFrom(records, minT0 = 1700000000) {
       hist: bHist(s.histStrength),
       trend: (s.learn && s.learn.trend && s.learn.trend !== "na") ? s.learn.trend : "na",
       dir, gap: gapRaw,
+      capOffsetMs: off, canonical,
       won: r.res.won === 1 ? 1 : 0,
       touch: r.res.touch === 1 ? 1 : 0,
       mfeFav: r.res.mfeFav, maeFav: r.res.maeFav,
     });
   }
-  return out.sort((a, b) => a.t0 - b.t0);
+  out.sort((a, b) => a.t0 - b.t0);
+  out.skipped = skipped;
+  return out;
 }
 
 const GATE_FEATS = { interval: (r) => r.interval, symbol: (r) => r.symbol, mode: (r) => r.mode, minute: (r) => r.minute, rsi: (r) => r.rsi, vol: (r) => r.vol, hour: (r) => r.hour, hist: (r) => r.hist, trend: (r) => r.trend };
@@ -172,4 +187,4 @@ function shouldPromote(candidate, incumbent, minTake = 40) {
   return { promote: false, why: `skor kandidat ${c.score} tidak mengalahkan insiden ${i.score}` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, shouldPromote, blockersOf, decide, GATE_FEATS, TOUCH_FEATS, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, shouldPromote, blockersOf, decide, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

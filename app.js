@@ -2836,6 +2836,12 @@ function captureDesktopSignal() {
             const L = cached.learn || null;
             LEDGER.addSignal({
               asset: sym, interval: tf, t0: t0Sec,
+              // capOffsetMs = umur sesi saat capture. Dipakai server untuk memilih snapshot
+              // KANONIK per sesi: yang paling dekat ke detik ke-2 (paling awal) yang menang,
+              // bukan yang kebetulan ter-upload lebih dulu. Browser yang dibuka di tengah sesi
+              // akan menghasilkan capOffsetMs besar -> disimpan sebagai alternatif, bukan kanonik.
+              capOffsetMs: Math.max(0, Math.round(now - t0)),
+              capAt: Math.floor(now / 1000),
               dir: cached.verdict, mode: cached.mode, conf: cached.conf, lock: lock,
               grade: cached.grade || null,
               expectedWR: cached.expectedWR != null ? +Number(cached.expectedWR).toFixed(4) : null,

@@ -388,9 +388,20 @@ http.createServer(async (req, res) => {
             // Tanpa vektor fitur (sig) record tidak berguna untuk learner -> jangan disimpan.
             if (!r.sig && !prev.sig) continue;
             const merged = Object.assign({}, prev, r);
-            // vektor fitur = snapshot PERTAMA (detik ke-2); capture ulang sesi yang sama tidak boleh
-            // menimpanya (defense in depth untuk klien lain / reset di sisi user)
-            if (prev.sig) merged.sig = prev.sig;
+            const off = (s) => (s && typeof s.capOffsetMs === "number" ? s.capOffsetMs : Infinity);
+            // Satu sesi = satu record. Siapa yang boleh mengisi slot `sig`?
+            // Bukan yang ter-upload lebih dulu, tapi yang CAPTURE-NYA paling dekat ke detik ke-2
+            // (capOffsetMs terkecil) — itulah sinyal kanonik. Snapshot lain disimpan di `alts`
+            // sebagai pembanding/audit (termasuk capture tengah sesi dari browser yang baru dibuka).
+            if (prev.sig && r.sig) {
+              if (off(r.sig) < off(prev.sig)) {
+                merged.sig = r.sig;
+                merged.alts = (prev.alts || []).concat([{ capOffsetMs: off(prev.sig), sig: prev.sig }]).slice(-6);
+              } else {
+                merged.sig = prev.sig;
+                merged.alts = (prev.alts || []).concat([{ capOffsetMs: off(r.sig), sig: r.sig }]).slice(-6);
+              }
+            } else if (prev.sig) merged.sig = prev.sig;
             // jangan menimpa hasil yang sudah tercatat dengan record sinyal yang lebih baru
             if (prev.res && !r.res) merged.res = prev.res;
             merged.upd = Date.now();

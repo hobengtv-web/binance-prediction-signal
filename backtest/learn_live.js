@@ -37,7 +37,7 @@ async function main() {
   const alts = raw.reduce((a, r) => a + ((r.alts && r.alts.length) || 0), 0);
   console.log(`=== LEARNER LIVE (dari ledger) ===`);
   console.log(`record: ${raw.length} · punya fitur: ${all} · siap dipakai (kanonik + ada hasil): ${withRes}`);
-  console.log(`dikecualikan: ${sk.late || 0} capture tengah sesi (capOffsetMs > ${L.CANONICAL_MAX_MS || 6000}ms) · ${sk.noRes || 0} belum ada hasil · ${sk.noSig || 0} tanpa fitur`);
+  console.log(`dikecualikan: ${sk.late || 0} capture tengah sesi (capOffsetMs > ${L.CANONICAL_MAX_MS}ms) · ${sk.noRes || 0} belum ada hasil · ${sk.noSig || 0} tanpa fitur · ${sk.badDir || 0} arah tidak jelas · ${sk.old || 0} di luar rentang`);
   if (alts) console.log(`snapshot alternatif tersimpan (capture lain di sesi yang sama): ${alts}`);
   const model = L.buildModel(rows);
   if (!model.ok) {

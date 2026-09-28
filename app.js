@@ -1636,11 +1636,31 @@ const MobilePredLog = (() => {
     clear() { log = []; save(); },
     size() { return log.length; },
     save() { save(); },
+    replaceAll(arr) { log = arr.slice(); if (log.length > 8000) log = log.slice(-8000); save(); },
   };
 })();
 
 // SignalLog alias - untuk desktop signal capture (source of truth)
 const SignalLog = MobilePredLog;
+
+/* Signals locked during a running session are held here (persisted) and only written to
+   history when the round ENDS. Prevents history entries appearing before a round finishes,
+   and prevents duplicates across page reloads. */
+const PENDING_SIG_KEY = "bps_pending_sig_v1";
+const PendingSig = (() => {
+  let map = {};
+  try { map = JSON.parse(localStorage.getItem(PENDING_SIG_KEY) || "{}"); } catch (_) { map = {}; }
+  const save = () => { try { localStorage.setItem(PENDING_SIG_KEY, JSON.stringify(map)); } catch (_) {} };
+  const keyOf = (r) => `${r.asset}_${r.interval}_${r.t0}`;
+  return {
+    add(r) { map[keyOf(r)] = r; save(); },
+    all() { return Object.values(map); },
+    remove(r) { delete map[keyOf(r)]; save(); },
+    has(k) { return !!map[k]; },
+    clear() { map = {}; save(); },
+    size() { return Object.keys(map).length; },
+  };
+})();
 
 /* ===== Backtest-calibrated quality gate (see backtest/replay.js) ===== */
 let GATE = null;
@@ -1713,8 +1733,12 @@ function captureDesktopSignal() {
           highConf: !!g,
           gateWr: g ? g.wr : null,
         };
-        SignalLog.add(entry);
-        console.log("[DESK-SIG] captured:", entry);
+        // Hold in PendingSig until the round ends (avoids early + duplicate history entries).
+        const alreadyFinal = SignalLog.data().some((e) => e.asset === sym && e.interval === tf && e.t0 === t0);
+        if (!alreadyFinal) {
+          PendingSig.add(entry);
+          console.log("[DESK-SIG] pending:", entry);
+        }
         
         if (state.asset === sym && state.interval === tf) {
           renderConfidenceReport();
@@ -1896,36 +1920,100 @@ function captureConfidenceRound(t0, O, C, fadeDir, fadeConf, trendDir, mode, sta
   }
 }
 
-// Evaluate all captured sessions whose round has ENDED (all coin/interval combos).
-// Sets `won` on each SignalLog entry: dir matches actual close-vs-lock direction.
+// Finalize locked signals whose round has ENDED: write them to history with the outcome.
+// Rounds still running stay in PendingSig, so history never shows an unfinished round.
 function evaluateUniversalSessions(now) {
-  const data = SignalLog.data();
+  const pending = PendingSig.all();
+  if (!pending.length) return;
   let changed = false;
 
-  for (const entry of data) {
-    if (entry.won !== undefined) continue;        // already scored
-    const dur = INTERVAL_MS[entry.interval];
-    if (!dur || entry.t0 == null) continue;
-    const sessionEnd = entry.t0 + dur;
-    if (now < sessionEnd) continue;               // round still running
+  for (const p of pending) {
+    const dur = INTERVAL_MS[p.interval];
+    if (!dur || p.t0 == null) continue;
+    if (now < p.t0 + dur) continue;               // round still running
 
-    const candles = state.cache[entry.asset]?.[entry.interval]?.candles || [];
-    const t0Sec = Math.floor(entry.t0 / 1000);
-    // Use the SAME session candle for lock and close (matches the chart lock line exactly).
-    const sessionCandle = candles.find((c) => c.time === t0Sec);
-    const lock = sessionCandle ? sessionCandle.open : entry.lock;
-    const close = sessionCandle ? sessionCandle.close : null;
-    if (lock == null || close == null) continue;
+    const candles = state.cache[p.asset]?.[p.interval]?.candles || [];
+    const t0Sec = Math.floor(p.t0 / 1000);
+    const sc = candles.find((c) => c.time === t0Sec);
+    if (!sc) {
+      // Cannot score without the candle; drop only if it is far too old to ever resolve.
+      if (now > p.t0 + dur + 3 * 3600000) PendingSig.remove(p);
+      continue;
+    }
 
+    const lock = sc.open;
+    const close = sc.close;
     const actual = close >= lock ? "up" : "down";
-    entry.lock = lock;
-    entry.close = close;
-    entry.actual = actual;
-    entry.won = entry.dir === actual ? 1 : 0;
+    const won = p.dir === actual ? 1 : 0;
+
+    const dup = SignalLog.data().some((e) => e.asset === p.asset && e.interval === p.interval && e.t0 === p.t0);
+    if (!dup) {
+      SignalLog.add({
+        ts: Date.now(),
+        t0: p.t0,
+        asset: p.asset,
+        interval: p.interval,
+        mode: p.mode,
+        dir: p.dir,
+        conf: p.conf,
+        lock: lock,
+        close: close,
+        actual: actual,
+        won: won,
+        reason: p.reason || "",
+        gateKey: p.gateKey,
+        highConf: !!p.highConf,
+        gateWr: p.gateWr != null ? p.gateWr : null,
+        lockedAt: p.lockedAt,
+      });
+    }
+    PendingSig.remove(p);
     changed = true;
   }
 
-  if (changed) SignalLog.save();
+  if (changed) renderConfidenceReport();
+}
+
+// Move history entries whose round has NOT finished back into PendingSig.
+// They were written by the old capture-at-start logic and must not appear as results yet.
+function migrateUnfinished(now) {
+  const data = SignalLog.data();
+  if (!data.length) return;
+  const keep = [];
+  let moved = 0;
+  for (const e of data) {
+    const dur = INTERVAL_MS[e.interval];
+    if (!dur || e.t0 == null || now >= e.t0 + dur) { keep.push(e); continue; }
+    if (!PendingSig.has(`${e.asset}_${e.interval}_${e.t0}`)) {
+      PendingSig.add({
+        asset: e.asset, interval: e.interval, t0: e.t0, dir: e.dir, mode: e.mode,
+        conf: e.conf, reason: e.reason, gateKey: e.gateKey, highConf: e.highConf,
+        gateWr: e.gateWr, lockedAt: e.lockedAt,
+      });
+    }
+    moved++;
+  }
+  if (moved) {
+    SignalLog.replaceAll(keep);
+    console.log(`[MIGRATE] moved ${moved} unfinished history entries back to pending`);
+  }
+}
+
+// Remove duplicate history entries for the same (asset, interval, t0), keeping one.
+function dedupeLog() {
+  const data = SignalLog.data();
+  const byKey = new Map();
+  for (const e of data) {
+    const k = `${e.asset}_${e.interval}_${e.t0}`;
+    const prev = byKey.get(k);
+    if (!prev) byKey.set(k, e);
+    else if (prev.won === undefined && e.won !== undefined) byKey.set(k, e); // prefer scored
+  }
+  const out = [...byKey.values()].sort((a, b) => a.t0 - b.t0);
+  if (out.length !== data.length) {
+    SignalLog.replaceAll(out);
+    console.log(`[DEDUPE] removed ${data.length - out.length} duplicate history entries`);
+  }
 }
 
 // One-time correction for already-stored entries: re-derive lock/close/actual/won from the
@@ -1967,11 +2055,12 @@ function renderConfidenceReport() {
   
   // Count total across all combos
   const totalAll = allData.length;
+  const pendingCount = PendingSig.size();
   if (head) head.textContent = `DESKTOP SIGNAL ACCURACY · Universal · `;
-  if (countEl) countEl.textContent = `${totalAll} rounds total`;
+  if (countEl) countEl.textContent = `${totalAll} rounds total${pendingCount ? ` · ${pendingCount} waiting to settle` : ""}`;
   
   if (!totalAll) {
-    body.innerHTML = `<div class="cd-empty">no evaluation data yet — let it run a few rounds</div>`;
+    body.innerHTML = `<div class="cd-empty">no completed rounds yet — ${pendingCount ? pendingCount + " signal(s) waiting to settle" : "let it run a few rounds"}</div>`;
     return;
   }
 
@@ -2341,6 +2430,7 @@ function bindControls() {
   const cdbg = document.getElementById("conf-debug-reset");
   if (cdbg) cdbg.addEventListener("click", () => {
     MobilePredLog.clear();
+    PendingSig.clear();
     // Clear in-memory caches in place (they may be const)
     for (const k in _deskSigCache) delete _deskSigCache[k];
     for (const k in _deskSigMap) delete _deskSigMap[k];
@@ -2453,6 +2543,9 @@ function start() {
   bindControls();
   restoreMobilePredSession();
   startData();
+  migrateUnfinished(serverNow());
+  dedupeLog();
+  evaluateUniversalSessions(serverNow());   // finalize rounds that already ended (e.g. after reload)
   renderConfidenceReport();
   loadGate();
   setInterval(loadGate, 10 * 60 * 1000);

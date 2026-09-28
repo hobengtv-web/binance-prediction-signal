@@ -3408,7 +3408,7 @@ function playSequence(notes, opts) {
     lp.Q.value = 0.7;
     master.connect(lp);
     lp.connect(ctx.destination);
-    // Optional echo — gives the sonar/control-room feel (delay + feedback, damped).
+    // Optional echo (delay + feedback, damped) — unused by the cockpit alerts, kept for reuse.
     let echoIn = null;
     if (opts && opts.echo) {
       const e = opts.echo;

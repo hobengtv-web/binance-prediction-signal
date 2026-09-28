@@ -770,7 +770,7 @@ function applyType() {
     
     // Trigger alarm otomatis ketika sinyal entry muncul. Dedupe PER SESI (key) supaya satu
     // sinyal hanya berbunyi sekali walau verdict sempat berubah-ubah dalam sesi yang sama.
-    const alertKey = `${state.asset}_${state.interval}_${sessionStart}`;
+    const alertKey = `${state.asset}_${state.interval}_${o.roundStart || ""}`;
     if (o.verdict !== "flat" && confMode === "SIGNAL" && o.highConf && !_mainSigAlerted.has(alertKey)) {
       _mainSigAlerted.add(alertKey);
       playSoundAlert();
@@ -1312,6 +1312,7 @@ function applyType() {
       calcStatus,
       recStatus,
       recStatusClass,
+      roundStart: sessionStart,     // dipakai updateSignal utk dedupe alarm per sesi
       analyzing,
     });
 

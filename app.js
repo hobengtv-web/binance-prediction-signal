@@ -740,10 +740,11 @@ function applyType() {
         // tidak membingungkan ketika keduanya berlawanan arah.
         if (tpBias) {
           const sd = String(o.verdict || "flat").toUpperCase();
-          const td = String(tp.tradeDir || "—").toUpperCase();
-          tpBias.className = "tp-bias " + (tp.tradeDir || "flat");
-          tpBias.innerHTML = `SINYAL <b>${esc(sd)}</b> · ARAH TRADE <b>${esc(td)}</b> — contra-lock, target LOCK <b>${fmtPrice(tp.levels ? tp.levels.target : null)}</b>`;
-          tpBias.title = "SINYAL = arah prediksi close sesi (continuation). ARAH TRADE = kebalikannya, selalu menuju LOCK (contra-lock): beli saat harga di bawah LOCK, jual saat harga di atas LOCK.";
+          const isUpSig = o.verdict === "up";
+          const lockTxt = fmtPrice(tp.levels ? tp.levels.target : null);
+          tpBias.className = "tp-bias " + (o.verdict || "flat");
+          tpBias.innerHTML = `SINYAL <b>${esc(sd)}</b> · entry <b>contra-lock</b>: tunggu harga <b>${isUpSig ? "DI BAWAH" : "DI ATAS"} LOCK</b> (${isUpSig ? "beli" : "jual"}) · close setelah melewati LOCK`;
+          tpBias.title = `Arah posisi = arah rekomendasi (sumber tunggal: main signal). LOCK ${lockTxt}. ENTRY hanya saat harga CONTRA-LOCK (${isUpSig ? "di bawah" : "di atas"} LOCK), CLOSE saat harga sudah searah rekomendasi & melewati LOCK (${isUpSig ? "di atas" : "di bawah"} LOCK).`;
         }
         tpAction.textContent = tp.action;
         tpAction.className = "tp-action " + (tp.cls || "wait");
@@ -1153,7 +1154,7 @@ function applyType() {
     // TRADE ASSISTANT plan (entry zone / averaging / hold / close) for the active combo.
     // PENTING: seluruh input TA memakai arah TRADE (contra-lock = menuju LOCK), bukan arah
     // sinyal. Sinyal hanya menentukan SISI harga (di bawah/atas LOCK) -> arah trade kebalikannya.
-    const taBiasNow = taBiasOf(uni.verdict);
+    const taBiasNow = tradeDirOf(uni.verdict);   // arah posisi = arah rekomendasi
     const taUp = taBiasNow === "up";
     const pk = _tradePeak[uniKey] || -Infinity;
     const favorNow = taUp ? (C - O) : (O - C);
@@ -1171,7 +1172,7 @@ function applyType() {
     dw.fadeSince = fade.count >= 2 ? (dw.fadeSince || now) : null;
     const dwellTurnMs = dw.turnSince ? now - dw.turnSince : 0;
     const dwellFadeMs = dw.fadeSince ? now - dw.fadeSince : 0;
-    const taBias = taBiasNow;                      // contra-lock (menuju LOCK)
+    const taBias = taBiasNow;                      // = arah rekomendasi (entry contra-lock)
     const trail = taBias ? trailOf(state.asset, Math.floor(sessionStart / 1000), Math.floor(now / 1000), O, taBias === "up") : null;
     tradePlan = taBias ? computeTradePlan(taBias, {
       tf: state.interval, lock: O, price: C, std, slope, slopeRecent, rsi, z,
@@ -2842,14 +2843,18 @@ function analyzeCoin(asset, tf, now) {
   const ofiShort = sessionOFI(asset, nowSec - 120, nowSec);
   const histTrend = analyzeHistoricalTrend(asset, tf, 50);
   const key = `${asset}_${tf}_${t0}`;
-  const sig = _deskSigCache[key] || _deskSigLive[key] || null;
+  // SATU SUMBER KEBENARAN: sama dengan rekomendasi utama (graded EARLY cache, non-flat).
+  // Sebelumnya jalur ini fallback ke _deskSigLive sehingga bisa BEDA dengan rekomendasi utama
+  // (itu penyebab TA terlihat 'bingung'). liveSig hanya dipakai untuk teks status saat flat.
+  const sig = _deskSigCache[key] || null;
+  const liveSig = sig || _deskSigLive[key] || null;
   const isUp = !!(sig && sig.verdict === "up");
   const recentC = win.slice(-12);
   const counterVol = recentC.filter((c) => (isUp ? c.close < c.open : c.close > c.open)).reduce((a, c) => a + (c.vol || 0), 0);
   const totVol = recentC.reduce((a, c) => a + (c.vol || 0), 0);
   const volAgainst = totVol > 0 ? (counterVol / totVol) / 0.5 : null;
   // Arah TRADE (contra-lock) dipakai untuk semua input TA: favor/peak/retreat/turn/fade.
-  const taBiasTmp = sig ? taBiasOf(sig.verdict) : null;
+  const taBiasTmp = sig ? tradeDirOf(sig.verdict) : null;   // arah posisi = arah rekomendasi
   const taUp = taBiasTmp === "up";
   const favor = taUp ? (C - O) : (O - C);
   const peakFavor = Math.max(_tradePeak[key] || -Infinity, favor);
@@ -2969,17 +2974,19 @@ function buildDual() {
     dualCharts[a].fit();
   }
 }
-/* Arah TRADE Trade Assistant = CONTRA-LOCK: selalu menuju LOCK, yaitu KEBALIKAN dari arah
-   sinyal. Sinyal (verdict) = arah pergerakan harga 2 detik vs LOCK (bias continuation):
-     harga di bawah LOCK (sinyal down) -> trade LONG  (beli di dasar, exit di LOCK)
-     harga di atas  LOCK (sinyal up)   -> trade SHORT (jual di puncak, exit di LOCK)
-   Backtest (BTC+ETH, 7d, gate bootstrap, entry puncak kontra +4s, exit LOCK):
-     contra-lock : setup 97% sesi, lock tersentuh 56.4%, capture median 0.077%
-     arah sinyal : setup 78% sesi, lock tersentuh 60.0%, capture median 0.066% (19% sesi tak pernah entry) */
-function taBiasOf(verdict) {
-  if (verdict === "up") return "down";
-  if (verdict === "down") return "up";
-  return null;
+/* Arah POSISI Trade Assistant = ARAH REKOMENDASI (main signal = SATU-SATUNYA sumber kebenaran).
+   Aturan main (goals):
+     ENTRY = CONTRA-LOCK, yaitu menunggu harga berada di sisi BERLAWANAN dari LOCK:
+               rekomendasi UP   -> tunggu harga DI BAWAH LOCK -> BELI  (long)
+               rekomendasi DOWN -> tunggu harga DI ATAS  LOCK -> JUAL  (short)
+     CLOSE = harga sudah SEARAH rekomendasi dan sudah MELEWATI LOCK:
+               rekomendasi UP   -> harga DI ATAS LOCK  -> tutup
+               rekomendasi DOWN -> harga DI BAWAH LOCK -> tutup
+   Di computeTradePlan(): favor>0 berarti harga sudah di sisi menguntungkan posisi
+   (= searah rekomendasi, sudah melewati LOCK) -> cabang WAIT (belum entry) / CLOSE (tutup);
+   favor<0 berarti masih contra-lock -> zona entry. */
+function tradeDirOf(verdict) {
+  return (verdict === "up" || verdict === "down") ? verdict : null;
 }
 
 // Selisih harga dari LOCK dalam dolar, mis. -$4.23 / $0.00 / +$1.05
@@ -3146,7 +3153,7 @@ function renderDual(force) {
     if (rEl) {
       rEl.textContent = graded
         ? `Recommendation: ${dir.toUpperCase()}${sig.grade ? ` · ${sig.grade}${sig.expectedWR != null ? " " + (sig.expectedWR * 100).toFixed(0) + "%" : ""}` : ""}${sig.minuteIn ? ` · min ${sig.minuteIn}` : ""}`
-        : (sig && sig.mode ? `No entry · ${sig.mode}` : "Menunggu…");
+        : (liveSig && liveSig.mode ? `No entry · ${liveSig.mode}` : "Menunggu…");
       rEl.className = "dc-rec " + (graded ? dir : "flat");
     }
     const bEl = g("badge");
@@ -3169,7 +3176,7 @@ function renderDual(force) {
     }
     const lvEl = g("levels");
     if (lvEl) lvEl.innerHTML = (plan && plan.levels)
-      ? `<b class="dc-arahtrade ${plan.tradeDir}">ARAH TRADE ${String(plan.tradeDir || "").toUpperCase()} (contra-lock)</b> · ENTRY L1 <b>${fmtPrice(plan.levels.l1)}</b> (+${plan.levels.r1.toFixed(2)}%) · L2 <b>${fmtPrice(plan.levels.l2)}</b> (+${plan.levels.r2.toFixed(2)}%) · L3 <b>${fmtPrice(plan.levels.l3)}</b> (+${plan.levels.r3.toFixed(2)}%) · TARGET <b>${fmtPrice(plan.levels.target)}</b>`
+      ? `<b class="dc-arahtrade ${plan.tradeDir}">ARAH ${String(plan.tradeDir || "").toUpperCase()} · entry contra-lock</b> · ENTRY L1 <b>${fmtPrice(plan.levels.l1)}</b> (+${plan.levels.r1.toFixed(2)}%) · L2 <b>${fmtPrice(plan.levels.l2)}</b> (+${plan.levels.r2.toFixed(2)}%) · L3 <b>${fmtPrice(plan.levels.l3)}</b> (+${plan.levels.r3.toFixed(2)}%) · TARGET <b>${fmtPrice(plan.levels.target)}</b>`
       : "";
     const grEl = g("grid");
     if (grEl) {
@@ -3189,7 +3196,7 @@ function renderDual(force) {
     const prEl = g("pred");
     if (prEl && m) {
       const delta = m.O > 0 ? (m.C - m.O) / m.O * 100 : 0;
-      prEl.innerHTML = `LOCK <b>${fmtPrice(m.O)}</b> · PREDIKSI <b>${graded ? dir.toUpperCase() : "—"}</b> · CONF <b>${sig && sig.conf != null ? sig.conf : "—"}</b> · MODE <b>${sig ? sig.mode : "—"}</b> · DELTA <b>${delta >= 0 ? "+" : ""}${delta.toFixed(3)}%</b>`;
+      prEl.innerHTML = `LOCK <b>${fmtPrice(m.O)}</b> · PREDIKSI <b>${graded ? dir.toUpperCase() : "—"}</b> · CONF <b>${sig && sig.conf != null ? sig.conf : "—"}</b> · MODE <b>${liveSig ? liveSig.mode : "—"}</b> · DELTA <b>${delta >= 0 ? "+" : ""}${delta.toFixed(3)}%</b>`;
     }
     const ch = dualCharts[a];
     if (ch) {

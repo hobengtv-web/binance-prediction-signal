@@ -3454,28 +3454,31 @@ function playSequence(notes, opts) {
     }
   } catch (e) { console.log("[SOUND] failed:", e.message); }
 }
-// SIGNAL ENTRY — submarine SONAR PING: a pure sine ping with a slight downward glide, a long
-// decaying tail and a delayed echo (as if the return bounces back).
+// SIGNAL ENTRY — aircraft MASTER CAUTION: bright two-tone "bing-bong" (B5 -> F#5) played twice.
+// Triangle wave + no reverb = an energetic cockpit alert, still far softer than a square wave.
 function playSoundAlert() {
   playSequence([
-    { f: 950, f2: 860, t: 0.00, d: 1.10, type: "sine", vol: 0.26, ping: true },
-    { f: 950, f2: 860, t: 0.44, d: 0.70, type: "sine", vol: 0.10, ping: true },  // faint return
-  ], { vol: 0.5, cutoff: 2400, echo: { delay: 0.22, feedback: 0.30, wet: 0.30 } });
-  console.log("[SOUND] sonar ping (signal) played");
+    { f: 988, t: 0.00, d: 0.13, type: "triangle", vol: 0.26 },   // B5
+    { f: 740, t: 0.15, d: 0.20, type: "triangle", vol: 0.26 },   // F#5
+    { f: 988, t: 0.46, d: 0.13, type: "triangle", vol: 0.26 },
+    { f: 740, t: 0.61, d: 0.24, type: "triangle", vol: 0.26 },
+  ], { vol: 0.6, cutoff: 3400 });
+  console.log("[SOUND] master-caution (signal) played");
 }
-// TRADE ASSISTANT entry/average — CONTACT CONFIRMED: a rising sonar sweep then a short ping.
+// TRADE ASSISTANT entry/average — AUTOPILOT DISCONNECT: three sharp identical beeps.
 function playTradeEntrySound() {
   playSequence([
-    { f: 520, f2: 1040, t: 0.00, d: 0.30, type: "sine", vol: 0.24 },
-    { f: 1040, t: 0.34, d: 0.24, type: "sine", vol: 0.18, ping: true },
-  ], { vol: 0.5, cutoff: 2600, echo: { delay: 0.14, feedback: 0.22, wet: 0.22 } });
+    { f: 1046, t: 0.00, d: 0.09, type: "triangle", vol: 0.26 },  // C6
+    { f: 1046, t: 0.18, d: 0.09, type: "triangle", vol: 0.26 },
+    { f: 1046, t: 0.36, d: 0.14, type: "triangle", vol: 0.26 },
+  ], { vol: 0.6, cutoff: 3600 });
 }
-// TRADE ASSISTANT close/cut — SURFACE / ALL CLEAR: a two-step descending sweep.
+// TRADE ASSISTANT close/cut — MASTER WARNING: descending "whoop" (pitch glide), twice.
 function playCloseSound() {
   playSequence([
-    { f: 900, f2: 620, t: 0.00, d: 0.42, type: "sine", vol: 0.24 },
-    { f: 620, f2: 430, t: 0.48, d: 0.60, type: "sine", vol: 0.22 },
-  ], { vol: 0.5, cutoff: 2200, echo: { delay: 0.26, feedback: 0.28, wet: 0.26 } });
+    { f: 1220, f2: 700, t: 0.00, d: 0.26, type: "triangle", vol: 0.26 },
+    { f: 1220, f2: 700, t: 0.34, d: 0.30, type: "triangle", vol: 0.26 },
+  ], { vol: 0.6, cutoff: 3600 });
 }
 
 // Preload audio context on first user interaction
@@ -3675,14 +3678,14 @@ function start() {
   if (audioTestBtn) {
     audioTestBtn.addEventListener("click", () => {
       try {
-        playSoundAlert();                          // 1) sonar ping (signal entry)
-        setTimeout(playTradeEntrySound, 1800);     // 2) rising sweep (contact confirmed)
-        setTimeout(playCloseSound, 3200);          // 3) descending sweep (surface / all clear)
+        playSoundAlert();                          // 1) master caution (signal entry)
+        setTimeout(playTradeEntrySound, 1300);     // 2) autopilot-disconnect triple beep
+        setTimeout(playCloseSound, 2300);          // 3) master warning whoop (close)
         audioTestBtn.textContent = "✓ 3 sounds";
       } catch (e) {
         audioTestBtn.textContent = "❌";
       }
-      setTimeout(() => { audioTestBtn.textContent = "🔊"; }, 4200);
+      setTimeout(() => { audioTestBtn.textContent = "🔊"; }, 3300);
     });
   }
 

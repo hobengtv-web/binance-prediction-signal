@@ -2072,36 +2072,37 @@ function computeTradePlan(bias, ctx) {
     // to enter (no wait for extra depth / confirmation — that is what this workflow needs).
     if (favor >= 0) {
       state = "WAIT"; cls = "wait";
-      action = `TUNGGU — harga masih di sisi ${isUp ? "atas" : "bawah"} lock, tunggu contra ke ${isUp ? "bawah" : "atas"} ${fmtPrice(ctx.lock)}`;
+      action = `TUNGGU — tunggu harga contra ke ${fmtPrice(ctx.lock)}`;
     } else {
       state = "ENTRY"; cls = "entry";
       nowEntered = true;
-      action = `ENTRY ${bias.toUpperCase()} — harga sudah contra lock (${rNowTxt}${isUp ? " di bawah" : " di atas"} lock)`
+      action = `ENTRY SEKARANG ${bias.toUpperCase()} — harga contra lock (${rNowTxt})`
         + (realReversal ? " · AWAS tren historis berbalik" : "");
     }
   } else {
     // ---------------- PHASE 2: position open ----------------
     if (biasAtRisk) {
       state = "STAND_DOWN"; cls = "exit";
-      action = "CUT — sinyal berbalik terkonfirmasi, keluar";
+      action = "CUT SEKARANG — sinyal berbalik terkonfirmasi";
     } else if (favor >= 0) {
       if (ctx.retreat && fade.count >= 1) { state = "CLOSE"; cls = "exit"; action = `CLOSE SEKARANG — harga mundur dari puncak${contTxt}`; }
-      else if (closeReady) { state = "CLOSE"; cls = "exit"; action = `CLOSE — momentum melemah terkonfirmasi (${partList(fade.parts)})${contTxt}`; }
+      else if (closeReady) { state = "CLOSE"; cls = "exit"; action = `CLOSE SEKARANG — momentum melemah (${partList(fade.parts)})${contTxt}`; }
       else if (fs < 45) { state = "CLOSE"; cls = "exit"; action = `CLOSE SEKARANG — momentum searah melemah${contTxt}`; }
       else if (fs < 65 || (fade.count >= 2 && dwellFade >= DWELL_CLOSE_MS / 2)) { state = "CAUTION"; cls = "wait"; action = `SIAP CLOSE — ${fade.count}/4 bukti melemah${contTxt}`; }
       else { state = "HOLD"; cls = "entry"; action = `HOLD — momentum masih searah${contTxt}`; }
     } else if (inZone2 && avgReady) {
       state = "AVERAGE"; cls = "entry";
-      action = `AVERAGE ${bias.toUpperCase()} di ${rNowTxt} — terkonfirmasi (${partList(turn.parts)})`;
+      action = `TAMBAH ENTRY SEKARANG ${bias.toUpperCase()} — harga ${rNowTxt} (average terkonfirmasi)`;
     } else if (inZone2) {
       state = "HOLD_POS"; cls = "wait";
-      action = `TAHAN POSISI — di zona ${rNowTxt}, konfirmasi average ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_AVG_MS / 1000}s`;
+      action = `SIAP TAMBAH ENTRY — konfirmasi ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_AVG_MS / 1000}s`;
     } else {
       state = "HOLD_POS"; cls = "wait";
-      action = `TAHAN POSISI — harga ${rNowTxt} dari lock, tunggu pembalikan`;
+      action = `TUNGGU — harga baru ${rNowTxt} dari lock (zona tambah entry ${RLV[1]}%)`;
     }
   }
-  return { state, action, cls, levels, fs, cp, cont, adverseStd, favor, why, entered: nowEntered, turn, fade, dwellTurnMs: dwellTurn, dwellFadeMs: dwellFade };
+  const CMD = { ENTRY: "ENTRY SEKARANG", AVERAGE: "TAMBAH ENTRY SEKARANG", HOLD: "HOLD", CAUTION: "SIAP CLOSE", CLOSE: "CLOSE SEKARANG", STAND_DOWN: "CUT SEKARANG", WAIT: "TUNGGU", HOLD_POS: "TUNGGU", NO_SIGNAL: "—" };
+  return { state, action, cls, cmd: CMD[state] || state, levels, fs, cp, cont, adverseStd, favor, why, entered: nowEntered, turn, fade, dwellTurnMs: dwellTurn, dwellFadeMs: dwellFade };
 }
 
 /* Signals locked during a running session are held here (persisted) and only written to

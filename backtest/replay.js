@@ -20,9 +20,9 @@ const OUT = path.join(__dirname, "out");
 const SYMBOLS = ["BTC", "ETH"];
 const TFS = ["5m", "15m", "1h"];
 const MS = Core.INTERVAL_MS;
-// Lock the actionable ("CONFIRMED") signal only at/after this fraction of the session.
-// Data shows accuracy rises steeply with time: 5m 68% (min1) -> 89% (60%) -> 94% (80%).
-const LOCK_FRAC = 0.6;
+// Signal is taken at the START of the session (earliest reproducible point = 1st minute).
+// 0 = evaluate from the first minute; the app fires as early as 15s live.
+const LOCK_FRAC = 0;
 
 const load = (sym, tf) => JSON.parse(fs.readFileSync(path.join(DATA, `${sym}_${tf}.json`), "utf8"));
 const lowerBound = (arr, t) => {

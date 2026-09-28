@@ -664,10 +664,6 @@ function applyType() {
       if (o.analyzing) {
         rec.textContent = "Sedang Menganalisa";
         rec.className = "signal-rec flat";
-      } else if (o.preview) {
-        const dirWord = o.previewDir === "up" ? "UP" : "DOWN";
-        rec.textContent = `Preview: ${dirWord}`;
-        rec.className = "signal-rec " + (o.previewDir === "up" ? "up" : "down");
       } else if (o.verdict === "flat") {
         rec.textContent = "No entry for this round";
         rec.className = "signal-rec flat";
@@ -680,13 +676,8 @@ function applyType() {
     // Alert badge next to the recommendation (Masih Sesuai / Awas Melemah / Waspada / Sudah Berbalik)
     const recStatusEl = document.getElementById("rec-status");
     if (recStatusEl) {
-      if (o.preview) {
-        recStatusEl.textContent = o.previewWR != null ? `Menunggu Konfirmasi (${(o.previewWR * 100).toFixed(0)}%)` : "Menunggu Konfirmasi";
-        recStatusEl.className = "rec-status warn";
-      } else {
-        recStatusEl.textContent = o.recStatus || "";
-        recStatusEl.className = "rec-status" + (o.recStatusClass ? " " + o.recStatusClass : "");
-      }
+      recStatusEl.textContent = o.recStatus || "";
+      recStatusEl.className = "rec-status" + (o.recStatusClass ? " " + o.recStatusClass : "");
     }
     
     // Trigger alarm otomatis ketika sinyal entry muncul (flat -> up/down transisi)
@@ -1077,10 +1068,8 @@ function applyType() {
   // the entry that is later scored (no desktop-engine mismatch).
   let gateInfo = null;
   const uniKey = `${state.asset}_${state.interval}_${sessionStart}`;
-  const uni = _deskSigCache[uniKey];              // CONFIRMED lock only
+  const uni = _deskSigCache[uniKey];              // graded EARLY lock (non-flat only)
   const liveSig = uni || _deskSigLive[uniKey] || null;
-  // PREVIEW: a non-flat verdict exists but the session hasn't reached the confirmation point yet.
-  const previewSig = (!uni && liveSig && liveSig.verdict !== "flat") ? liveSig : null;
   if (uni && uni.verdict !== "flat") {
     finalVerdict = uni.verdict;
     mode = uni.mode;
@@ -1140,13 +1129,8 @@ function applyType() {
   const calcStatus = uni
     ? `Signal locked ${elapsedSec - Math.round((now - uni.lockedAt) / 1000)}s after session open · mode ${uni.mode}`
     : `Evaluating session, open +${elapsedSec}s · ${liveSig ? liveSig.mode : "collecting data"}`;
-  // Still analyzing until a signal locks OR a preview exists OR warmup passed with a verdict.
-  const analyzing = !uni && !previewSig && (
-    elapsedSec < 15 ||
-    !liveSig ||
-    liveSig.mode === "MENUNGGU" ||
-    liveSig.mode === "WARMUP"
-  );
+  // Analysing only during the first seconds; after that a flat verdict means "no entry".
+  const analyzing = !uni && elapsedSec < 15;
 
     // Sync: confidence tetap realtime, verdict tetap di filter desktop
     const mob = _mobilePredSession;
@@ -1172,18 +1156,17 @@ function applyType() {
         momentum: histTrend?.momentum, elapsedSec: elapsed / 1000,
       });
     }
-    // Keep the quality tier visible in the reason (it no longer fits in the short recommendation).
+    // Keep the quality grade visible in the reason (it no longer fits in the short recommendation).
+    const grade = uni && uni.grade ? uni.grade : null;
     const ofiTxt = liveSig && liveSig.ofi != null
       ? ` Order flow (OFI) ${(liveSig.ofi * 100).toFixed(0)} percent, ${liveSig.ofiAgree ? "agreeing" : "against"}.`
       : "";
-    if (previewSig) {
-      const wr = previewSig.expectedWR != null ? `~${(previewSig.expectedWR * 100).toFixed(0)}%` : "unknown";
-      currentReason = `PREVIEW (accuracy ${wr}, not yet confirmed — wait for the confirmation window). ` + currentReason + ofiTxt;
-    } else if (finalVerdict !== "flat") {
-      const wr = uni && uni.expectedWR != null ? `${(uni.expectedWR * 100).toFixed(0)}%` : null;
-      currentReason = (gateInfo
-        ? `High confidence, backtested winrate ${(gateInfo.wr * 100).toFixed(0)} percent. `
-        : wr ? `Confirmed, backtested winrate ${wr}. ` : "Watchlist, not filtered for high winrate. ") + currentReason + ofiTxt;
+    if (finalVerdict !== "flat") {
+      const wr = uni && uni.expectedWR != null ? `${(uni.expectedWR * 100).toFixed(0)} percent` : null;
+      const head = grade
+        ? `EARLY ${grade}${wr ? `, measured hit rate ${wr}` : ""}. `
+        : (gateInfo ? `High confidence, backtested winrate ${(gateInfo.wr * 100).toFixed(0)} percent. ` : "Watchlist. ");
+      currentReason = head + currentReason + ofiTxt;
     }
     
     updateSignal({
@@ -1195,9 +1178,6 @@ function applyType() {
       reason: currentReason,
       highConf: !!gateInfo,
       gateWr: gateInfo ? gateInfo.wr : null,
-      preview: !!previewSig,
-      previewWR: previewSig && previewSig.expectedWR != null ? previewSig.expectedWR : null,
-      previewDir: previewSig ? previewSig.verdict : null,
       calcStatus,
       recStatus,
       recStatusClass,
@@ -1886,36 +1866,28 @@ async function loadGate() {
   } catch (e) { GATE_STATUS = "error"; console.warn("[GATE] load failed — all signals will be marked watchlist:", e.message); renderConfidenceReport(); }
 }
 
-/* ===== Two-tier calibration (see backtest/out/tiers.json) =====
-   PREVIEW   = earliest non-flat verdict (shown at the start, lower accuracy)
-   CONFIRMED = verdict at/after LOCK_FRAC of the session (actionable, high accuracy) */
-const LOCK_FRAC = 0.6;
+/* ===== Early-signal calibration (see backtest/out/early_tiers.json) =====
+   The signal is produced at the START of the session. Accuracy is graded from the
+   first-minute price direction + volume pace + executed order flow (OFI):
+      STRONG = OFI strongly agrees and volume pace >= 3x
+      GOOD   = OFI agrees and volume pace >= 3x
+      FAIR   = OFI agrees and volume pace >= 1.5x
+   Anything else = no entry. */
 let TIERS = null;
 let TIER_STATUS = "loading";
 async function loadTiers() {
   try {
-    const res = await fetch("/backtest/out/tiers.json", { cache: "no-store" });
+    const res = await fetch("/backtest/out/early_tiers.json", { cache: "no-store" });
     if (!res.ok) { TIER_STATUS = "missing"; return; }
     TIERS = await res.json();
-    // Optional OFI-conditional table (order-flow agreement lifts CONFIRMED accuracy).
-    try {
-      const r2 = await fetch("/backtest/out/ofi_tiers.json", { cache: "no-store" });
-      if (r2.ok) { const j = await r2.json(); TIERS.ofi = j.ofi || null; }
-    } catch (_) {}
     TIER_STATUS = "ok";
-    console.log(`[TIERS] loaded · lockFrac ${TIERS.lockFrac} · ofi table ${TIERS.ofi ? "yes" : "no"}`);
+    console.log(`[TIERS] early tiers loaded · ${TIERS.windowDays}d window`);
   } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
 }
-function tierWR(tf, mode, tier) {
-  if (!TIERS) return null;
-  const t = tier === "PREVIEW" ? TIERS.preview : TIERS.confirm;
-  const o = t && t[`${tf}|${mode}`];
-  return o ? o.wr : null;
-}
-// OFI-conditional winrate (from backtest/out/ofi_tiers.json, merged into tiers.json).
-function ofiWR(tf, tier, strong) {
-  if (!TIERS || !TIERS.ofi) return null;
-  const o = TIERS.ofi[`${tf}|${tier}${strong ? "|strong" : ""}`];
+const GRADE_VARIANT = { STRONG: "OFI strong+vol>=3", GOOD: "OFI agree+vol>=3", FAIR: "OFI agree+vol>=1.5" };
+function gradeWR(tf, grade) {
+  if (!TIERS || !TIERS.tiers) return null;
+  const o = TIERS.tiers[`${tf}|${GRADE_VARIANT[grade]}`];
   return o ? o.wr : null;
 }
 
@@ -2035,13 +2007,7 @@ function updateProjectionUniversal() {
       const sig = calculateUniversalSignal(sym, tf, t0, now, candles5m);
       if (sig) {
         _deskSigLive[cacheKey] = sig;                 // live status (recomputed each tick)
-        // OFI filter: skip a CONFIRMED signal when executed order flow disagrees with it.
-        if (sig.verdict !== "flat" && sig.tier === "CONFIRMED" && sig.ofiAgree === false) {
-          sig.expectedWR = tierWR(tf, sig.mode, "PREVIEW");   // recompute for the demoted tier
-          sig.tier = "PREVIEW";                               // do not lock/notify against the flow
-          sig.mode = sig.mode + " (OFI contra)";
-        }
-        if (sig.verdict !== "flat" && sig.tier === "CONFIRMED") {
+        if (sig.verdict !== "flat") {                 // graded EARLY signal -> lock immediately
           // Attach gate info at lock time (single place; reused by capture + notifications).
           const gk = gateKey(tf, sig.mode, sig.verdict, sig.rsi, sig.histStrength);
           const g = gateLookup(gk);
@@ -2049,8 +2015,8 @@ function updateProjectionUniversal() {
           sig.highConf = !!g;
           sig.gateWr = g ? g.wr : null;
           sig.lockedAt = now;                         // when the session signal was locked
-          _deskSigCache[cacheKey] = sig;              // lock ONLY the CONFIRMED tier
-          console.log(`[SIGNAL] confirmed ${sym}/${tf} at +${Math.round((now - t0) / 1000)}s (${Math.round(((now - t0) / INTERVAL_MS[tf]) * 100)}% into session):`, sig.mode, sig.verdict, `expected ${sig.expectedWR != null ? (sig.expectedWR * 100).toFixed(1) + "%" : "—"}`);
+          _deskSigCache[cacheKey] = sig;
+          console.log(`[SIGNAL] early ${sym}/${tf} at +${Math.round((now - t0) / 1000)}s:`, sig.grade, sig.mode, sig.verdict, `expected ${sig.expectedWR != null ? (sig.expectedWR * 100).toFixed(1) + "%" : "—"}`);
           notifySignal(sym, tf, sig);                 // background alert (all combos)
         }
       }
@@ -2130,22 +2096,33 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
   let verdict = decision.verdict, mode = decision.mode, conf = decision.conf;
   const histStr = histTrend?.strength || 0;
   // Executed order-flow imbalance (OFI) accumulated live from the trade stream.
-  // Validated (30d): CONFIRMED 5m 78.7% -> 82.9%, 15m 80.1% -> 84.7% when OFI agrees.
   const ofi = sessionOFI(sym, t0Sec, nowSecFloor);
   const ofiAgree = (ofi == null || verdict === "flat") ? null : ((ofi >= 0) === (verdict === "up"));
-  // Tier: PREVIEW before LOCK_FRAC of the session, CONFIRMED at/after it.
-  const elapsedFrac = elapsed / dur;
-  const tier = verdict === "flat" ? null : (elapsedFrac >= LOCK_FRAC ? "CONFIRMED" : "PREVIEW");
   const ofiStrong = ofi != null && Math.abs(ofi) >= 0.2;
-  let expectedWR = tier ? tierWR(tf, mode, tier) : null;
-  if (tier && ofiAgree) {
-    const o = ofiWR(tf, tier, ofiStrong);
-    if (o != null) expectedWR = o;
+  // EARLY grade — the signal is produced at the start of the session. Only these grade
+  // produce an entry; everything else becomes "no entry".
+  //   STRONG = OFI strongly agrees + volume pace >= 3x   (~75% 5m / ~64% 15m)
+  //   GOOD   = OFI agrees + volume pace >= 3x            (~74% / ~64%)
+  //   FAIR   = OFI agrees + volume pace >= 1.5x          (~72% / ~66%)
+  let grade = null;
+  if (verdict !== "flat" && ofiAgree !== false) {
+    if (volRel >= 3) grade = ofiStrong ? "STRONG" : "GOOD";
+    else if (volRel >= 1.5) grade = "FAIR";
   }
-  const reason = SignalCore.buildReason({
-    verdict, mode, rsi, volRel, strength: histStr,
+  if (!grade) {
+    const why = ofiAgree === false ? "OFI contra" : (volRel < 1.5 ? "LOWVOL" : "FILTERED");
+    verdict = "flat";
+    mode = why;
+    conf = 0;
+  }
+  const expectedWR = grade ? gradeWR(tf, grade) : null;
+  let reason = SignalCore.buildReason({
+    verdict: verdict === "flat" && mode === "OFI contra" ? "flat" : verdict,
+    mode: mode === "OFI contra" ? "FILTERED" : mode,
+    rsi, volRel, strength: histStr,
     momentum: histTrend?.momentum, elapsedSec: elapsed / 1000,
   });
+  if (mode === "OFI contra") reason = "No entry. Executed order flow is against this direction.";
   
   return {
     roundStart: t0,
@@ -2157,7 +2134,7 @@ function calculateUniversalSignal(sym, tf, t0, now, candles5m) {
     conf,
     rsi,
     histStrength: histStr,
-    tier,
+    grade,
     expectedWR,
     ofi,
     ofiAgree,
@@ -2921,7 +2898,7 @@ window.__comboStatus = function () {
           risk = `${rr.risk} ${riskLabel(rr.risk)}`;
         }
       }
-      const tierNow = locked ? "CONFIRMED" : (live && live.verdict !== "flat" ? live.tier : "—");
+      const tierNow = locked ? (locked.grade || "LOCKED") : (live && live.verdict !== "flat" ? (live.grade || "—") : "—");
       const ofiNow = sessionOFI(sym, t0 / 1000, Math.floor(now / 1000));
       rows.push({
         combo: `${sym}/${tf}`,

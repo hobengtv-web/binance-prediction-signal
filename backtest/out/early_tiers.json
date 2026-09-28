@@ -1,0 +1,76 @@
+{
+  "generated": "2026-09-28T05:21:52.138Z",
+  "windowDays": 30,
+  "tiers": {
+    "5m|base dir": {
+      "n": 16764,
+      "wr": 0.658,
+      "perDay": 558.9
+    },
+    "5m|vol>=1.5": {
+      "n": 3221,
+      "wr": 0.7029,
+      "perDay": 107.4
+    },
+    "5m|vol>=3": {
+      "n": 896,
+      "wr": 0.7321,
+      "perDay": 29.9
+    },
+    "5m|OFI agree": {
+      "n": 12383,
+      "wr": 0.6738,
+      "perDay": 412.8
+    },
+    "5m|OFI agree+vol>=1.5": {
+      "n": 2431,
+      "wr": 0.7232,
+      "perDay": 81
+    },
+    "5m|OFI agree+vol>=3": {
+      "n": 707,
+      "wr": 0.7426,
+      "perDay": 23.6
+    },
+    "5m|OFI strong+vol>=3": {
+      "n": 626,
+      "wr": 0.7508,
+      "perDay": 20.9
+    },
+    "15m|base dir": {
+      "n": 5596,
+      "wr": 0.5979,
+      "perDay": 186.6
+    },
+    "15m|vol>=1.5": {
+      "n": 1153,
+      "wr": 0.6383,
+      "perDay": 38.4
+    },
+    "15m|vol>=3": {
+      "n": 329,
+      "wr": 0.6474,
+      "perDay": 11
+    },
+    "15m|OFI agree": {
+      "n": 4140,
+      "wr": 0.6068,
+      "perDay": 138
+    },
+    "15m|OFI agree+vol>=1.5": {
+      "n": 849,
+      "wr": 0.6549,
+      "perDay": 28.3
+    },
+    "15m|OFI agree+vol>=3": {
+      "n": 251,
+      "wr": 0.6375,
+      "perDay": 8.4
+    },
+    "15m|OFI strong+vol>=3": {
+      "n": 219,
+      "wr": 0.6438,
+      "perDay": 7.3
+    }
+  }
+}

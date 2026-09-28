@@ -1081,49 +1081,49 @@ function applyType() {
     conf = 0;
   }
   const elapsedSec = Math.round((now - sessionStart) / 1000);
-  // Live validity of the LOCKED signal (display only — the locked direction never changes).
-  // Includes a LEADING early-warning using several reversal precursors.
-  // Shown as a compact badge next to the recommendation ("Masih Sesuai" / "Waspada" / ...).
+  // Signal HEALTH (multi-criteria) shown as a badge next to the recommendation.
   let recStatus = "", recStatusClass = "";
   if (uni) {
+    const isUp = uni.verdict === "up";
     const st = computeLockStatus(uniKey, uni.verdict, O, C, now);
-    if (st && st.state === "AGAINST") {
-      recStatus = `Sudah Berbalik ${Math.round((now - st.since) / 1000)}s`;
-      recStatusClass = "bad";
-    } else {
-      const isUp = uni.verdict === "up";
-      const scale = Math.max(tol, std * 0.5, 1e-9);
-      const margin = isUp ? (C - O) : (O - C);                 // >0 = still on our side
-      const seg = win.slice(-Math.max(3, Math.ceil(winLen / 3)));
-      const regRecent = seg.length >= 3 ? linreg(seg) : null;
-      const slopeRecent = regRecent ? regRecent.b : slope;
-      const riskInfo = reversalRisk(uni.verdict, {
-        nearLock: margin <= scale,
-        momentumAgainst: isUp ? slope < 0 : slope > 0,
-        decel: isUp ? (slopeRecent < 0 && slopeRecent < slope) : (slopeRecent > 0 && slopeRecent > slope),
-        peakAgainst: isUp ? (isTopPeak && peakConf) : (isBotPeak && peakConf),
-        droppedAgainst: isUp ? droppedFromPeak : roseFromPeak,
-        rsi: rsi,
-        z: z,
-        histTrend: histTrend,
-      });
-      if (riskInfo.risk >= 70) { recStatus = `Waspada Berbalik (${riskInfo.risk})`; recStatusClass = "bad"; }
-      else if (riskInfo.risk >= 45) { recStatus = `Awas Melemah (${riskInfo.risk})`; recStatusClass = "warn"; }
-      else { recStatus = "Masih Sesuai"; recStatusClass = "ok"; }
-      // Early-warning alert: notify once per session when risk becomes high (before the flip).
-      if (riskInfo.risk >= 70 && !_warnedKeys.has(uniKey)) {
-        _warnedKeys.add(uniKey);
-        console.warn(`[WASPADA] ${state.asset}/${state.interval} ${uni.verdict.toUpperCase()} berisiko berbalik — ${riskInfo.fired.join(", ")}`);
-        flashTitle(`⚠ WASPADA ${uni.verdict.toUpperCase()} ${state.asset}/${state.interval}`);
-        try {
-          if (typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
-            new Notification(`Waspada berbalik arah · ${state.asset}/${state.interval}`, {
-              body: `Signal ${uni.verdict.toUpperCase()} berisiko berbalik · risk ${riskInfo.risk} · ${riskInfo.fired.join(", ")}`,
-              tag: `warn_${uniKey}`,
-            });
-          }
-        } catch (_) {}
-      }
+    // price position and margin, normalised by volatility
+    const margin = isUp ? (C - O) : (O - C);                       // >0 = still on our side
+    const marginStd = std > 0 ? Math.abs(C - O) / std : null;
+    // momentum + deceleration from the 5s window
+    const seg = win.slice(-Math.max(3, Math.ceil(winLen / 3)));
+    const regRecent = seg.length >= 3 ? linreg(seg) : null;
+    const slopeRecent = regRecent ? regRecent.b : slope;
+    // executed order flow: session cumulative + short (last 2 minutes) window
+    const nowSec2 = Math.floor(now / 1000);
+    const ofiShort = sessionOFI(state.asset, nowSec2 - 120, nowSec2);
+    // share of counter-direction volume in the last ~60s of 5s candles (1.0 = neutral)
+    const recentC = win.slice(-12);
+    const counterVol = recentC.filter((c) => (isUp ? c.close < c.open : c.close > c.open)).reduce((a, c) => a + (c.vol || 0), 0);
+    const totVol = recentC.reduce((a, c) => a + (c.vol || 0), 0);
+    const volAgainst = totVol > 0 ? (counterVol / totVol) / 0.5 : null;
+    const health = computeSignalHealth(uni.verdict, {
+      margin, marginStd, slope, slopeRecent,
+      ofi: uni.ofi, ofiShort, volAgainst,
+      rsi, z,
+      peakAgainst: isUp ? (isTopPeak && peakConf) : (isBotPeak && peakConf),
+      histTrend,
+    });
+    const dwell = (st && st.state === "AGAINST") ? ` ${Math.round((now - st.since) / 1000)}s` : "";
+    recStatus = `${health.label}${health.score ? ` ${health.score}` : ""}${dwell}`;
+    recStatusClass = healthClass(health.label);
+    // High-risk alert: notify once per session when the health score is critical.
+    if (health.score >= 75 && !_warnedKeys.has(uniKey)) {
+      _warnedKeys.add(uniKey);
+      console.warn(`[WASPADA] ${state.asset}/${state.interval} ${uni.verdict.toUpperCase()} — ${health.label} (score ${health.score}): ${health.fired.join(", ")}`);
+      flashTitle(`⚠ ${health.label} ${uni.verdict.toUpperCase()} ${state.asset}/${state.interval}`);
+      try {
+        if (typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
+          new Notification(`${health.label} · ${state.asset}/${state.interval}`, {
+            body: `Signal ${uni.verdict.toUpperCase()} · score ${health.score} · ${health.fired.join(", ")}`,
+            tag: `warn_${uniKey}`,
+          });
+        }
+      } catch (_) {}
     }
   }
   const calcStatus = uni
@@ -1790,36 +1790,48 @@ function computeLockStatus(key, dir, lock, price, now) {
   _lockStatusSince[key] = null;
   return { state: aligned ? "ALIGNED" : "AT_LOCK", since: null };
 }
-function lockStatusText(st, now) {
-  if (!st) return "";
-  if (st.state === "AGAINST") return `SUDAH BERBALIK ${Math.round((now - st.since) / 1000)}s`;
-  if (st.state === "ALIGNED") return "MASIH SESUAI";
-  return "DI HARGA LOCK";
-}
-
-/* Leading (early-warning) reversal risk for a LOCKED signal.
-   Combines several precursors that typically appear BEFORE price crosses the lock.
-   Advisory only — never changes the locked direction or the score. */
-const _warnedKeys = new Set();   // one "waspada" alert per combo per session
-function reversalRisk(dir, ctx) {
-  if (dir !== "up" && dir !== "down") return { risk: 0, fired: [] };
+/* Signal HEALTH score for a LOCKED signal — multi-criteria, deliberately NOT driven by a
+   single "price vs lock" sign (which is noisy / whipsaws). Each dimension is independent:
+   price position+margin, momentum + deceleration, executed order flow (session and short
+   window), counter-direction volume, RSI/z stretch, opposite peak confirmation, higher-tf
+   trend flip, and how long price has been against. Advisory only. */
+const _warnedKeys = new Set();   // one high-risk alert per combo per session
+function computeSignalHealth(dir, ctx) {
+  if (dir !== "up" && dir !== "down") return { score: 0, label: "—", fired: [], confirmedReversal: false };
   const isUp = dir === "up";
-  let risk = 0; const fired = [];
-  const add = (cond, w, label) => { if (cond) { risk += w; fired.push(label); } };
-  if (ctx.nearLock != null) add(ctx.nearLock, 25, "harga mendekati lock");
-  if (ctx.momentumAgainst != null) add(ctx.momentumAgainst, 20, "momentum melawan");
-  if (ctx.decel != null) add(ctx.decel, 15, "momentum melambat");
-  if (ctx.peakAgainst != null) add(ctx.peakAgainst, 25, "peak lawan terkonfirmasi");
-  if (ctx.droppedAgainst != null) add(ctx.droppedAgainst, 10, "menjauh dari peak");
-  if (ctx.rsi != null) add(isUp ? ctx.rsi >= 70 : ctx.rsi <= 30, 15, "RSI ekstrem");
-  if (ctx.z != null) add(isUp ? ctx.z >= 1.6 : ctx.z <= -1.6, 10, "harga terlalu stretch");
-  if (ctx.histTrend) add(ctx.histTrend.predictDir !== "flat" && ctx.histTrend.predictDir !== dir && ctx.histTrend.strength >= 35, 20, "trend historis berbalik");
-  return { risk: Math.min(100, risk), fired };
+  let score = 0; const fired = [];
+  const add = (cond, w, label) => { if (cond) { score += w; fired.push(label); } };
+  const ofiAgainst = ctx.ofi != null && (isUp ? ctx.ofi < -0.05 : ctx.ofi > 0.05);
+  const ofiShortAgainst = ctx.ofiShort != null && (isUp ? ctx.ofiShort < -0.15 : ctx.ofiShort > 0.15);
+  const histAgainst = !!ctx.histTrend && ctx.histTrend.predictDir !== "flat" && ctx.histTrend.predictDir !== dir && ctx.histTrend.strength >= 35;
+
+  add(ctx.margin != null && ctx.margin < 0, 15, "harga di sisi lawan lock");
+  add(ctx.margin != null && ctx.margin >= 0 && ctx.marginStd != null && ctx.marginStd < 0.5, 10, "margin tipis");
+  add(ctx.slope != null && (isUp ? ctx.slope < 0 : ctx.slope > 0), 18, "momentum melawan");
+  add(ctx.slope != null && ctx.slopeRecent != null && (isUp ? (ctx.slopeRecent < 0 && ctx.slopeRecent < ctx.slope) : (ctx.slopeRecent > 0 && ctx.slopeRecent > ctx.slope)), 10, "momentum melambat");
+  add(ofiAgainst, 18, "OFI melawan");
+  add(ofiShortAgainst, 12, "OFI jangka pendek melawan");
+  add(ctx.volAgainst != null && ctx.volAgainst >= 1.5, 10, "volume lawan dominan");
+  add(ctx.rsi != null && (isUp ? ctx.rsi >= 70 : ctx.rsi <= 30), 8, "RSI ekstrem");
+  add(ctx.z != null && (isUp ? ctx.z >= 1.6 : ctx.z <= -1.6), 8, "harga stretch");
+  add(!!ctx.peakAgainst, 15, "peak lawan terkonfirmasi");
+  add(histAgainst, 12, "trend historis berbalik");
+
+  score = Math.min(100, score);
+  // "SUDAH BERBALIK" now requires price against AND independent confirmation — not price alone.
+  const confirmedReversal = ctx.margin != null && ctx.margin < 0 && (ofiAgainst || ofiShortAgainst || !!ctx.peakAgainst || histAgainst);
+  let label;
+  if (confirmedReversal) label = "SUDAH BERBALIK";
+  else if (score >= 75) label = "HAMPIR PASTI BERBALIK";
+  else if (score >= 55) label = "WASPADA BERBALIK ARAH";
+  else if (score >= 30) label = "AWAS MELEMAH";
+  else label = "MASIH SESUAI";
+  return { score, label, fired, confirmedReversal };
 }
-function riskLabel(risk) {
-  if (risk >= 70) return "WASPADA BERBALIK ARAH";
-  if (risk >= 45) return "AWAS MELEMAH";
-  return "MASIH SESUAI";
+function healthClass(label) {
+  if (label === "MASIH SESUAI") return "ok";
+  if (label === "AWAS MELEMAH") return "warn";
+  return "bad";
 }
 
 /* Signals locked during a running session are held here (persisted) and only written to
@@ -2876,27 +2888,29 @@ window.__comboStatus = function () {
       if (locked) {
         const lock = sessionLock(sym, dur, now);
         const price = (state.cache[sym]?.["5s"]?.candles || []).slice(-1)[0]?.close ?? (state.ticker[sym] ? state.ticker[sym].last : null);
-        const st = computeLockStatus(key, locked.verdict, lock, price, now);
-        status = lockStatusText(st, now) || "—";
-        if (!st || st.state !== "AGAINST") {
-          const five = state.cache[sym]?.["5s"]?.candles || [];
-          const w = five.slice(-24);
-          const reg = w.length >= 3 ? linreg(w) : null;
-          const sl = reg ? reg.b : 0;
-          const cl = w.map((c) => c.close);
-          const mu = cl.length ? cl.reduce((a, b) => a + b, 0) / cl.length : price;
-          const sd = cl.length ? Math.sqrt(cl.reduce((a, b) => a + (b - mu) * (b - mu), 0) / cl.length) : 0;
-          const tl = Math.max((lock || 0) * 0.0005, sd * 0.5, 1e-9);
-          const isUp = locked.verdict === "up";
-          const mg = isUp ? (price - lock) : (lock - price);
-          const rr = reversalRisk(locked.verdict, {
-            nearLock: mg <= tl,
-            momentumAgainst: isUp ? sl < 0 : sl > 0,
-            rsi: rsiFromSeries((state.cache[sym]?.["5m"]?.candles || []).slice(-50), 14),
-            histTrend: analyzeHistoricalTrend(sym, tf, 50),
-          });
-          risk = `${rr.risk} ${riskLabel(rr.risk)}`;
-        }
+        const five = state.cache[sym]?.["5s"]?.candles || [];
+        const w = five.slice(-24);
+        const reg = w.length >= 3 ? linreg(w) : null;
+        const sl = reg ? reg.b : 0;
+        const reg2 = w.length >= 3 ? linreg(w.slice(-Math.max(3, Math.ceil(w.length / 3)))) : null;
+        const slRecent = reg2 ? reg2.b : sl;
+        const cl = w.map((c) => c.close);
+        const mu = cl.length ? cl.reduce((a, b) => a + b, 0) / cl.length : price;
+        const sd = cl.length ? Math.sqrt(cl.reduce((a, b) => a + (b - mu) * (b - mu), 0) / cl.length) : 0;
+        const isUp = locked.verdict === "up";
+        const mg = isUp ? (price - lock) : (lock - price);
+        const nowS = Math.floor(now / 1000);
+        const health = computeSignalHealth(locked.verdict, {
+          margin: mg,
+          marginStd: sd > 0 ? Math.abs(price - lock) / sd : null,
+          slope: sl, slopeRecent: slRecent,
+          ofi: sessionOFI(sym, t0 / 1000, nowS),
+          ofiShort: sessionOFI(sym, nowS - 120, nowS),
+          rsi: rsiFromSeries((state.cache[sym]?.["5m"]?.candles || []).slice(-50), 14),
+          histTrend: analyzeHistoricalTrend(sym, tf, 50),
+        });
+        status = health.label;
+        risk = String(health.score);
       }
       const tierNow = locked ? (locked.grade || "LOCKED") : (live && live.verdict !== "flat" ? (live.grade || "—") : "—");
       const ofiNow = sessionOFI(sym, t0 / 1000, Math.floor(now / 1000));

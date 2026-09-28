@@ -1061,6 +1061,7 @@ function applyType() {
     const edge = Math.abs(C - O) / std;
     const edgeScore = clamp(edge / 2, 0, 1) * 35;
     const htfScore = (trendBias === "flat") ? 0 : 20;
+    const remSec = Math.max(0, remaining / 1000);   // sisa detik sesi (dipakai momScore; blok fade punya salinannya sendiri)
     const momScore = clamp(Math.abs(slope) * remSec / std, 0, 1) * 15;
     conf = Math.round(edgeScore + htfScore + momScore);
     

@@ -703,7 +703,10 @@ function applyType() {
         if (tpMeta) {
           const ofiTxt = o.ofi != null ? `OFI ${(o.ofi * 100).toFixed(0)}%` : "OFI —";
           const adv = tp.adverseStd != null ? `${tp.adverseStd >= 0 ? "-" : "+"}${Math.abs(tp.adverseStd).toFixed(2)}σ` : "—";
-          tpMeta.textContent = `Momentum ${tp.fs} · jarak lock ${adv} · ${ofiTxt}${tp.why.length ? " · " + tp.why.join(", ") : ""}`;
+          const pos = tp.entryPrice != null
+            ? ` · posisi @${fmtPrice(tp.entryPrice)} (${o.recPnl != null ? (o.recPnl >= 0 ? "+" : "") + o.recPnl.toFixed(2) + "%" : "—"})`
+            : " · belum ada posisi";
+          tpMeta.textContent = `Momentum ${tp.fs} · jarak lock ${adv} · ${ofiTxt}${pos}${tp.why.length ? " · " + tp.why.join(", ") : ""}`;
         }
       }
     }
@@ -1146,12 +1149,19 @@ function applyType() {
     const peakFavor = Math.max(pk, favorNow);
     _tradePeak[uniKey] = peakFavor;
     const retreat = peakFavor > 0 && (peakFavor - favorNow) >= 0.25 * Math.max(std, 1e-9);
+    const entryRec = _tradeEntered[uniKey];
+    const wasEntered = !!(entryRec && entryRec.entered);
     tradePlan = computeTradePlan(uni.verdict, {
       lock: O, price: C, std, slope, slopeRecent, rsi, z,
-      ofi: uni.ofi, ofiShort, retreat, health,
+      ofi: uni.ofi, ofiShort, retreat, health, entered: wasEntered,
     });
-    tradePlan.levels.fmt = fmtPrice;
-    // Actionable alerts (once per state change) for entry / average / close.
+    if (tradePlan.entered && !wasEntered) {
+      _tradeEntered[uniKey] = { entered: true, since: now, price: C };
+      console.log(`[TRADE] position opened ${state.asset}/${state.interval} @ ${fmtPrice(C)}`);
+    }
+    if (!tradePlan.entered) delete _tradeEntered[uniKey];   // no position yet / stand down
+    tradePlan.entryPrice = _tradeEntered[uniKey] ? _tradeEntered[uniKey].price : null;
+    // Actionable alerts (once per session/state) for entry and averaging.
     if (tradePlan.state === "ENTRY" || tradePlan.state === "AVERAGE") {
       const ak = `${uniKey}|${tradePlan.state}`;
       if (!_tradeAlerted.has(ak)) {
@@ -1229,6 +1239,9 @@ function applyType() {
       gateWr: gateInfo ? gateInfo.wr : null,
       ofi: liveSig ? liveSig.ofi : null,
       tradePlan,
+      recPnl: (tradePlan && tradePlan.entryPrice != null && finalVerdict !== "flat")
+        ? ((finalVerdict === "up" ? (C - tradePlan.entryPrice) : (tradePlan.entryPrice - C)) / tradePlan.entryPrice) * 100
+        : null,
       calcStatus,
       recStatus,
       recStatusClass,
@@ -1886,14 +1899,17 @@ function healthClass(label) {
   return "bad";
 }
 
-/* TRADE ASSISTANT — built for a mean-reversion entry + momentum exit workflow:
-   take the session BIAS, wait for price to retrace against it (entry zone in sigma),
-   flag averaging levels, warn when the trend is really turning (do NOT average),
-   then after price recovers to the lock tell when to HOLD vs when to CLOSE. */
-const _tradePeak = {};   // key -> max favourable excursion (price) after recovery
+/* TRADE ASSISTANT — position-aware, matching a mean-reversion entry + momentum exit:
+   PHASE 1 (no position): WAIT until price goes CONTRA the bias (below lock for UP),
+     then WAIT_TURN until there is evidence it is about to turn back, then ENTRY.
+     It never says HOLD/CLOSE before a position exists.
+   PHASE 2 (in position): manage the position — AVERAGE deeper on a confirmed turn,
+     HOLD while momentum stays with us, CLOSE when momentum fades or price retreats. */
+const _tradePeak = {};     // key -> max favourable excursion after recovery
+const _tradeEntered = {};  // key -> { entered, since, price }
 function computeTradePlan(bias, ctx) {
   if (bias !== "up" && bias !== "down") {
-    return { state: "NO_SIGNAL", action: "Tidak ada sinyal — tunggu bias sesi", cls: "wait", levels: null, fs: 0, adverseStd: null, why: [] };
+    return { state: "NO_SIGNAL", action: "Tidak ada sinyal — tunggu bias sesi", cls: "wait", levels: null, fs: 0, adverseStd: null, why: [], entered: false };
   }
   const isUp = bias === "up";
   const sigma = Math.max(ctx.std || 0, 1e-9);
@@ -1901,16 +1917,21 @@ function computeTradePlan(bias, ctx) {
   const adverseStd = adverse / sigma;
   const favor = -adverse;                                                   // >0 = on the bias side
   const levels = {
-    l1: isUp ? ctx.lock - 0.3 * sigma : ctx.lock + 0.3 * sigma,
-    l2: isUp ? ctx.lock - 0.6 * sigma : ctx.lock + 0.6 * sigma,
-    l3: isUp ? ctx.lock - 1.0 * sigma : ctx.lock + 1.0 * sigma,
+    l1: isUp ? ctx.lock - 0.4 * sigma : ctx.lock + 0.4 * sigma,
+    l2: isUp ? ctx.lock - 0.8 * sigma : ctx.lock + 0.8 * sigma,
+    l3: isUp ? ctx.lock - 1.3 * sigma : ctx.lock + 1.3 * sigma,
     target: ctx.lock,
   };
   const h = ctx.health || {};
   const biasAtRisk = h.label === "HAMPIR PASTI BERBALIK" || h.label === "SUDAH BERBALIK";
   const biasWeakening = h.label === "WASPADA BERBALIK ARAH";
+  // Evidence the move against the bias is about to turn back toward it.
+  const turnToward = isUp
+    ? ((ctx.slope != null && ctx.slope > 0) || (ctx.ofiShort != null && ctx.ofiShort > 0.1))
+    : ((ctx.slope != null && ctx.slope < 0) || (ctx.ofiShort != null && ctx.ofiShort < -0.1));
+  const ofiAgainst = ctx.ofi != null && (isUp ? ctx.ofi < -0.15 : ctx.ofi > 0.15);
 
-  // momentum in favour of the bias (drives HOLD vs CLOSE)
+  // momentum in favour (only used in PHASE 2)
   let fs = 0; const why = [];
   const add = (c, w, l) => { if (c) { fs += w; why.push(l); } };
   add(ctx.slope != null && (isUp ? ctx.slope > 0 : ctx.slope < 0), 25, "momentum searah");
@@ -1922,28 +1943,50 @@ function computeTradePlan(bias, ctx) {
   add(ctx.rsi != null && !(isUp ? ctx.rsi >= 75 : ctx.rsi <= 25), 5, "RSI belum ekstrem");
   fs = Math.min(100, fs);
 
-  let state, action, cls;
-  if (biasAtRisk) {
-    state = "STAND_DOWN"; cls = "exit";
-    action = `BATAL — sinyal ${bias.toUpperCase()} berisiko berbalik arah`;
-  } else if (favor >= 0) {
-    if (ctx.retreat || fs < 45) { state = "CLOSE"; cls = "exit"; action = "CLOSE SEKARANG — momentum searah melemah"; }
-    else if (fs < 65) { state = "CAUTION"; cls = "wait"; action = "SIAP CLOSE — momentum mulai melemah"; }
-    else { state = "HOLD"; cls = "entry"; action = "HOLD — momentum masih searah"; }
-  } else if (adverseStd >= 0.3) {
-    const lvl = adverseStd >= 1.0 ? "L3" : adverseStd >= 0.6 ? "L2" : "L1";
-    if (biasWeakening && adverseStd >= 0.6) {
+  const entered = !!ctx.entered;
+  const ZONE = 0.4;                 // minimum retracement (in sigma) before an entry is allowed
+  let state, action, cls, nowEntered = entered;
+
+  if (!entered) {
+    // ---------------- PHASE 1: no position ----------------
+    if (biasAtRisk) {
+      state = "STAND_DOWN"; cls = "exit";
+      action = `BATAL — bias ${bias.toUpperCase()} berisiko berbalik, jangan entry`;
+    } else if (favor >= 0) {
+      state = "WAIT"; cls = "wait";
+      action = `TUNGGU — harga masih di sisi ${isUp ? "atas" : "bawah"} lock, tunggu contra ke ${isUp ? "bawah" : "atas"} ${fmtPrice(ctx.lock)}`;
+    } else if (adverseStd < ZONE) {
+      state = "WAIT"; cls = "wait";
+      action = `TUNGGU — harga baru mundur ${(-adverseStd).toFixed(2)}σ (minimum ${ZONE}σ)`;
+    } else if (adverseStd >= 1.3 && ofiAgainst && biasWeakening) {
       state = "NO_AVERAGE"; cls = "exit";
-      action = "JANGAN AVERAGE — tren mulai melawan";
+      action = "JANGAN MASUK — tren melawan terlalu kuat";
+    } else if (turnToward) {
+      state = "ENTRY"; cls = "entry";
+      action = `ENTRY ${bias.toUpperCase()} di zona ${(-adverseStd).toFixed(2)}σ — pembalikan terkonfirmasi`;
+      nowEntered = true;
     } else {
-      state = adverseStd >= 0.6 ? "AVERAGE" : "ENTRY"; cls = "entry";
-      action = `${adverseStd >= 0.6 ? "AVERAGE" : "ENTRY"} ${bias.toUpperCase()} ${lvl} (-${adverseStd.toFixed(1)} sigma)`;
+      state = "WAIT_TURN"; cls = "wait";
+      action = `TUNGGU PEMBALIKAN — harga di zona ${(-adverseStd).toFixed(2)}σ, belum ada tanda berbalik`;
     }
   } else {
-    state = "WAIT"; cls = "wait";
-    action = `TUNGGU — bias ${bias.toUpperCase()}, harga belum masuk zona entry (-0.3 sigma)`;
+    // ---------------- PHASE 2: position open ----------------
+    if (biasAtRisk) {
+      state = "STAND_DOWN"; cls = "exit";
+      action = "CUT — sinyal berbalik terkonfirmasi, keluar";
+    } else if (favor >= 0) {
+      if (ctx.retreat || fs < 45) { state = "CLOSE"; cls = "exit"; action = "CLOSE SEKARANG — momentum searah melemah"; }
+      else if (fs < 65) { state = "CAUTION"; cls = "wait"; action = "SIAP CLOSE — momentum mulai melemah"; }
+      else { state = "HOLD"; cls = "entry"; action = "HOLD — momentum masih searah"; }
+    } else if (adverseStd >= 0.8 && turnToward) {
+      state = "AVERAGE"; cls = "entry";
+      action = `AVERAGE ${bias.toUpperCase()} di ${(-adverseStd).toFixed(2)}σ — pembalikan terkonfirmasi`;
+    } else {
+      state = "HOLD_POS"; cls = "wait";
+      action = `TAHAN POSISI — harga di zona ${(-adverseStd).toFixed(2)}σ, tunggu pembalikan`;
+    }
   }
-  return { state, action, cls, levels, fs, adverseStd, favor, why, biasAtRisk, biasWeakening };
+  return { state, action, cls, levels, fs, adverseStd, favor, why, entered: nowEntered };
 }
 
 /* Signals locked during a running session are held here (persisted) and only written to

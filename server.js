@@ -504,8 +504,9 @@ http.createServer(async (req, res) => {
 
   // ---- STATUS LEARNER (dipakai panel UI agar user bisa memantau proses belajar) ----
   if (u.pathname === "/api/learner") {
-    const CANON_MS = 6000, TARGET = 120;
+    const CANON_MS = 6000, TARGET = 300, TARGET_CTX = 120;   // 300 = ambang bisa dipelajari; 120 = model konteks sudah bisa
     let total = 0, withSig = 0, withRes = 0, canon = 0, canonRes = 0, late = 0, sincePromote = 0, rate24h = 0;
+    let recentRes = 0, firstUpd = Infinity;
     const dayAgo = Date.now() - 86400000;
     const promotedTs = modelMeta && modelMeta.promotedAt ? Date.parse(modelMeta.promotedAt) : null;
     let lastUpd = 0;
@@ -519,7 +520,8 @@ http.createServer(async (req, res) => {
       const s = r.sig;
       const off = typeof s.capOffsetMs === "number" ? s.capOffsetMs : null;
       const isCanon = off != null ? off <= CANON_MS : (s.minuteIn == null || s.minuteIn <= 1);
-      if (isCanon) { canon++; if (r.res) { canonRes++; if (r.upd && r.upd > dayAgo) rate24h++; } } else late++;
+      if (r.upd && r.upd < firstUpd) firstUpd = r.upd;
+      if (isCanon) { canon++; if (r.res) { canonRes++; if (r.upd && r.upd > dayAgo) recentRes++; } } else late++;
     }
     const g = readModelPart("gate"), t = readModelPart("touch");
     const single = (rules, prefix) => (rules || []).filter((k) => typeof k === "string" && k.indexOf("&") === -1 && k.indexOf(prefix) === 0);
@@ -532,8 +534,18 @@ http.createServer(async (req, res) => {
     const learned = !!(modelMeta && modelMeta.version && modelMeta.version !== "default");
     res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
     res.end(JSON.stringify({
-      ledger: { total, withSig, withRes, canonical: canon, canonicalWithRes: canonRes, late, target: TARGET, pct: +Math.min(1, canonRes / TARGET).toFixed(3), lastUpd: lastUpd || null, sincePromote, rate24h,
-        etaDays: rate24h > 0 ? +Math.max(0, (TARGET - canonRes) / rate24h).toFixed(1) : null },
+      ledger: (() => {
+        // Laju per 24 jam dihitung terhadap RENTANG OBSERVASI sebenarnya: kalau capture baru
+        // berjalan 40 menit, membagi dengan 24 jam membuat laju tampak 30x lebih kecil.
+        const spanH = Math.max(0.25, (Date.now() - (isFinite(firstUpd) ? firstUpd : Date.now())) / 3600000);
+        rate24h = Math.round(recentRes / Math.min(24, spanH) * 24);
+        return {
+          total, withSig, withRes, canonical: canon, canonicalWithRes: canonRes, late,
+          target: TARGET, targetCtx: TARGET_CTX, pct: +Math.min(1, canonRes / TARGET).toFixed(3),
+          lastUpd: lastUpd || null, sincePromote, rate24h, spanHours: +spanH.toFixed(2),
+          etaDays: rate24h > 0 ? +Math.max(0, (TARGET - canonRes) / rate24h).toFixed(2) : null,
+        };
+      })(),
       // jadwal re-fit berikutnya (jam server) supaya user tahu kapan model bisa berubah
       nextRefitAt: (() => { const d = new Date(); const n = new Date(d); n.setHours(REFIT_HOUR, 0, 0, 0); if (n <= d) n.setDate(n.getDate() + 1); return n.toISOString(); })(),
       model: {

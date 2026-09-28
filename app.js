@@ -2423,7 +2423,8 @@ function renderLearnerStatus() {
   if (LEARNER_ERR || !LEARNER_STATUS) { el.innerHTML = `<div class="cd-empty">status learner belum tersedia${LEARNER_ERR ? " (" + esc(LEARNER_ERR) + ")" : ""}</div>`; return; }
   const S = LEARNER_STATUS, L = S.ledger || {}, M = S.model || {}, g = S.gates || {}, C = S.capture || {};
   const pctv = Math.round((L.pct || 0) * 1000) / 10;
-  const need = Math.max(0, (L.target || 120) - (L.canonicalWithRes || 0));
+  const need = Math.max(0, (L.target || 300) - (L.canonicalWithRes || 0));
+  const ctxReady = (L.canonicalWithRes || 0) >= (L.targetCtx || 120);
   const learned = g.mode === "learned";
   // ---- hasil perbaikan (terukur pada jendela uji) ----
   const gm = g.metrics || null;
@@ -2459,7 +2460,8 @@ function renderLearnerStatus() {
     <div class="lstat-sec">
       <b>1 · PROGRESS DATA BELAJAR</b>
       <div class="lstat-bar"><i style="width:${Math.min(100, pctv)}%"></i></div>
-      <div class="lstat-line"><b>${L.canonicalWithRes || 0}</b> / ${L.target || 120} sinyal kanonik berhasil (${pctv}%)${L.rate24h != null ? ` · laju ${L.rate24h}/24 jam` : ""}${L.etaDays != null && need > 0 ? ` · perkiraan ${L.etaDays} hari lagi` : ""}</div>
+      <div class="lstat-line"><b>${L.canonicalWithRes || 0}</b> / ${L.target || 300} sinyal kanonik berhasil (${pctv}%)${L.rate24h != null ? ` · laju ~${L.rate24h}/24 jam` : ""}${L.etaDays != null && need > 0 ? ` · perkiraan <b>${L.etaDays} hari</b> lagi` : ""}</div>
+      <div class="lstat-line lstat-dim">model <b>konteks</b> sudah bisa dibentuk pada ${L.targetCtx || 120} data ${ctxReady ? "(tercapai ✓)" : ""}; ambang numerik butuh ${L.target || 300} baris berarah.${L.spanHours ? ` Laju dihitung dari ${L.spanHours} jam pengamatan.` : ""}</div>
       <div class="lstat-line">capture otomatis server: ${C.enabled ? '<span class="lstat-badge ok">AKTIF</span>' : '<span class="lstat-badge def">MATI</span>'} · <b>${C.captured || 0}</b> tersimpan · ${C.accepted || 0} lolos gate · ${C.rejected || 0} ditolak (tetap direkam)${C.errors ? ` · <span class="lstat-warn">${C.errors} error</span>` : ""}${C.lastAt ? ` · terakhir ${new Date(C.lastAt).toLocaleTimeString()}` : ""}</div>
       <div class="lstat-grid">
         <span><i>total record</i><b>${L.total || 0}</b></span>

@@ -2199,6 +2199,131 @@ function pctile(arr, p) {
   const idx = Math.min(s.length - 1, Math.max(0, Math.floor((p / 100) * (s.length - 1))));
   return s[idx];
 }
+// Self-contained stats helpers (top-level, so any scope can use them safely).
+function meanOf(a) { return a && a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0; }
+function stdOf(a) { const m = meanOf(a); return a && a.length ? Math.sqrt(a.reduce((s, x) => s + (x - m) * (x - m), 0) / a.length) : 0; }
+function slopeOf(candles) {
+  const n = candles ? candles.length : 0;
+  if (n < 3) return 0;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) { const x = i, y = candles[i].close; sx += x; sy += y; sxx += x * x; sxy += x * y; }
+  const den = n * sxx - sx * sx;
+  return den ? (n * sxy - sx * sy) / den : 0;
+}
+
+/* ===== Wide-screen dual-coin monitor =====
+   Compact per-coin card (recommendation + trade-assistant action + health) computed for
+   BOTH coins so they can be watched side by side. Uses the same engine as the detail view. */
+const MON_WINDOW = { "5m": 24, "15m": 60, "1h": 120 };
+function analyzeCoin(asset, tf, now) {
+  const dur = INTERVAL_MS[tf];
+  const t0 = Math.floor(now / dur) * dur;
+  const t0Sec = Math.floor(t0 / 1000);
+  const five = state.cache[asset]?.["5s"]?.candles || [];
+  if (five.length < 5) return null;
+  const win = five.slice(-(MON_WINDOW[tf] || 120));
+  const C = win[win.length - 1].close;
+  const O = sessionLock(asset, dur, now);
+  if (O == null || C == null) return null;
+  const closes = win.map((c) => c.close);
+  const mean = meanOf(closes);
+  const std = stdOf(closes);
+  const z = std > 0 ? (C - mean) / std : 0;
+  const slope = slopeOf(win);
+  const seg = win.slice(-Math.max(3, Math.ceil(win.length / 3)));
+  const slopeRecent = slopeOf(seg);
+  const nowSec = Math.floor(now / 1000);
+  const rsi = SignalCore.rsiFromSeries((state.cache[asset]?.["5m"]?.candles || []).filter((c) => c.time < nowSec).slice(-50), 14);
+  const ofi = sessionOFI(asset, t0Sec, nowSec);
+  const ofiShort = sessionOFI(asset, nowSec - 120, nowSec);
+  const histTrend = analyzeHistoricalTrend(asset, tf, 50);
+  const key = `${asset}_${tf}_${t0}`;
+  const sig = _deskSigCache[key] || _deskSigLive[key] || null;
+  const isUp = !!(sig && sig.verdict === "up");
+  const recentC = win.slice(-12);
+  const counterVol = recentC.filter((c) => (isUp ? c.close < c.open : c.close > c.open)).reduce((a, c) => a + (c.vol || 0), 0);
+  const totVol = recentC.reduce((a, c) => a + (c.vol || 0), 0);
+  const volAgainst = totVol > 0 ? (counterVol / totVol) / 0.5 : null;
+  const favor = isUp ? (C - O) : (O - C);
+  const peakFavor = Math.max(_tradePeak[key] || -Infinity, favor);
+  _tradePeak[key] = peakFavor;
+  const retreat = peakFavor > 0 && (peakFavor - favor) >= 0.25 * Math.max(std, 1e-9);
+  const health = (sig && sig.verdict !== "flat")
+    ? computeSignalHealth(sig.verdict, {
+        margin: isUp ? (C - O) : (O - C),
+        marginStd: std > 0 ? Math.abs(C - O) / std : null,
+        slope, slopeRecent, ofi, ofiShort, volAgainst, rsi, z, histTrend,
+      })
+    : null;
+  const turn = turnEvidence(isUp, { slope, slopeRecent, ofiShort, win });
+  const fade = fadeEvidence(isUp, { slope, slopeRecent, ofiShort, retreat, rsi });
+  const dw = _tradeDwell[key] || (_tradeDwell[key] = { turnSince: null, fadeSince: null });
+  dw.turnSince = turn.count >= 2 ? (dw.turnSince || now) : null;
+  dw.fadeSince = fade.count >= 2 ? (dw.fadeSince || now) : null;
+  const entered = !!(_tradeEntered[key] && _tradeEntered[key].entered);
+  const plan = (sig && sig.verdict !== "flat")
+    ? computeTradePlan(sig.verdict, {
+        lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
+        entered, turn, fade,
+        dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,
+        dwellFadeMs: dw.fadeSince ? now - dw.fadeSince : 0,
+        histTrend,
+      })
+    : null;
+  return { key, C, O, std, sig, health, plan, ofi };
+}
+
+function switchAsset(asset) {
+  if (state.asset === asset) return;
+  state.asset = asset;
+  _deskSig = null;
+  const btn = document.querySelector(`#asset-seg [data-asset="${asset}"]`);
+  if (btn) segActive("asset-seg", btn);
+  renderActive(); updateProjection(); updateMobilePrediction(); updateGap(); renderConfidenceReport();
+}
+
+let _monLastAt = 0;
+let _monLastHtml = "";
+function renderMonitors(force) {
+  const el = document.getElementById("monitors");
+  if (!el) return;
+  if (!force && typeof window.matchMedia === "function" && !window.matchMedia("(min-width: 1100px)").matches) return;
+  if (!force && Date.now() - _monLastAt < 1000) return;
+  _monLastAt = Date.now();
+  const now = serverNow();
+  const tf = state.interval;
+  const html = ["BTC", "ETH"].map((a) => {
+    const m = analyzeCoin(a, tf, now);
+    const tick = state.ticker[a] || {};
+    const px = m ? m.C : (tick.last || 0);
+    const chg = (tick.chg != null && isFinite(tick.chg)) ? +tick.chg : null;
+    const sig = m && m.sig;
+    const graded = !!(sig && sig.verdict !== "flat");
+    const dir = graded ? sig.verdict : "flat";
+    const dirWord = dir === "up" ? "UP" : dir === "down" ? "DOWN" : "—";
+    const grec = graded
+      ? `Recommendation: ${dirWord}${sig.grade ? ` · ${sig.grade}${sig.expectedWR != null ? " " + (sig.expectedWR * 100).toFixed(0) + "%" : ""}` : ""}${sig.minuteIn ? ` · min ${sig.minuteIn}` : ""}`
+      : (sig && sig.mode ? `No entry · ${sig.mode}` : "Menunggu…");
+    const plan = m && m.plan;
+    const hl = m && m.health ? m.health.label : "—";
+    const hlCls = m && m.health ? healthClass(m.health.label) : "";
+    const liq = sig && sig.liqRatio != null ? (sig.liqRatio * 100).toFixed(0) + "%" : "—";
+    const rw = plan && plan.levels ? plan.levels.rNow.toFixed(2) + "%" : "—";
+    const ofiTxt = sig && sig.ofi != null ? ` · OFI <b>${(sig.ofi * 100).toFixed(0)}%</b>` : "";
+    const l1Txt = plan && plan.levels ? ` · L1 <b>${fmtPrice(plan.levels.l1)}</b>` : "";
+    return `<div class="mon-card${a === state.asset ? " active" : ""}" data-mon="${a}">
+      <div class="mon-head"><span class="mon-coin">${a}</span><span class="mon-price">${fmtPrice(px)}</span>${chg != null ? `<span class="mon-chg ${chg >= 0 ? "up" : "down"}">${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%</span>` : ""}<span class="mon-sig-badge ${hlCls}">${hl}</span></div>
+      <div class="mon-rec ${dir}">${grec}</div>
+      <div class="mon-act ${plan ? plan.cls : "wait"}">${plan ? plan.action : "—"}</div>
+      <div class="mon-meta">reward <b>${rw}</b> · liq <b>${liq}</b>${ofiTxt}${l1Txt}</div>
+    </div>`;
+  }).join("");
+  if (html !== _monLastHtml) {          // avoid re-rendering (and losing the click target) every second
+    _monLastHtml = html;
+    el.innerHTML = html;
+    el.querySelectorAll("[data-mon]").forEach((c) => { c.onclick = () => switchAsset(c.dataset.mon); });
+  }
+}
 
 // Universal signal cache - untuk background calculation semua coin & interval
 let _deskSigCache = {};  // key: `${sym}_${tf}_${roundStart}` -> LOCKED signal (only non-flat entries)
@@ -2343,6 +2468,7 @@ function updateProjectionUniversal() {
       }
     }
   }
+  renderMonitors();   // wide screens: refresh the BTC/ETH monitor cards (throttled, no-op on mobile)
 }
 
 // Calculate signal untuk coin/interval spesifik (dipakai universal)
@@ -3271,9 +3397,9 @@ window.__comboStatus = function () {
         const price = (state.cache[sym]?.["5s"]?.candles || []).slice(-1)[0]?.close ?? (state.ticker[sym] ? state.ticker[sym].last : null);
         const five = state.cache[sym]?.["5s"]?.candles || [];
         const w = five.slice(-24);
-        const reg = w.length >= 3 ? linreg(w) : null;
+        const reg = w.length >= 3 ? slopeOf(w) : null;
         const sl = reg ? reg.b : 0;
-        const reg2 = w.length >= 3 ? linreg(w.slice(-Math.max(3, Math.ceil(w.length / 3)))) : null;
+        const reg2 = w.length >= 3 ? slopeOf(w.slice(-Math.max(3, Math.ceil(w.length / 3)))) : null;
         const slRecent = reg2 ? reg2.b : sl;
         const cl = w.map((c) => c.close);
         const mu = cl.length ? cl.reduce((a, b) => a + b, 0) / cl.length : price;
@@ -3287,7 +3413,7 @@ window.__comboStatus = function () {
           slope: sl, slopeRecent: slRecent,
           ofi: sessionOFI(sym, t0 / 1000, nowS),
           ofiShort: sessionOFI(sym, nowS - 120, nowS),
-          rsi: rsiFromSeries((state.cache[sym]?.["5m"]?.candles || []).slice(-50), 14),
+          rsi: SignalCore.rsiFromSeries((state.cache[sym]?.["5m"]?.candles || []).filter((c) => c.time < Math.floor(now / 1000)).slice(-50), 14),
           histTrend: analyzeHistoricalTrend(sym, tf, 50),
         });
         status = health.label;
@@ -3355,6 +3481,8 @@ function start() {
      }
    }, 3000);
    startOrderbookPoll();  // real-time orderbook (200ms browser fetch)
+  renderMonitors(true);  // wide screens: draw both coin cards immediately
+  window.addEventListener("resize", () => renderMonitors(true));
 
    // Active visitor tracking
   let visitorId = localStorage.getItem("bps_vid") || null;

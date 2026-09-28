@@ -192,6 +192,47 @@ body {
 .vol-val.v-hot { color: #0ecb81; text-shadow: 0 0 8px rgba(14,203,129,.55); }  /* >=4 strong green */
 #s-liq { font-weight: 800; font-size: 14px; letter-spacing: .02em; }
 
+/* ---------- Wide screens: dual-coin monitor ---------- */
+.monitors { display: none; }
+.mon-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; cursor: pointer; transition: border-color .15s, background .15s;
+}
+.mon-card.active { border-color: var(--accent); background: #1a2027; }
+.mon-card .mon-head { display: flex; align-items: baseline; gap: 8px; }
+.mon-card .mon-coin { font-weight: 800; font-size: 16px; letter-spacing: .04em; }
+.mon-card .mon-price { font-weight: 700; font-variant-numeric: tabular-nums; }
+.mon-card .mon-chg { font-size: 12px; font-weight: 700; }
+.mon-card .mon-rec { font-size: 15px; font-weight: 800; margin-top: 6px; letter-spacing: .03em; }
+.mon-card .mon-rec.up { color: var(--up); }
+.mon-card .mon-rec.down { color: var(--down); }
+.mon-card .mon-rec.flat { color: var(--muted); }
+.mon-card .mon-act {
+  margin-top: 6px; padding: 6px 8px; border-radius: 7px; background: var(--panel-2);
+  font-size: 13px; font-weight: 800; letter-spacing: .02em;
+}
+.mon-card .mon-act.entry { color: var(--up); }
+.mon-card .mon-act.exit { color: var(--down); }
+.mon-card .mon-act.wait { color: var(--muted); }
+.mon-card .mon-meta { margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.mon-card .mon-meta b { color: var(--text); }
+.mon-card .mon-sig-badge {
+  display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 6px;
+  font-size: 10px; font-weight: 800; background: var(--panel-2); color: var(--muted);
+}
+.mon-card .mon-sig-badge.ok { background: rgba(14,203,129,.15); color: var(--up); }
+.mon-card .mon-sig-badge.warn { background: rgba(240,185,11,.18); color: #f0b90b; }
+.mon-card .mon-sig-badge.bad { background: rgba(246,70,93,.18); color: var(--down); }
+
+@media (min-width: 1100px) {
+  #asset-seg { display: none; }
+  .monitors {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg);
+  }
+  body { max-width: none; }
+}
+
 /* ---------- Mobile Prediction ---------- */
 .mobile-pred { padding: 10px 12px; background: var(--panel); border-top: 1px solid var(--border); }
 .mobile-pred-title { font-size: 10px; color: var(--muted); letter-spacing: .14em; margin-bottom: 8px; }

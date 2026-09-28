@@ -23,6 +23,7 @@ for(const tf of ['5m','15m']){
   const cut=Math.floor(rows.length*0.7);
   const variants=[
     ['base dir', r=>true],
+    ['vol>=0.5', r=>r.volRel>=0.5],
     ['vol>=0.6', r=>r.volRel>=0.6],
     ['vol>=0.8', r=>r.volRel>=0.8],
     ['vol>=1.0', r=>r.volRel>=1.0],
@@ -31,6 +32,7 @@ for(const tf of ['5m','15m']){
     ['vol>=2', r=>r.volRel>=2],
     ['vol>=3', r=>r.volRel>=3],
     ['OFI agree', r=>r.agree],
+    ['OFI agree+vol>=0.5', r=>r.agree&&r.volRel>=0.5],
     ['OFI agree+vol>=0.6', r=>r.agree&&r.volRel>=0.6],
     ['OFI agree+vol>=0.8', r=>r.agree&&r.volRel>=0.8],
     ['OFI agree+vol>=1.0', r=>r.agree&&r.volRel>=1.0],

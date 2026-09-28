@@ -67,9 +67,9 @@
   function decideSignal(input) {
     const { tf, elapsed, currentDir, volRel } = input;
     const isHighFreq = tf === "5m" || tf === "15m";
-    // Direction gate only (the real entry gate is the grade). 5m was lowered to 0.6x per
-    // request; 15m/1h keep 1.05x.
-    const volOK = tf === "5m" ? volRel >= 0.6 : volRel >= 1.05;
+    // Direction gate only (the real entry gate is the grade + liquidity). 5m was lowered
+    // to 0.5x per request; 15m/1h keep 1.05x.
+    const volOK = tf === "5m" ? volRel >= 0.5 : volRel >= 1.05;
     let verdict = "flat", mode = "CONT", conf = 0;
 
     if (isHighFreq && volOK && currentDir !== "flat") {

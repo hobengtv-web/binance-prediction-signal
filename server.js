@@ -256,6 +256,16 @@ const capture = createCapture({
   log: console.log,
 });
 capture.start();
+
+// ---- ENGINE sinyal server-side: satu sumber kebenaran untuk semua device ----
+const { createEngine } = require("./engine.js");
+const engine = createEngine({
+  getKlines,
+  getModel: (part) => readModelPart(part),
+  getGates: () => readGates(),
+  log: console.log,
+});
+engine.start();
 // Jadwal: setiap jam, tapi hanya menjalankan re-fit sekali per hari pada REFIT_HOUR (default 03:00 WIB/server).
 const REFIT_HOUR = parseInt(process.env.REFIT_HOUR || "3", 10);
 let lastRefitDay = null;
@@ -458,6 +468,42 @@ http.createServer(async (req, res) => {
       res.writeHead(502, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: String(e) }));
     }
+    return;
+  }
+
+  // ---- SSE: sinyal live dari SERVER (dipakai semua device -> konsisten) ----
+  if (u.pathname === "/api/live") {
+    const tfArg = u.searchParams.get("tf");
+    const tf = ["5m", "15m", "1h"].includes(tfArg) ? tfArg : "5m";
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+      "X-Accel-Buffering": "no",
+    });
+    res.write("retry: 3000\n\n");
+    const release = engine.addSubscriber();
+    const send = () => { try { res.write(`data: ${JSON.stringify(engine.snapshot(tf))}\n\n`); } catch (_) {} };
+    send();                                   // snapshot pertama langsung
+    const iv = setInterval(send, 1000);       // lalu tiap detik (harga live + sinyal terkunci)
+    const ka = setInterval(() => { try { res.write(": keep-alive\n\n"); } catch (_) {} }, 20000);
+    const stop = () => { clearInterval(iv); clearInterval(ka); release(); };
+    req.on("close", stop); req.on("error", stop); res.on("close", stop);
+    return;
+  }
+  // Snapshot sinyal sebagai JSON (fallback non-SSE + untuk debugging/monitoring)
+  if (u.pathname === "/api/signal") {
+    const tfArg = u.searchParams.get("tf");
+    const tf = ["5m", "15m", "1h"].includes(tfArg) ? tfArg : "5m";
+    engine.touch();                       // penuhi permintaan: engine refresh data segera
+    res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+    res.end(JSON.stringify(engine.snapshot(tf)));
+    return;
+  }
+  if (u.pathname === "/api/engine") {
+    res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+    res.end(JSON.stringify(engine.status()));
     return;
   }
 

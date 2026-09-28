@@ -1110,7 +1110,9 @@ function applyType() {
   // the entry that is later scored (no desktop-engine mismatch).
   let gateInfo = null;
   const uniKey = `${state.asset}_${state.interval}_${sessionStart}`;
-  const uni = _deskSigCache[uniKey];              // graded EARLY lock (non-flat only)
+  let uni = _deskSigCache[uniKey];                // graded EARLY lock lokal (cadangan)
+  const srvSig = LIVE.signalFor(state.asset, state.interval);   // SUMBER KEBENARAN: sinyal server
+  if (srvSig) uni = Object.assign({}, uni || {}, srvSig, { verdict: srvSig.dir });
   const liveSig = uni || _deskSigLive[uniKey] || null;
   if (uni && uni.verdict !== "flat") {
     finalVerdict = uni.verdict;
@@ -2297,6 +2299,45 @@ async function loadTiers() {
   } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
 }
 
+/* ===== LIVE: sinyal dari SERVER (satu sumber kebenaran untuk semua device) =====
+   Sebelumnya sinyal dihitung di tiap browser -> device bisa beda (data pasar, offset jam,
+   dan sinyal hanya terkunci bila device terbuka saat detik ke-2 sesi). Sekarang server
+   menghitung & mengunci sinyal per sesi (engine.js) dan mengirimnya lewat SSE /api/live.
+   Klien memakai sinyal server bila segar; kalau stream mati/basi, otomatis jatuh ke mesin
+   lokal (fallback) supaya aplikasi tetap jalan. */
+const LIVE = (() => {
+  let es = null, snap = null, at = 0, tfSub = null, err = null, count = 0;
+  function connect(tf) {
+    if (es) { try { es.close(); } catch (_) {} es = null; }
+    snap = null; at = 0; tfSub = tf;
+    try {
+      es = new EventSource(`/api/live?tf=${encodeURIComponent(tf)}`);
+      es.onmessage = (e) => { try { snap = JSON.parse(e.data); at = Date.now(); count++; err = null; } catch (_) {} };
+      es.onerror = () => { err = "stream terputus (EventSource akan reconnect)"; };
+      console.log("[LIVE] subscribe sinyal server tf=" + tf);
+    } catch (e) { err = (e && e.message) || "gagal membuat EventSource"; console.warn("[LIVE]", err); }
+  }
+  const fresh = (ms = 5000) => !!(snap && Date.now() - at < ms);
+  // Sinyal server utk (asset, tf) — hanya bila stream segar dan sesinya cocok.
+  function signalFor(asset, tf) {
+    if (!fresh() || !snap) return null;
+    if (tfSub !== tf) return null;
+    const a = snap.assets && snap.assets[asset];
+    if (!a || !a.signal) return null;
+    const dur = INTERVAL_MS[tf] || 300000;
+    const t0 = Math.floor(serverNow() / dur) * dur / 1000;
+    if (a.signal.t0 !== t0) return null;                 // snapshot beda sesi -> abaikan
+    return Object.assign({}, a.signal, {
+      verdict: a.signal.verdict || (a.signal.accepted ? a.signal.dir : "flat"),
+      source: "server", roundStart: a.signal.t0,
+    });
+  }
+  const priceFor = (asset) => (fresh() && snap && snap.assets && snap.assets[asset]) ? snap.assets[asset].price : null;
+  // Hook uji/debug: suntikkan snapshot seolah-olah baru diterima dari stream.
+  const inject = (s, tf) => { snap = s; at = Date.now(); tfSub = tf || tfSub; count++; err = null; };
+  return { connect, inject, fresh, signalFor, priceFor, get snap() { return snap; }, get at() { return at; }, get tf() { return tfSub; }, get err() { return err; }, get n() { return count; } };
+})();
+
 /* ===== PROFIL GATE (ambang sinyal) — bisa diganti learner TANPA deploy =====
    Ambang yang menentukan apakah sinyal ditampilkan (tier volRel2/surprise, floor likuiditas,
    lateFrac, plus threshold hasil belajar) disajikan server lewat /api/model/gates. Default =
@@ -2860,7 +2901,8 @@ function analyzeCoin(asset, tf, now) {
   // SATU SUMBER KEBENARAN: sama dengan rekomendasi utama (graded EARLY cache, non-flat).
   // Sebelumnya jalur ini fallback ke _deskSigLive sehingga bisa BEDA dengan rekomendasi utama
   // (itu penyebab TA terlihat 'bingung'). liveSig hanya dipakai untuk teks status saat flat.
-  const sig = _deskSigCache[key] || null;
+  const srvSigA = (typeof LIVE !== "undefined") ? LIVE.signalFor(asset, tf) : null;   // sinyal server
+  const sig = srvSigA || _deskSigCache[key] || null;
   const liveSig = sig || _deskSigLive[key] || null;
   const isUp = !!(sig && sig.verdict === "up");
   const recentC = win.slice(-12);
@@ -3350,7 +3392,11 @@ function captureDesktopSignal() {
         if (!alreadyFinal) {
           PendingSig.add(entry);
           // PHASE 2: simpan vektor fitur LENGKAP saat sinyal muncul (dipakai learner).
+          // Dilewati bila sinyal untuk tf ini sudah diproduksi server (engine 5m/15m) supaya
+          // tidak ada record ganda; 1h tetap direkam klien karena server tidak menyajikannya.
+          const srvHas = ["5m", "15m"].includes(tf) && !!(typeof LIVE !== "undefined" && LIVE.fresh() && LIVE.tf === tf);
           try {
+            if (srvHas) throw new Error("skip: sinyal tf ini diproduksi server");
             const L = cached.learn || null;
             LEDGER.addSignal({
               asset: sym, interval: tf, t0: t0Sec,
@@ -4243,6 +4289,7 @@ function bindControls() {
     state.interval = b.dataset.tf;
     // Reset desktop signal lock karena interval berubah
     _deskSig = null;
+    LIVE.connect(state.interval);      // stream sinyal server mengikuti interval aktif
     segActive("tf-seg", b);
     renderActive(); updateProjection(); updateMobilePrediction(); renderConfidenceReport();
   });
@@ -4650,6 +4697,7 @@ function start() {
   rebuildLoggedIndex();                     // build O(1) index after migrations
   evaluateUniversalSessions(serverNow());   // finalize rounds that already ended (e.g. after reload)
   renderConfidenceReport();
+  LIVE.connect(state.interval);      // sinyal dari server (SSE)
   loadGate();
   loadTiers();
   loadLearn();

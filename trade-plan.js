@@ -47,7 +47,12 @@ function computeSignalHealth(dir, ctx) {
 
   score = Math.min(100, score);
   // "SUDAH BERBALIK" now requires price against AND independent confirmation — not price alone.
-  const confirmedReversal = ctx.margin != null && ctx.margin < 0 && (ofiAgainst || ofiShortAgainst || !!ctx.peakAgainst || histAgainst);
+  // PERBAIKAN (permintaan user): konfirmasi berbasis ARUS harus BERTAHAN (dwell >= 10 detik),
+  // supaya lonjakan OFI sesaat tidak langsung dinyatakan "SUDAH BERBALIK" dan memicu CUT.
+  // Konfirmasi struktural (peak lawan terkonfirmasi / tren historis berbalik) tidak butuh dwell.
+  const flowPersist = ctx.ofiAgainstMs == null ? true : ctx.ofiAgainstMs >= 10000;
+  const confirmedReversal = ctx.margin != null && ctx.margin < 0 &&
+    (((ofiAgainst || ofiShortAgainst) && flowPersist) || !!ctx.peakAgainst || histAgainst);
   let label;
   if (confirmedReversal) label = "SUDAH BERBALIK";
   else if (score >= 75) label = "HAMPIR PASTI BERBALIK";
@@ -139,7 +144,23 @@ function computeTradePlan(bias, ctx) {
   levels.r1 = RLV[0]; levels.r2 = RLV[1]; levels.r3 = RLV[2];
   const inZone2 = levels.rNow >= RLV[1];
   const h = ctx.health || {};
-  const biasAtRisk = h.label === "HAMPIR PASTI BERBALIK" || h.label === "SUDAH BERBALIK";
+  const hRisk = h.label === "HAMPIR PASTI BERBALIK" || h.label === "SUDAH BERBALIK";
+  // ===== KEDALAMAN POSISI (dasar keputusan CUT) =====
+  // Diukur dari HARGA ENTRY (P&L posisi), bukan dari LOCK. Untuk sinyal UP, entry memang di
+  // BAWAH lock (zona contra) -> "harga di sisi lawan lock" BUKAN risiko selama harga masih di
+  // dalam zona entry. CUT hanya bila posisi sudah benar-benar dalam (>= 0.5 sigma dari entry)
+  // ATAU rugi sudah >= 1.5 sigma dari harga entry.
+  const entPx = ctx.entryPrice != null ? ctx.entryPrice : null;
+  const adverseFromEntry = entPx != null ? (isUp ? (entPx - ctx.price) : (ctx.price - entPx)) : null;
+  const cutAdverseStd = (adverseFromEntry != null && sigma > 0) ? adverseFromEntry / sigma : null;
+  const l3px = levels.l3;
+  const beyondZone = isUp ? (ctx.price < l3px) : (ctx.price > l3px);
+  const deepEnough = beyondZone || (cutAdverseStd != null && cutAdverseStd >= 1.5);
+  const biasAtRisk = hRisk && deepEnough;
+  const pnlPct = entPx != null ? (((isUp ? (ctx.price - entPx) : (entPx - ctx.price)) / entPx) * 100) : null;
+  const pnlTxt = pnlPct != null ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(3)}%` : "";
+  const hWhy = (h.fired && h.fired.length) ? h.fired.join(", ") : "arus melawan";
+  const histFlippedNow = !!ctx.histTrend && ctx.histTrend.predictDir !== "flat" && ctx.histTrend.predictDir !== bias && ctx.histTrend.strength >= 35;
   // NOTE: "price is contra the lock" is the ENTRY OPPORTUNITY in this workflow, not a risk —
   // so the health label (built for managing an open position) must NOT veto PHASE 1.
   // The only genuine reason to hold back is a real reversal: higher-tf trend flipped against
@@ -207,7 +228,13 @@ function computeTradePlan(bias, ctx) {
     // ---------------- PHASE 2: position open ----------------
     if (biasAtRisk) {
       state = "STAND_DOWN"; cls = "exit";
-      action = "CUT SEKARANG — sinyal berbalik terkonfirmasi";
+      // Sebut alasan NYATA (bukan klaim "sinyal berbalik" bila tren historis tidak berbalik).
+      action = `CUT SEKARANG — posisi ${pnlTxt}${cutAdverseStd != null ? ` (${cutAdverseStd.toFixed(1)}σ)` : ""}`
+        + `; ${histFlippedNow ? "tren historis berbalik" : hWhy}`;
+    } else if (hRisk) {
+      // Label risiko tinggi TAPI posisi masih di dalam zona entry -> jangan cut, jelaskan.
+      state = "HOLD_POS"; cls = "wait";
+      action = `TAHAN — masih di zona entry (posisi ${pnlTxt}); risiko: ${hWhy}. Tunggu balik ke lock ${fmtPrice(ctx.lock)}`;
     } else if (favor >= 0) {
       // Behaviour: sell when price reaches/exceeds the lock. Only hold when momentum is clearly
       // strong and there is measurable extra room.
@@ -292,21 +319,26 @@ function buildPlan(input) {
   state.peak[key] = peakFavor;
   const retreat = peakFavor > 0 && (peakFavor - favor) >= 0.25 * Math.max(std, 1e-9);
 
+  const turn = turnEvidence(taUp, { slope, slopeRecent, ofiShort, win });
+  const fade = fadeEvidence(taUp, { slope, slopeRecent, ofiShort, retreat, rsi });
+  const dw = state.dwell[key] || (state.dwell[key] = { turnSince: null, fadeSince: null, ofiSince: null });
+  dw.turnSince = turn.count >= 2 ? (dw.turnSince || now) : null;
+  dw.fadeSince = fade.count >= 2 ? (dw.fadeSince || now) : null;
+  // berapa lama arus (OFI sesi) sudah melawan arah bias -> dipakai untuk konfirmasi reversal
+  const ofiAgainstNow = ofi != null && (isUp ? ofi < -0.05 : ofi > 0.05);
+  dw.ofiSince = ofiAgainstNow ? (dw.ofiSince || now) : null;
   const health = computeSignalHealth(bias, {
     margin: isUp ? (C - O) : (O - C),
     marginStd: std > 0 ? Math.abs(C - O) / std : null,
     slope, slopeRecent, ofi, ofiShort, volAgainst, rsi, z, histTrend,
+    ofiAgainstMs: dw.ofiSince ? now - dw.ofiSince : 0,   // persistensi arus melawan
   });
-  const turn = turnEvidence(taUp, { slope, slopeRecent, ofiShort, win });
-  const fade = fadeEvidence(taUp, { slope, slopeRecent, ofiShort, retreat, rsi });
-  const dw = state.dwell[key] || (state.dwell[key] = { turnSince: null, fadeSince: null });
-  dw.turnSince = turn.count >= 2 ? (dw.turnSince || now) : null;
-  dw.fadeSince = fade.count >= 2 ? (dw.fadeSince || now) : null;
   const entered = !!(state.entered[key] && state.entered[key].entered);
   const trail = trailOfCloses(input.sessionCloses || [], O, taUp);
   const plan = computeTradePlan(bias, {
     tf: input.tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
     entered, turn, fade, trail,
+    entryPrice: state.entered[key] ? state.entered[key].price : null,   // harga entry posisi (untuk kedalaman CUT)
     dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,
     dwellFadeMs: dw.fadeSince ? now - dw.fadeSince : 0,
     histTrend, tiers: input.tiers || null,

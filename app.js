@@ -4514,8 +4514,11 @@ function renderConfidenceReport() {
     const tail = data.slice(-PER_COIN).reverse();
     totalShown += data.length;
     const statCls = wr == null ? "" : (wr >= 50 ? "cd-win" : "cd-lose");
+    const sfPct = withPos.length ? Math.round(sOk / withPos.length * 100) : null;   // % sukses entry+close
+    const sfCls = sfPct == null ? "" : (sfPct >= 50 ? "cd-win" : "cd-lose");
     const sfTxt = withPos.length
-      ? `<span class="sa-sf"><span class="sa-s">S:${sOk}</span> <span class="sa-f">F:${fBad}</span></span>`
+      ? `<span class="sa-sf"><span class="sa-s">S:${sOk}</span> <span class="sa-f">F:${fBad}</span>`
+        + ` <span class="sa-sfpct ${sfCls}">(${sfPct}%)</span></span>`
       : `<span class="sa-sf sa-na">S:— F:—</span>`;
     html += `<div class="sa-coin">
       <div class="sa-coin-head"><b>${sym}</b> · ${tf}
@@ -4525,11 +4528,12 @@ function renderConfidenceReport() {
         </span>
       </div>
       ${tail.length
-        ? `<div class="sa-sessions">${tail.map(stack).join("")}</div>`
+        ? `<div class="sa-axis"><span>◀ Terbaru</span><span>Lama ▶</span></div>`
+          + `<div class="sa-sessions">${tail.map(stack).join("")}</div>`
         : `<div class="cd-empty">belum ada sesi</div>`}
     </div>`;
   }
-  html += `</div><div class="sa-legend">tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> entry · baris 3 <b>C</b> early close (hijau sukses · merah gagal · abu = tidak ada entry/posisi atau tidak tercatat pada data lama)</div>`;
+  html += `</div><div class="sa-legend">tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal (dengan % sukses) · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> entry · baris 3 <b>C</b> early close (hijau sukses · merah gagal · abu = tidak ada entry/posisi atau tidak tercatat pada data lama)</div>`;
 
   if (head) head.textContent = "DESKTOP SIGNAL ACCURACY · per sesi (signal · entry · early close) · ";
   if (countEl) countEl.textContent = `${totalShown} sesi ${tf} · sumber ${srcLabel}`

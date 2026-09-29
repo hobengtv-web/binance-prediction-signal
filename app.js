@@ -1015,8 +1015,6 @@ function applyType() {
 
     // Lock (open) line + session dividers
     chart.setDecision(O);
-    // garis bantu: level Trade Assistant + support/resistance (dari server)
-    chart.setGuides(buildGuides(tradePlan, (typeof LIVE !== "undefined" && LIVE.entryFor) ? (LIVE.entryFor(state.asset, state.interval) || {}).disp : null, O));
     chart.setSessionDuration(dur);
     const liveStatus = C > O ? "up" : C < O ? "down" : "flat";
 
@@ -1138,6 +1136,10 @@ function applyType() {
         }
       }
     }
+
+    // Garis bantu chart: level Trade Assistant + support/resistance (dari server).
+    // Dipanggil SETELAH tradePlan terisi supaya tidak kena TDZ (variabel dideklarasikan di atas).
+    chart.setGuides(buildGuides(tradePlan, (typeof LIVE !== "undefined" && LIVE.entryFor) ? (LIVE.entryFor(state.asset, state.interval) || {}).disp : null, O));
 
     updateSignal({
       zone, momentum, rsi, verdict: finalVerdict, mode, trendBias, aligned, conf,

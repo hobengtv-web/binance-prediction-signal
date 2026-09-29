@@ -249,6 +249,8 @@ let _fastOfi = { at: 0, assets: {} };
    v dalam -1..+1. Hijau ke kanan = tekanan beli, merah ke kiri = tekanan jual.
    Skala ±25% = penuh; pita tengah = netral ±5%; di luar skala diberi penanda saturasi (▶/◀). */
 const OFI_BAR_FULL = 0.25;
+const _ofiSmooth = {};     // key(id elemen) -> nilai EMA bar OFI (halus, tahan render ulang)
+const _ofiPainted = {};    // key(id elemen) -> sudah pernah digambar (agar paint pertama tanpa animasi)
 function paintOfi(v, fillEl, satEl, valEl) {
   if (valEl) {
     valEl.textContent = v != null ? (v >= 0 ? "+" : "") + (v * 100).toFixed(0) + "%" : "—";
@@ -259,10 +261,16 @@ function paintOfi(v, fillEl, satEl, valEl) {
   if (!fillEl) return;
   // ANTI-GLITCH: bar memakai EMA (0.35) supaya tidak bergetar saat update ~300 ms dan tidak
   // "melompat" kiri-kanan ketika nilai menyentuh 0 (magnitudo menyusut melewati nol dulu).
+  // State EMA disimpan per-KEY (id elemen), bukan di properti elemen, supaya tetap halus walau
+  // elemennya sempat dibuat ulang oleh render.
+  const key = fillEl.id || "ofi";
   const target = v == null ? 0 : v;
-  const prev = (typeof fillEl._ofiS === "number") ? fillEl._ofiS : target;
-  fillEl._ofiS = prev + (target - prev) * 0.35;
-  const vv = fillEl._ofiS;
+  const prev = (typeof _ofiSmooth[key] === "number") ? _ofiSmooth[key] : target;
+  _ofiSmooth[key] = prev + (target - prev) * 0.35;
+  const vv = _ofiSmooth[key];
+  // paint pertama untuk elemen ini: jangan animasikan dari 0 (mencegah efek "tumbuh" yang
+  // terbaca sebagai glitch saat kartu dirender ulang).
+  if (!_ofiPainted[key]) { fillEl.style.transition = "none"; _ofiPainted[key] = 1; setTimeout(() => { try { fillEl.style.transition = ""; } catch (_) {} }, 60); }
   const mag = Math.min(1, Math.abs(vv) / OFI_BAR_FULL) * 50;      // persen lebar track
   fillEl.style.left = (vv >= 0 ? 50 : 50 - mag) + "%";
   fillEl.style.width = mag + "%";
@@ -3108,12 +3116,24 @@ function renderDual(force) {
         const mom = m.slope > 0 ? "BULLISH" : m.slope < 0 ? "BEARISH" : "FLAT";
         const momCls = m.slope > 0 ? "up" : m.slope < 0 ? "down" : "";
         const delta = m.O > 0 ? (m.C - m.O) / m.O * 100 : 0;
-        const ofiChip = `<span class="dc-m" title="Order flow (eksekusi taker) sesi berjalan: positif = tekanan BELI, negatif = tekanan JUAL. Bar menyimpang dari garis tengah (skala ±25% = penuh)."><i>OFI</i>`
-          + `<i class="ofi-track"><b class="ofi-band"></b><b class="ofi-fill" id="dc-${a}-ofi-fill"></b><b class="ofi-mid"></b><b class="ofi-sat" id="dc-${a}-ofi-sat"></b></i>`
-          + `<b class="ofi-val ${ofiVal == null ? "na" : (ofiVal >= 0 ? "up" : "down")}" id="dc-${a}-ofi">${ofi}</b></span>`;
-        grEl.innerHTML = ofiChip +
+        // PENTING: elemen chip OFI DIPERTAHANKAN antar render. Sebelumnya innerHTML dibangun
+        // ulang tiap ~2 detik sehingga animasi bar & state EMA reset (bar "tumbuh dari nol" /
+        // berkedip) — itulah "glitch" yang terlihat di desktop.
+        const prevFill = document.getElementById(`dc-${a}-ofi-fill`);
+        const prevChip = prevFill && prevFill.closest ? prevFill.closest(".dc-m") : null;
+        let ofiChipEl = prevChip;
+        if (!ofiChipEl) {
+          const tmp = document.createElement("span");
+          tmp.innerHTML = `<span class="dc-m" title="Order flow (eksekusi taker) sesi berjalan: positif = tekanan BELI, negatif = tekanan JUAL. Bar menyimpang dari garis tengah (skala ±25% = penuh)."><i>OFI</i>`
+            + `<i class="ofi-track"><b class="ofi-band"></b><b class="ofi-fill" id="dc-${a}-ofi-fill"></b><b class="ofi-mid"></b><b class="ofi-sat" id="dc-${a}-ofi-sat"></b></i>`
+            + `<b class="ofi-val na" id="dc-${a}-ofi">—</b></span>`;
+          ofiChipEl = tmp.firstChild;
+        }
+        grEl.innerHTML =
           chip("MOMENTUM", mom, momCls) + chip("MODE", liveMode || "—") +
           chip("DELTA", `${delta >= 0 ? "+" : ""}${delta.toFixed(3)}%`);
+        grEl.insertBefore(ofiChipEl, grEl.firstChild);          // OFI tetap di posisi pertama
+        paintOfi(ofiVal, document.getElementById(`dc-${a}-ofi-fill`), document.getElementById(`dc-${a}-ofi-sat`), document.getElementById(`dc-${a}-ofi`));
       }
     }
     // Detail (di balik "Lihat semua metrik") — pendukung, bukan informasi utama.

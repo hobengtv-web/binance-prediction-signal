@@ -158,6 +158,12 @@ function mergeRecord(r) {
     }
   } else if (prev.sig) merged.sig = prev.sig;
   if (prev.res && !r.res) merged.res = prev.res;
+  // JANGAN BUANG status Trade Assistant. Klien juga mengirim `res` (hasil dari jalur 1s yang
+  // lebih presisi) TANPA field `trade`, sehingga saat res klien menimpa res server, catatan
+  // entry/early close hilang -> baris E/C di panel riwayat jadi abu walau posisinya nyata.
+  if (r.res && prev.res && prev.res.trade && !r.res.trade) {
+    merged.res = Object.assign({}, r.res, { trade: prev.res.trade });
+  }
   merged.upd = Date.now();
   ledger.set(r.k, merged);
   appendLedger(merged);

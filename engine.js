@@ -18,6 +18,8 @@ const { computeSignal, DUR_S } = require("./capture.js");
 const GATES_DEF = require("./gates.js");
 const FLOW = require("./flow.js");        // OFI live (order flow per menit)
 const TRADE = require("./trade-plan.js");  // TRADE ASSISTANT: modul bersama (server + browser)
+const CONF = require("./confidence.js");  // MODEL CONFIDENCE: modul bersama (server + browser)
+const MP = require("./mobile-pred.js");   // MOBILE PREDICTION: modul bersama (server + browser)
 const fs = require("fs");
 const path = require("path");
 // Tabel backtest (kontinuasi/ladder exit). Tidak wajib: bila tidak ada, teks plan kehilangan
@@ -36,7 +38,9 @@ try {
 } catch (_) { TIERS = null; }
 const SignalCore = require("./signal-core.js");
 
-const TFS = ["5m", "15m"];   // 1h tidak disajikan server (di 2 detik sinyalnya flat by design)
+// Semua interval yang dipakai UI diproses server (termasuk 1h) supaya klien tidak perlu
+// menghitung sinyal sendiri di interval mana pun.
+const TFS = ["5m", "15m", "1h"];
 
 function createEngine(deps) {
   const { getKlines, getModel, getGates, log = console.log } = deps;
@@ -87,6 +91,50 @@ function createEngine(deps) {
      Bias = arah sinyal yang DITAMPILKAN (accepted). Data yang dibutuhkan semuanya sudah ada
      di server: window 5s (dari polling 1s), std/slope/z (statsOfWindow), OFI (flow.js),
      RSI + histTrend (SignalCore), deret close sesi (trail). */
+  /* MODEL CONFIDENCE dihitung di SERVER (modul bersama confidence.js).
+     Butuh: window 5s, deret 5s (baseline volume), candle tf (tren 3 sesi), std/slope/rsi/z,
+     sisa waktu sesi. Semua sudah tersedia dari polling -> tidak ada lagi hitung di klien. */
+  function computeConf(sym, tf, t0, nowSec, sig, m) {
+    const durMs = (DUR_S[tf] || 300) * 1000;
+    const win = (m.five5s || []).slice(-(TRADE.MON_WINDOW[tf] || 24));
+    if (win.length < 5) return null;
+    const ones = m.ones || [];
+    const price = ones.length ? ones[ones.length - 1].close : null;
+    // LOCK = harga OPEN sesi (sama dengan yang digambar chart & dipakai plan), TIDAK diambil
+    // dari objek sinyal: sinyal bisa ditolak/flat, tetapi model confidence tetap dihitung
+    // untuk semua sesi (klien pun menghitungnya walau verdict flat).
+    const sessC = (m.tf[tf] || []).find((c) => c.time === t0);
+    const lock = sessC ? sessC.open : ((sig && sig.lock != null) ? sig.lock : null);
+    if (price == null || lock == null) return null;
+    const stat = TRADE.statsOfWindow(win);
+    let rsi = null;
+    try { rsi = SignalCore.rsiFromSeries((m.tf["5m"] || []).filter((c) => c.time < nowSec).slice(-50), 14); } catch (_) {}
+    const remainingMs = Math.max(0, (t0 + (DUR_S[tf] || 300)) * 1000 - Date.now());
+    return CONF.confidenceFor({
+      sym, tf, C: price, O: lock,
+      std: stat.std, slope: stat.slope, rsi, z: stat.z,
+      remainingMs, win, five: m.five5s || [], tfCandles: m.tf[tf] || [],
+      swingLookback: Math.max(4, Math.min(Math.round((TRADE.MON_WINDOW[tf] || 24) * 0.3), Math.floor(win.length / 3))),
+      volTypical: CONF.VOL_TYPICAL[sym],
+    });
+  }
+
+  /* MOBILE PREDICTION di server (modul bersama mobile-pred.js): arah sesi + keyakinan.
+     Butuh candle 5m (pola sesi sebelumnya) + candle 1s (arah candle pertama sesi ini). */
+  function computeMobilePred(sym, tf, t0, m) {
+    const ones = m.ones || [];
+    const price = ones.length ? ones[ones.length - 1].close : null;
+    const sessC = (m.tf[tf] || []).find((c) => c.time === t0);
+    const lockPrice = sessC ? sessC.open : (price != null ? price : null);
+    if (price == null || lockPrice == null) return null;
+    try {
+      return MP.predictSessionStart({
+        tf, durMs: (DUR_S[tf] || 300) * 1000, now: Date.now(),
+        price, lockPrice, candles5m: m.tf["5m"] || [], ones,
+      });
+    } catch (_) { return null; }
+  }
+
   function computePlan(sym, tf, t0, nowSec, sig, m) {
     const bias = (sig && sig.accepted && (sig.dir === "up" || sig.dir === "down")) ? sig.dir : null;
     const key = `${sym}_${tf}_${t0}`;
@@ -140,14 +188,32 @@ function createEngine(deps) {
             sym, tf, t0, tfc, idx, ones, five5m: market[sym].five5m,
             profile, getModel, SignalCore, nowSec,
           });
-          const plan = computePlan(sym, tf, t0, nowSec, r.skipped ? null : r.signal, market[sym]);
-          session[sym][tf] = { t0, signal: r.skipped ? null : r.signal, skipped: r.skipped || null, at: Date.now(), plan };
+          const sigForPlan = r.skipped ? null : r.signal;
+          const plan = computePlan(sym, tf, t0, nowSec, sigForPlan, market[sym]);
+          const conf = computeConf(sym, tf, t0, nowSec, sigForPlan, market[sym]);
+          session[sym][tf] = { t0, signal: sigForPlan, skipped: r.skipped || null, at: Date.now(), plan, conf };
           if (!r.skipped) {
             stats.locked++;
             log(`[ENGINE] ${sym} ${tf} terkunci: dir=${r.signal.dir} grade=${r.signal.grade || "-"} accepted=${r.signal.accepted} volRel2=${r.signal.volRel2} surprise=${String(r.signal.surprise).slice(0, 6)}`);
           } else {
             log(`[ENGINE] ${sym} ${tf} tanpa sinyal: ${r.skipped}`);
           }
+        }
+        // ===== UPDATE LIVE setiap tick =====
+        // Sinyal memang DIKUNCI sekali per sesi, TAPI Trade Assistant dan model confidence
+        // adalah metrik hidup: dwell turn/fade, status entry/close, jarak ke lock, sisa waktu,
+        // dan feasibilitas berubah tiap detik. Jadi keduanya dihitung ULANG di sini setiap tick
+        // (bukan memakai hasil saat lock) supaya angka yang dikirim = keadaan sekarang.
+        for (const tf of TFS) {
+          const durS = DUR_S[tf] || 300;
+          const t0Live = Math.floor(nowSec / durS) * durS;
+          const cur = session[sym][tf];
+          if (!cur || cur.t0 !== t0Live) continue;            // belum terkunci untuk sesi ini
+          try {
+            cur.plan = computePlan(sym, tf, t0Live, nowSec, cur.signal, market[sym]);
+            cur.conf = computeConf(sym, tf, t0Live, nowSec, cur.signal, market[sym]);
+            cur.mobilePred = computeMobilePred(sym, tf, t0Live, market[sym]);
+          } catch (e) { stats.errors++; stats.lastErr = e && e.message; }
         }
       }
       stats.refreshes++; stats.lastAt = Date.now();
@@ -156,6 +222,25 @@ function createEngine(deps) {
   }
 
   // Snapshot untuk UI: harga live, lock, selisih $, sinyal sesi (kanonik, dari server)
+  // Ringkas satu (sym, tf) untuk dipakai lintas-tf di snapshot.
+  function tfEntry(sym, tf, price) {
+    const durMs = (DUR_S[tf] || 300) * 1000;
+    const now = Date.now();
+    const t0 = Math.floor(now / durMs) * durMs;
+    const sess = session[sym] && session[sym][tf];
+    const same = !!(sess && sess.t0 === t0 / 1000);
+    const sig = same ? sess.signal : null;
+    return {
+      t0: t0 / 1000,
+      skipped: same ? sess.skipped : "pending",
+      signal: sig ? Object.assign({}, sig, { verdict: sig.accepted ? sig.dir : "flat" }) : null,
+      plan: same ? (sess.plan || null) : null,
+      conf: same ? (sess.conf || null) : null,
+      mobilePred: same ? (sess.mobilePred || null) : null,
+      ofi: FLOW.sessionOFI(sym, t0 / 1000, Math.floor(now / 1000)),
+    };
+  }
+
   function snapshot(tf) {
     const now = Date.now();
     const durMs = (DUR_S[tf] || 300) * 1000;
@@ -171,7 +256,11 @@ function createEngine(deps) {
       const sess = session[sym] && session[sym][tf];
       const sameSession = !!(sess && sess.t0 === t0 / 1000);
       const sig = sameSession ? sess.signal : null;
+      // Semua tf dilayani server (lihat TFS) -> klien tidak perlu menghitung sinyal sendiri.
+      const all = {};
+      for (const t of TFS) all[t] = tfEntry(sym, t, px);
       out.assets[sym] = {
+        all,
         price: px,
         lock: sig ? sig.lock : null,
         deltaUsd: (px != null && sig && sig.lock) ? +(px - sig.lock).toFixed(2) : null,
@@ -180,6 +269,10 @@ function createEngine(deps) {
         signal: sig ? Object.assign({}, sig, { verdict: sig.accepted ? sig.dir : "flat" }) : null,
         // Trade Assistant (diproses server): aksi, level, status entry/close, health.
         plan: (sess && sameSession) ? (sess.plan || null) : null,
+        // Model confidence (diproses server): angka untuk arah up/down + konteks.
+        conf: (sess && sameSession) ? (sess.conf || null) : null,
+        // Mobile prediction (diproses server).
+        mobilePred: (sess && sameSession) ? (sess.mobilePred || null) : null,
         // OFI LIVE (dihitung ulang setiap snapshot, bukan beku saat sinyal dikunci):
         // parameter sesi berjalan -> semua device menampilkan angka yang SAMA.
         ofi: FLOW.sessionOFI(sym, t0 / 1000, Math.floor(now / 1000)),

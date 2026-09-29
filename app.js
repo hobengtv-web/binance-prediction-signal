@@ -1395,7 +1395,7 @@ function applyType() {
 
     // Dihitung sebagai FUNGSI atas sebuah arah, supaya LED bar bisa dihitung untuk arah
     // sinyal utama (bukan hanya arah fade internal).
-    const confForDir = (dir) => {
+    const confForDirLocal = (dir) => {
       if (!dir) return 0;
       const dn = dir === "down";
       const alignThis = !!curTrendDir && curTrendDir !== "flat" && curTrendDir === dir;
@@ -1445,6 +1445,24 @@ function applyType() {
         reach = clamp(1 - residual / Math.max(volMove, 1e-9), 0, 1);
       }
       return clamp(Math.round(base * reach), 0, 100);
+    };
+
+    // ===== MODEL CONFIDENCE = DIPROSES SERVER =====
+    // Angka untuk arah up/down (dua basis: value = sesuai keselarasan trend, past = 3 sesi
+    // sebelumnya) sudah dihitung server (confidence.js) dan dikirim lewat
+    // assets[sym].all[tf].conf. Klien HANYA memilih angka yang sesuai konteks tab — tidak
+    // menjalankan modelnya. confForDirLocal di atas tinggal cadangan bila server tak tersedia.
+    const srvConf = (() => {
+      try {
+        const e = (typeof LIVE !== "undefined") ? LIVE.entryFor(state.asset, state.interval) : null;
+        return (e && e.conf) ? e.conf : null;
+      } catch (_) { return null; }
+    })();
+    const confForDir = (dir) => {
+      if (!dir) return 0;
+      const c = srvConf && srvConf[dir];
+      if (c) return (c.align || (mobLocked && confMode === "SIGNAL")) ? c.past : c.value;
+      return confForDirLocal(dir);
     };
     const fadeConf = confForDir(fadeDir);
 
@@ -2434,9 +2452,18 @@ const LIVE = (() => {
     });
   }
   const priceFor = (asset) => (fresh() && snap && snap.assets && snap.assets[asset]) ? snap.assets[asset].price : null;
+  // Data server untuk (aset, tf) apa pun yang dilayani server (snapshot membawa `all` per tf).
+  // Dipakai untuk MEMATIKAN perhitungan sinyal lokal: bila server sudah menyediakan entri tf ini
+  // (walau masih "pending"/flat), server yang berwenang -> klien tidak boleh mengarang verdict.
+  function entryFor(asset, tf) {
+    if (!fresh() || !snap || !snap.assets) return null;
+    const a = snap.assets[asset];
+    return (a && a.all && a.all[tf]) ? a.all[tf] : null;
+  }
+  const covers = (asset, tf) => !!entryFor(asset, tf);
   // Hook uji/debug: suntikkan snapshot seolah-olah baru diterima dari stream.
   const inject = (s, tf) => { snap = s; at = Date.now(); tfSub = tf || tfSub; count++; err = null; };
-  return { connect, inject, fresh, signalFor, priceFor, get snap() { return snap; }, get at() { return at; }, get tf() { return tfSub; }, get err() { return err; }, get n() { return count; } };
+  return { connect, inject, fresh, signalFor, priceFor, entryFor, covers, get snap() { return snap; }, get at() { return at; }, get tf() { return tfSub; }, get err() { return err; }, get n() { return count; } };
 })();
 
 /* ===== PROFIL GATE (ambang sinyal) — bisa diganti learner TANPA deploy =====
@@ -2787,7 +2814,26 @@ const LEDGER = (() => {
       }
     } catch (_) { failed++; } finally { sending = false; }
   }
+  // ===== Riwayat dari SERVER (sumber utama panel akurasi) =====
+  // Server menyimpan setiap sinyal kanonik + hasilnya (res.won/lock/close/actual) di volume
+  // persisten. Panel akurasi membacanya dari sini supaya SEMUA device melihat riwayat yang sama,
+  // bukan hanya apa yang sempat tercatat di localStorage device ini.
+  let srvCache = null, srvAt = 0, srvLoading = false;
+  async function server(force) {
+    if (!force && srvCache && Date.now() - srvAt < 15000) return srvCache;
+    if (srvLoading) return srvCache;
+    srvLoading = true;
+    try {
+      const res = await fetch("/api/ledger?dump=1", { cache: "no-store" });
+      const j = await res.json();
+      srvCache = { records: (j && j.records) || [], stats: (j && j.stats) || null };
+      srvAt = Date.now();
+    } catch (_) { /* offline -> panel memakai salinan lokal */ } finally { srvLoading = false; }
+    return srvCache;
+  }
   return {
+    server,
+    serverCached: () => srvCache,
     addSignal(rec) { if (!rec || !rec.asset) return; const k = keyOf(rec.asset, rec.interval, rec.t0); upsert(k, { asset: rec.asset, interval: rec.interval, t0: rec.t0, sig: rec }); flush(); },
     resolve(asset, interval, t0Sec, res) {
       if (!asset) return;
@@ -3007,8 +3053,11 @@ function analyzeCoin(asset, tf, now) {
   // Sebelumnya jalur ini fallback ke _deskSigLive sehingga bisa BEDA dengan rekomendasi utama
   // (itu penyebab TA terlihat 'bingung'). liveSig hanya dipakai untuk teks status saat flat.
   const srvSigA = (typeof LIVE !== "undefined") ? LIVE.signalFor(asset, tf) : null;   // sinyal server
+  const srvEntry = (typeof LIVE !== "undefined") ? LIVE.entryFor(asset, tf) : null;    // entri per tf (semua tf)
   const sig = srvSigA || _deskSigCache[key] || null;
-  const liveSig = sig || _deskSigLive[key] || null;
+  // Saat sinyal flat, teks mode diambil dari server (skipped) supaya tidak perlu cache lokal.
+  const liveSig = sig || _deskSigLive[key] || (srvEntry && srvEntry.skipped && srvEntry.skipped !== "pending"
+    ? { mode: String(srvEntry.skipped).toUpperCase() } : null);
   const isUp = !!(sig && sig.verdict === "up");
   const recentC = win.slice(-12);
   const counterVol = recentC.filter((c) => (isUp ? c.close < c.open : c.close > c.open)).reduce((a, c) => a + (c.vol || 0), 0);
@@ -3680,8 +3729,12 @@ function renderDual(force) {
         if (ledVal) { ledVal.textContent = "—"; ledVal.className = "dc-led-val na"; }
         if (ledWrap) ledWrap.title = "Belum ada arah signal — LED keyakinan kosong";
       } else {
-        // parameter ke-3 = BOOLEAN "apakah arahnya DOWN" (bukan string arah)
-        const conf = confidenceFromPastSessions(a, tf, confDir === "down");
+        // Angka dari SERVER (basis "past" = 3 sesi sebelumnya, sama dengan tab SIGNAL di mobile).
+        // Cadangan: hitung lokal bila server belum menyediakan.
+        const srvC = (() => {
+          try { const e = (typeof LIVE !== "undefined") ? LIVE.entryFor(a, tf) : null; return (e && e.conf) ? e.conf : null; } catch (_) { return null; }
+        })();
+        const conf = (srvC && srvC[confDir]) ? srvC[confDir].past : confidenceFromPastSessions(a, tf, confDir === "down");
         paintLedBar(ledTrack, conf);
         if (ledVal) { ledVal.textContent = conf + "%"; ledVal.className = "dc-led-val " + confDir; }
         if (ledWrap) ledWrap.title = `Keyakinan arah ${confDir.toUpperCase()} (3 sesi sebelum sesi aktif) — sumber sama dengan tab SIGNAL di mobile`;
@@ -3896,6 +3949,12 @@ function updateProjectionUniversal() {
       
       // Skip jika sudah ada di cache dan sesi masih sama
       if (_deskSigCache[cacheKey]) continue;
+
+      // ===== CADANGAN SAJA =====
+      // Bila server sudah menyediakan entri untuk (aset, tf) ini (termasuk saat masih
+      // "pending"/flat), maka server yang berwenang. Klien TIDAK menghitung sinyal sendiri,
+      // supaya tidak pernah ada dua mesin keputusan yang bisa berbeda.
+      if (typeof LIVE !== "undefined" && LIVE.covers(sym, tf)) continue;
       
       // Minimal validation - pastikan ada candle data
       const candles5m = state.cache[sym]["5m"]?.candles || [];
@@ -4355,14 +4414,42 @@ function renderConfidenceReport() {
   const countEl = document.getElementById("conf-debug-count");
   if (!body) return;
   
-  // Show universal report for ALL coin/interval combos
-  const allData = MobilePredLog.data();
+  // Sumber data: LEDGER SERVER (kanonik, semua device sama). Bila server tidak terjangkau,
+  // baru pakai catatan lokal (MobilePredLog) sebagai cadangan.
+  const srv = (typeof LEDGER !== "undefined" && LEDGER.serverCached) ? LEDGER.serverCached() : null;
+  let allData = [];
+  let srcLabel = "server";
+  if (srv && srv.records && srv.records.length) {
+    allData = srv.records.map((r) => {
+      const sig = r.sig || {};
+      const dir = (sig.verdict === "up" || sig.verdict === "down") ? sig.verdict
+        : (sig.dir === "up" || sig.dir === "down") ? sig.dir : null;
+      const res = r.res || null;
+      return {
+        asset: r.asset, interval: r.interval, dir,
+        won: (res && res.won != null) ? res.won : undefined,
+        lock: res ? res.lock : sig.lock,
+        close: res ? res.close : null,
+        actual: res ? res.actual : null,
+      };
+    }).filter((r) => r.dir);
+  }
+  if (!allData.length) { allData = MobilePredLog.data(); srcLabel = "lokal"; }
+  // Minta data terbaru dari server (throttle 15s di dalam modul LEDGER), lalu render ulang
+  // bila jumlahnya berubah (mis. ada sesi baru yang selesai).
+  if (typeof LEDGER !== "undefined" && LEDGER.server) {
+    LEDGER.server().then((s2) => {
+      const n1 = srv && srv.records ? srv.records.length : -1;
+      const n2 = s2 && s2.records ? s2.records.length : -1;
+      if (n2 !== n1) renderConfidenceReport();
+    });
+  }
   
   // Count total across all combos
   const totalAll = allData.length;
   const pendingCount = PendingSig.size();
   if (head) head.textContent = `DESKTOP SIGNAL ACCURACY · Universal · `;
-  if (countEl) countEl.textContent = `${totalAll} rounds total${pendingCount ? ` · ${pendingCount} waiting to settle` : ""}${GATE_STATUS === "ok" ? "" : ` · gate ${GATE_STATUS}`}${TIER_STATUS === "ok" ? "" : ` · tiers ${TIER_STATUS}`}`;
+  if (countEl) countEl.textContent = `${totalAll} rounds total · sumber ${srcLabel}${pendingCount ? ` · ${pendingCount} waiting to settle` : ""}${GATE_STATUS === "ok" ? "" : ` · gate ${GATE_STATUS}`}${TIER_STATUS === "ok" ? "" : ` · tiers ${TIER_STATUS}`}`;
   
   if (!totalAll) {
     body.innerHTML = `<div class="cd-empty">no completed rounds yet — ${pendingCount ? pendingCount + " signal(s) waiting to settle" : "let it run a few rounds"}</div>`;
@@ -4577,6 +4664,35 @@ function predictSessionStart(sym, tf) {
     console.log("[MOBILE-PRED] updateMobilePrediction: no ticker for", state.asset);
     return;
   }
+  // ===== MOBILE PREDICTION = DIPROSES SERVER =====
+  // Bila server sudah mengirim hasilnya untuk sesi ini, pakai itu (semua device sama);
+  // kalau tidak, jalur lokal di bawah dipakai sebagai cadangan (offline).
+  try {
+    const e = (typeof LIVE !== "undefined") ? LIVE.entryFor(state.asset, state.interval) : null;
+    if (e && e.mobilePred) {
+      const sp = e.mobilePred;
+      _mobilePredSession = { roundStart: sp.roundStart, asset: state.asset, interval: state.interval,
+        lockPrice: sp.lockPrice, prediction: sp.prediction, confidence: sp.confidence, mode: sp.mode };
+      const C2 = ticker.last;
+      const pd = sp.lockPrice ? (C2 - sp.lockPrice) / sp.lockPrice : 0;
+      const g = (id) => document.getElementById(id);
+      const lockEl = g("m-lock"), dirEl = g("m-dir"), confEl = g("m-conf"),
+            priceEl = g("m-price"), deltaEl = g("m-delta"), modeEl = g("m-mode");
+      if (lockEl) lockEl.textContent = fmtPrice(sp.lockPrice);
+      if (priceEl) priceEl.textContent = fmtPrice(C2);
+      if (deltaEl) deltaEl.textContent = (pd >= 0 ? "+" : "") + (pd * 100).toFixed(2) + "%";
+      if (modeEl) modeEl.textContent = sp.mode;
+      if (dirEl) {
+        dirEl.textContent = sp.prediction === "up" ? "UP ▲" : sp.prediction === "down" ? "DOWN ▼" : "—";
+        dirEl.className = sp.prediction === "up" ? "up" : sp.prediction === "down" ? "down" : "";
+      }
+      if (confEl) {
+        confEl.textContent = sp.prediction !== "flat" ? sp.confidence + "%" : "—";
+        confEl.className = sp.prediction === "up" ? "up" : sp.prediction === "down" ? "down" : "";
+      }
+      return;   // sudah ditangani server -> tidak menghitung model lokal
+    }
+  } catch (_) {}
 
     const dur = INTERVAL_MS[state.interval];
   const now = serverNow();

@@ -858,7 +858,17 @@ function applyType() {
     // Trigger alarm otomatis ketika sinyal entry muncul. Dedupe PER SESI (key) supaya satu
     // sinyal hanya berbunyi sekali walau verdict sempat berubah-ubah dalam sesi yang sama.
     const alertKey = `${state.asset}_${state.interval}_${o.roundStart || ""}`;
-    if (o.verdict !== "flat" && confMode === "SIGNAL" && o.highConf && !_mainSigAlerted.has(alertKey)) {
+    // PRIMING pengamatan pertama: kalau sesi ini baru pertama kali terlihat (mis. halaman baru
+    // dibuka padahal sinyalnya sudah terkunci beberapa detik lalu), JANGAN bunyikan alarm —
+    // kartu sudah menampilkannya. Alarm hanya untuk sinyal yang MUNCUL selagi user ada.
+    const sigFirstSight = !_sigFirstSight.has(alertKey);
+    _sigFirstSight.add(alertKey);
+    if (sigFirstSight) {
+      // Pengamatan PERTAMA untuk sesi ini (mis. halaman baru dibuka padahal sinyalnya sudah
+      // terkunci beberapa detik lalu): tandai "sudah diberitahukan" tanpa bunyi, supaya tick-tick
+      // berikutnya tidak ikut berbunyi untuk sinyal yang sudah tampil di kartu sejak awal.
+      if (o.verdict !== "flat" && o.highConf) _mainSigAlerted.add(alertKey);
+    } else if (o.verdict !== "flat" && confMode === "SIGNAL" && o.highConf && !_mainSigAlerted.has(alertKey)) {
       _mainSigAlerted.add(alertKey);
       playSoundAlert();
       flashCard(state.asset, "signal");
@@ -1281,8 +1291,14 @@ function applyType() {
     //   entry/average -> rising chirp ; close/cut -> descending chime ; signal entry -> pulsing (existing)
     // First observation of a combo is silent, so switching tabs does not replay a sound.
     const prevTradeState = _tradeLastState[uniKey];
+    const prevTradeSrc = _tradeLastSrc[uniKey];
+    const planSrc = srvPlan ? "server" : "local";
     _tradeLastState[uniKey] = tradePlan.state;
-    if (prevTradeState !== undefined && tradePlan.state !== prevTradeState) {
+    _tradeLastSrc[uniKey] = planSrc;
+    // Transisi hanya dihitung bila SUMBER plan tidak berubah. Saat halaman baru dibuka, plan
+    // sempat dihitung lokal (snapshot server belum tiba) lalu berganti ke plan server — dulu itu
+    // terdeteksi sebagai transisi sehingga muncul notif Trade Assistant "palsu" tepat setelah load.
+    if (prevTradeState !== undefined && prevTradeSrc === planSrc && tradePlan.state !== prevTradeState) {
       if (tradePlan.state === "ENTRY" || tradePlan.state === "AVERAGE") {
         const sk = `${uniKey}|${tradePlan.state}`;
         if (!_entrySounded.has(sk)) { _entrySounded.add(sk); playTradeEntrySound(); }
@@ -1300,7 +1316,11 @@ function applyType() {
       }
     }
     // High-risk alert: notify once per session when the health score is critical.
-    if (health.score >= 75 && !_warnedKeys.has(uniKey)) {
+    const warnFirstSight = !_warnPrimed.has(uniKey);
+    _warnPrimed.add(uniKey);
+    if (warnFirstSight) {
+      if (health.score >= 75) _warnedKeys.add(uniKey);       // sudah kritis saat halaman dibuka -> jangan notif
+    } else if (health.score >= 75 && !_warnedKeys.has(uniKey)) {
       _warnedKeys.add(uniKey);
       console.warn(`[WASPADA] ${state.asset}/${state.interval} ${uni.verdict.toUpperCase()} — ${health.label} (score ${health.score}): ${health.fired.join(", ")}`);
       flashTitle(`⚠ ${health.label} ${uni.verdict.toUpperCase()} ${state.asset}/${state.interval}`);
@@ -2213,6 +2233,11 @@ const _wideSigSounded = new Set();  // key koin yg sudah dibunyikan di tampilan 
 const _mainSigAlerted = new Set();  // key sesi yg alarm sinyalnya sudah dibunyikan (jalur utama)
 const _closeSounded = new Set();    // key sesi yg nada close-nya sudah dibunyikan (cegah berulang)
 const _entrySounded = new Set();    // key "sesi|state" yg nada entry/average-nya sudah dibunyikan
+const _sigFirstSight = new Set();   // key sesi yg sudah pernah dilihat (PRIMING: sinyal yang sudah
+                                    // ada saat halaman dibuka TIDAK dibunyikan, karena kartu sudah
+                                    // menampilkannya — hanya sinyal yang muncul setelah user ada)
+const _warnPrimed = new Set();      // idem untuk peringatan health (skor kritis)
+const _tradeLastSrc = {};           // key -> "server" | "local" (asal plan pada pengamatan terakhir)
 const _tradeDwell = {};    // key -> { turnSince, fadeSince }
 function computeTradePlan(bias, ctx) {
   if (bias !== "up" && bias !== "down") {
@@ -3102,6 +3127,7 @@ function analyzeCoin(asset, tf, now) {
   // PLAN = hasil proses SERVER (satu sumber kebenaran). Klien hanya menghitung sendiri
   // sebagai cadangan bila snapshot server belum ada/putus (offline), memakai rumus yang sama.
   const srvPlan = taBias ? serverPlanFor(asset, tf) : null;
+  const planSrc = srvPlan ? "server" : "local";
   const plan = srvPlan || (taBias
     ? computeTradePlan(taBias, {
         tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
@@ -3149,7 +3175,7 @@ function analyzeCoin(asset, tf, now) {
       plan.statusClose = { ok: !!_clo, at: _clo ? _clo.at : null, price: _clo ? _clo.price : null };
     }
   }
-  return { key, C, O, std, slope, slopeRecent, rsi, z, sig, health, plan, ofi, ofiShort, histTrend,
+  return { key, C, O, std, slope, slopeRecent, rsi, z, sig, health, plan, planSrc, ofi, ofiShort, histTrend,
     liveMode: liveSig ? liveSig.mode : null };   // mode live (utk teks status saat tidak ada sinyal graded)
 }
 
@@ -3508,13 +3534,21 @@ function renderDual(force) {
     // berbunyi. Koin non-aktif ditangani di sini; koin aktif tetap oleh jalur utama supaya
     // tidak dobel. Trade Assistant memakai _tradeLastState bersama -> transisi sama = 1 suara.
     if (m && m.key) {
+      // PRIMING: sama seperti jalur utama — sinyal yang sudah ada sebelum halaman dibuka tidak
+      // dibunyikan (kartu sudah menampilkannya), hanya sinyal yang muncul selagi user ada.
+      const dualFirstSight = !_sigFirstSight.has(m.key);
+      _sigFirstSight.add(m.key);
       if (state.asset !== a && graded) {
         if (!_wideSigSounded.has(m.key)) {
           _wideSigSounded.add(m.key);
-          playSoundAlert();
-          flashCard(a, "signal");
-          flashTitle(`▶ SIGNAL ${dir.toUpperCase()} ${a}/${tf}`);
-          console.log(`[WIDE][SOUND-SIGNAL] ${a}/${tf} ${dir}${sig && sig.grade ? " " + sig.grade : ""}`);
+          if (dualFirstSight) {
+            // sinyal sudah ada saat halaman dibuka -> tandai sudah dibunyikan, tanpa bunyi
+          } else {
+            playSoundAlert();
+            flashCard(a, "signal");
+            flashTitle(`▶ SIGNAL ${dir.toUpperCase()} ${a}/${tf}`);
+            console.log(`[WIDE][SOUND-SIGNAL] ${a}/${tf} ${dir}${sig && sig.grade ? " " + sig.grade : ""}`);
+          }
         }
       } else if (state.asset !== a && !graded) {
         _wideSigSounded.delete(m.key);      // flat / sesi baru -> siap berbunyi lagi
@@ -3522,7 +3556,12 @@ function renderDual(force) {
       // Trade Assistant: entry / average / close (semua koin, termasuk koin aktif — dedupe via state bersama)
       if (plan) {
         const prevW = _tradeLastState[m.key];
-        if (prevW !== undefined && plan.state !== prevW) {
+        const prevWSrc = _tradeLastSrc[m.key];
+        const srcNow = m.planSrc || "local";
+        _tradeLastSrc[m.key] = srcNow;
+        // Sumber plan harus sama (lihat catatan di jalur utama) supaya pergantian lokal->server
+        // setelah load tidak dianggap transisi -> tidak ada notif TA palsu.
+        if (prevW !== undefined && prevWSrc === srcNow && plan.state !== prevW) {
           if (plan.state === "ENTRY" || plan.state === "AVERAGE") {
             const sk = `${m.key}|${plan.state}`;
             if (!_entrySounded.has(sk)) { _entrySounded.add(sk); playTradeEntrySound(); }
@@ -3952,6 +3991,9 @@ function updateProjectionUniversal() {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) _closeSounded.delete(k);
     for (const sk of _entrySounded) { const t2 = parseInt(sk.split("_")[2]); if (!isNaN(t2) && t2 < CUTOFF) _entrySounded.delete(sk); }
+    for (const k2 of _sigFirstSight) { const t3 = parseInt(k2.split("_")[2]); if (!isNaN(t3) && t3 < CUTOFF) _sigFirstSight.delete(k2); }
+    for (const k2 of _warnPrimed) { const t3 = parseInt(k2.split("_")[2]); if (!isNaN(t3) && t3 < CUTOFF) _warnPrimed.delete(k2); }
+    for (const k2 in _tradeLastSrc) { const t3 = parseInt(k2.split("_")[2]); if (!isNaN(t3) && t3 < CUTOFF) delete _tradeLastSrc[k2]; }
   }
   for (const k of _warnedKeys) {
     const t = parseInt(k.split("_")[2]);

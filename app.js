@@ -3043,11 +3043,6 @@ function buildDual() {
   el.innerHTML = ["BTC", "ETH"].map((a) => `
     <div class="dual-col" id="dc-${a}-col">
       <div class="dc-head"><span class="dc-coin">${a}</span><span class="dc-price" id="dc-${a}-price">—</span><span class="dc-chg" id="dc-${a}-chg"></span><span class="dc-dusd" id="dc-${a}-dusd"></span><span class="dc-chg24" id="dc-${a}-chg24"></span><span class="dc-cd" id="dc-${a}-cd" title="Sisa waktu sesi">--:--</span></div>
-      <!-- VOLUME & LIQUIDITY: ditonjolkan (bold + gradasi warna) seperti di tampilan mobile -->
-      <div class="dc-volrow">
-        <span>LIQUIDITY <b class="vol-val v-na" id="dc-${a}-liq" title="Rasio likuiditas: proyeksi volume sesi dibanding volume 5m typical (>1 = lebih ramai)">—</b></span>
-        <span>VOL <b class="vol-val v-na" id="dc-${a}-vol" title="Pace volume 5m terhadap rata-rata (angka yang dinilai gate)">—</b></span>
-      </div>
       <div class="dc-chart" id="dc-${a}-chart"></div>
       <div class="dc-recrow"><span class="dc-rec" id="dc-${a}-rec">—</span><span class="rec-status" id="dc-${a}-badge"></span></div>
       <div class="dc-act" id="dc-${a}-act">—</div>
@@ -3056,6 +3051,11 @@ function buildDual() {
       <div class="dc-grid" id="dc-${a}-grid"></div>
       <div class="dc-grid" id="dc-${a}-rows"></div>
       <div class="dc-pred" id="dc-${a}-pred"></div>
+      <!-- VOLUME & LIQUIDITY: ditonjolkan (bold + gradasi warna) — tepat di atas orderbook bar -->
+      <div class="dc-volrow">
+        <span>LIQUIDITY <b class="vol-val v-na" id="dc-${a}-liq" title="Rasio likuiditas: proyeksi volume sesi dibanding volume 5m typical (>1 = lebih ramai)">—</b></span>
+        <span>VOL <b class="vol-val v-na" id="dc-${a}-vol" title="Pace volume 5m terhadap rata-rata (angka yang dinilai gate)">—</b></span>
+      </div>
       <div class="dc-ob">
         <div class="ob-bg"><div class="ob-ask" id="dc-${a}-ask"></div><div class="ob-bid" id="dc-${a}-bid"></div></div>
         <div class="ob-label"><span class="ob-sell-pct" id="dc-${a}-askp">—</span><span class="ob-buy-pct" id="dc-${a}-bidp">—</span></div>
@@ -3312,11 +3312,11 @@ function renderDual(force) {
       : "";
     const grEl = g("grid");
     if (grEl) {
-      const liq = sig && sig.liqRatio != null ? (sig.liqRatio * 100).toFixed(0) + "%" : "—";
-      const v5m = sig && sig.volRel != null ? (sig.volRel >= 10 ? "≥10×" : sig.volRel.toFixed(1) + "×") : "—";
+      // LIQUIDITY & VOL sudah ditampilkan (ditonjolkan) di baris tepat atas orderbook bar ->
+      // di sini hanya OFI & REWARD supaya tidak ada informasi ganda.
       const ofi = sig && sig.ofi != null ? (sig.ofi * 100).toFixed(0) + "%" : "—";
       const rw = plan && plan.levels ? plan.levels.rNow.toFixed(2) + "%" : "—";
-      grEl.innerHTML = `LIQUIDITY <b>${liq}</b> · VOL(5m) <b>${v5m}</b> · OFI <b>${ofi}</b> · REWARD <b>${rw}</b>`;
+      grEl.innerHTML = `OFI <b>${ofi}</b> · REWARD <b>${rw}</b>`;
     }
     const rwEl = g("rows");
     if (rwEl && m) {

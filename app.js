@@ -3235,8 +3235,15 @@ function renderConfidenceReport() {
     rounds = srv.records.map((r) => {
       const sig = r.sig || {};
       const res = r.res || null;
-      const dir = (sig.verdict === "up" || sig.verdict === "down") ? sig.verdict
-        : (sig.dir === "up" || sig.dir === "down") ? sig.dir : null;
+      // ARAH YANG DITAMPILKAN (bukan arah mentah). Record ledger dari capture tidak menyertakan
+      // `verdict`, hanya `dir` + `accepted`. Sebelumnya panel memakai `dir` apa adanya sehingga
+      // sesi yang DITOLAK gate (accepted=false) tetap muncul sebagai kolom U/D dan ikut dihitung
+      // di win-rate, padahal kartu tidak menampilkan sinyal apa pun.
+      const isUD = (v) => v === "up" || v === "down";
+      const dir = isUD(sig.verdict) ? sig.verdict
+        : (isUD(sig.dir) && sig.accepted === true) ? sig.dir
+        : (isUD(sig.dir) && sig.accepted === undefined) ? sig.dir   // record lama tanpa flag gate
+        : null;
       if (!dir) return null;
       const tr = (res && res.trade) || null;
       // Tiga keadaan (semuanya tampil ABU, hanya tooltip-nya yang beda):

@@ -245,9 +245,9 @@ body {
    tertukar arti: hijau tumbuh ke kanan = tekanan BELI, merah ke kiri = tekanan JUAL.
    Skala: ±25% = penuh · pita abu di tengah = zona netral ±5% · di luar skala diberi penanda. */
 .ofi-wrap { display: inline-flex; align-items: center; gap: 6px; }
-.ofi-track { position: relative; display: block; width: 56px; height: 8px; border-radius: 4px;
+.ofi-track { position: relative; display: block; width: 96px; height: 9px; border-radius: 5px;
   background: rgba(255,255,255,.07); overflow: hidden; flex: 0 0 auto; }
-.ofi-band { position: absolute; top: 0; height: 100%; left: calc(50% - 5.6px); width: 11.2px;
+.ofi-band { position: absolute; top: 0; height: 100%; left: calc(50% - 9.6px); width: 19.2px;
   background: rgba(255,255,255,.07); }
 .ofi-mid { position: absolute; top: 0; height: 100%; left: 50%; width: 1px;
   background: rgba(255,255,255,.38); }
@@ -260,7 +260,7 @@ body {
 .ofi-val { font-weight: 800; font-size: 14px; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
 .ofi-val.up { color: var(--up); } .ofi-val.down { color: var(--down); } .ofi-val.na { color: var(--muted); }
 /* rentang sempit: bar sedikit lebih pendek supaya baris volume tetap rapi */
-@media (max-width: 380px) { .ofi-track { width: 42px; } }
+@media (max-width: 380px) { .ofi-track { width: 64px; } }
 #s-ofi { font-weight: 800; font-size: 14px; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
 #s-ofi.up { color: var(--up); }
 #s-ofi.down { color: var(--down); }

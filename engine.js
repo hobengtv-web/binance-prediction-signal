@@ -257,7 +257,27 @@ function createEngine(deps) {
         }
       }
     } catch (_) {}
+    // ===== SUPPORT / RESISTANCE (gaya analis) =====
+    // Dari swing high/low pada window analisis: resistance terdekat = swing high TERENDAH yang
+    // masih di atas harga; support terdekat = swing low TERTINGGI yang masih di bawah harga.
+    let support = null, resistance = null, srFrom = "swing window";
+    try {
+      const sw = CONF.detectSwings(win, Math.max(3, Math.round(win.length / 6)));
+      const lows = (sw.lows || []).map((x) => x.price).filter((p) => p < C * 0.9999);
+      const highs = (sw.highs || []).map((x) => x.price).filter((p) => p > C * 1.0001);
+      if (lows.length) support = Math.max.apply(null, lows);
+      if (highs.length) resistance = Math.min.apply(null, highs);
+      // jaring ekstra: batas sesi dari candle tf (high/low sesi berjalan)
+      const sessC2 = (m.tf[tf] || []).filter((x) => x.time < nowSec);
+      if (sessC2.length) {
+        const lastTf = sessC2[sessC2.length - 1];
+        if (support == null && lastTf.low < C) support = lastTf.low;
+        if (resistance == null && lastTf.high > C) resistance = lastTf.high;
+        if (sessC2.length < 3) srFrom = "batas candle sesi";
+      }
+    } catch (_) {}
     return {
+      support, resistance, srFrom,
       zone, momentum, rsi, mean: stat.mean, std, slope, slopeRecent: stat.slopeRecent, z,
       peak: peak ? { price: peak.price, dir: peak.dir, conf: peak.conf } : null,
       reversal: verdict === "flat" ? null : { dir: verdict, mode, peakPrice, reward },

@@ -257,7 +257,12 @@ function paintOfi(v, fillEl, satEl, valEl) {
     else valEl.className = "ofi-val " + cls;
   }
   if (!fillEl) return;
-  const vv = v == null ? 0 : v;
+  // ANTI-GLITCH: bar memakai EMA (0.35) supaya tidak bergetar saat update ~300 ms dan tidak
+  // "melompat" kiri-kanan ketika nilai menyentuh 0 (magnitudo menyusut melewati nol dulu).
+  const target = v == null ? 0 : v;
+  const prev = (typeof fillEl._ofiS === "number") ? fillEl._ofiS : target;
+  fillEl._ofiS = prev + (target - prev) * 0.35;
+  const vv = fillEl._ofiS;
   const mag = Math.min(1, Math.abs(vv) / OFI_BAR_FULL) * 50;      // persen lebar track
   fillEl.style.left = (vv >= 0 ? 50 : 50 - mag) + "%";
   fillEl.style.width = mag + "%";
@@ -275,6 +280,36 @@ function ofiDOM(prefix) {
     sat: document.getElementById(prefix + "-sat"),
     val: document.getElementById(prefix),
   };
+}
+
+/* ===== GARIS BANTU CHART (gaya analis) =====
+   Level Trade Assistant (ENTRY/TAMBAH/TARGET/POSISI) + Support/Resistance terdekat dari server
+   (disp.support / disp.resistance). Dikirim ke chart lewat chart.setGuides(). */
+function buildGuides(plan, disp, lock) {
+  const out = [];
+  const seen = new Set();
+  const add = (p, label, cls) => {
+    if (p == null || !isFinite(p)) return;
+    const key = cls + "|" + Math.round(p * 100);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ p: Number(p), label, cls });
+  };
+  if (plan && plan.levels) {
+    const L = plan.levels;
+    add(L.l1, "ENTRY L1", "g-entry");
+    add(L.l2, "TAMBAH L2", "g-add");
+    add(L.l3, "TAMBAH L3", "g-add");
+    if (plan.cont && plan.cont.target) add(plan.cont.target, "TARGET", "g-target");
+  }
+  if (plan && plan.entryPrice != null) add(plan.entryPrice, "ENTRY POSISI", "g-pos");
+  if (disp) {
+    // S/R yang terlalu dekat dengan LOCK (<=0.02%) tidak digambar supaya tidak menumpuk garis.
+    const far = (p) => lock == null || Math.abs(p - lock) / lock > 0.0002;
+    if (disp.resistance != null && far(disp.resistance)) add(disp.resistance, "R", "g-sr");
+    if (disp.support != null && far(disp.support)) add(disp.support, "S", "g-sr");
+  }
+  return out;
 }
 
 /* Patch angka OFI (mobile + chip desktop) tanpa render penuh — dipakai oleh event SSE `ofi`. */
@@ -773,7 +808,7 @@ function applyType() {
     // OFI (order flow eksekusi) — ditonjolkan sejajar LIQUIDITY & VOL seperti di desktop.
     // Angka = OFI sesi; arah diwarnai (positif hijau = tekanan beli, negatif merah = jual).
     if (ofiEl) {
-      const ov = o.ofi;
+      const ov = (o.fastOfi != null) ? o.fastOfi : o.ofi;
       const dOfi = ofiDOM("s-ofi");
       paintOfi(ov, dOfi.fill, dOfi.sat, dOfi.val);
       const os = (() => { try { const e = (typeof LIVE !== "undefined") ? LIVE.entryFor(state.asset, state.interval) : null; return e && e.ofiShort != null ? e.ofiShort : null; } catch (_) { return null; } })();
@@ -882,7 +917,7 @@ function applyType() {
             : "";
         }
         if (tpMeta) {
-          const ofiTxt = o.ofi != null ? `OFI ${(o.ofi * 100).toFixed(0)}%` : "OFI —";
+          const ofiTxt = (o.ofi != null || o.fastOfi != null) ? `OFI ${(o.fastOfi != null ? o.fastOfi : o.ofi) >= 0 ? "+" : ""}${((o.fastOfi != null ? o.fastOfi : o.ofi) * 100).toFixed(0)}%` : "OFI —";
           const adv = tp.adverseStd != null ? `${tp.adverseStd >= 0 ? "-" : "+"}${Math.abs(tp.adverseStd).toFixed(2)}σ` : "—";
           const pos = tp.entryPrice != null
             ? ` · posisi @${fmtPrice(tp.entryPrice)} (${o.recPnl != null ? (o.recPnl >= 0 ? "+" : "") + o.recPnl.toFixed(2) + "%" : "—"})`
@@ -980,6 +1015,8 @@ function applyType() {
 
     // Lock (open) line + session dividers
     chart.setDecision(O);
+    // garis bantu: level Trade Assistant + support/resistance (dari server)
+    chart.setGuides(buildGuides(tradePlan, (typeof LIVE !== "undefined" && LIVE.entryFor) ? (LIVE.entryFor(state.asset, state.interval) || {}).disp : null, O));
     chart.setSessionDuration(dur);
     const liveStatus = C > O ? "up" : C < O ? "down" : "flat";
 
@@ -1041,7 +1078,7 @@ function applyType() {
     // chart (visual): overlay digambar klien memakai nilai server supaya konsisten
     const ov = buildOverlay(win, { C, O, std, slope, nowSec, closeSec, remainingMs: remaining, swingLookback: swingLookback() });
     if (ov) { chart.setProjection(ov.projection); chart.setTrendFit(ov.trendFit); chart.setMarkers(ov.markers); }
-    const ofiTxt = ofiNow != null ? ` Order flow (OFI) ${(ofiNow * 100).toFixed(0)} percent.` : "";
+    const ofiTxt = ofiNow != null ? ` Order flow (OFI) ${ofiNow >= 0 ? "+" : ""}${(ofiNow * 100).toFixed(0)} percent.` : "";
 
     // Nilai yang butuh sinyal server (dihitung di sini karena `uni` baru tersedia)
     const modeFinal = uni ? uni.mode : (liveSig ? liveSig.mode : "—");
@@ -1117,6 +1154,8 @@ function applyType() {
       highConf: !!gateInfo,
       gateWr: gateInfo ? gateInfo.wr : null,
       ofi: ofiNow,
+      fastOfi: (_fastOfi && _fastOfi.assets && _fastOfi.assets[state.asset] && Date.now() - _fastOfi.at < 3000)
+        ? _fastOfi.assets[state.asset].ofi : null,
       tradePlan,
       recPnl: (tradePlan && tradePlan.entryPrice != null && tradePlan.tradeDir)
         ? (((tradePlan.tradeDir === "up" ? (C - tradePlan.entryPrice) : (tradePlan.entryPrice - C)) / tradePlan.entryPrice) * 100)
@@ -2872,7 +2911,7 @@ function renderDual(force) {
     // OFI untuk tampilan (metrik LIVE: pakai angka server dulu, else flow lokal). Dihitung di
     // AWAL loop karena dipakai dua tempat: baris "Detail" Trade Assistant DAN chip metrik.
     const t0SecR = Math.floor(Math.floor(now / dur) * dur / 1000);
-    const ofiVal = ofiForDisplay(a, t0SecR, Math.floor(now / 1000));
+    const ofiVal = ofiForDisplay(a, t0SecR, Math.floor(now / 1000));   // mengutamakan nilai cepat 300ms
 
     // ===== SOUND per-koin untuk tampilan DESKTOP (dual) =====
     // Mobile: hanya koin aktif yang berbunyi (jalur utama). Di layar lebar KEDUA koin harus
@@ -3023,7 +3062,7 @@ function renderDual(force) {
     if (metaEl) {
       if (!plan) metaEl.textContent = "";
       else {
-        const ofiTxt = ofiVal != null ? `OFI ${(ofiVal * 100).toFixed(0)}%` : "OFI —";
+        const ofiTxt = ofiVal != null ? `OFI ${ofiVal >= 0 ? "+" : ""}${(ofiVal * 100).toFixed(0)}%` : "OFI —";
         const adv = plan.adverseStd != null ? `${plan.adverseStd >= 0 ? "-" : "+"}${Math.abs(plan.adverseStd).toFixed(2)}σ` : "—";
         const rwNow = plan.levels && plan.levels.rNow != null ? ` · reward +${plan.levels.rNow.toFixed(2)}%` : "";
         const pos = plan.entryPrice != null ? ` · posisi @${fmtPrice(plan.entryPrice)}` : " · belum ada posisi";
@@ -3094,6 +3133,7 @@ function renderDual(force) {
       // dengan perkiraan lokal supaya TIDAK hilang dari chart (mobile pun berperilaku sama).
       const oDual = (m && m.O != null) ? m.O : sessionLock(a, dur, now);
       ch.setDecision(oDual);
+      ch.setGuides(buildGuides(m && m.plan ? m.plan : null, m ? m.disp : null, oDual));
       ch.setPrediction(graded ? dir : null, m ? m.O : null);
       ch.setCurrentPrice(px);
       // OVERLAY LENGKAP seperti chart mobile: garis proyeksi ke settlement + garis tren

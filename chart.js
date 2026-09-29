@@ -25,6 +25,7 @@
     this.candles = [];
     this.type = "candle";
     this.decision = null;
+    this.guides = [];
     this.projection = [];
     this.markers = [];
     this.visible = 90;
@@ -38,6 +39,7 @@
     this._loadingStart = false; // flag lazy-load sedang berjalan
     this.sessionDuration = 0; // ms; 0 = no session dividers
     this.decision = null;
+    this.guides = [];
     this.projection = [];
     this.trendFit = [];   // auto trend line (regression) drawn across the recent window
     this.markers = [];    // marker.below => drawn under the point (swing lows)
@@ -73,6 +75,12 @@
   };
   CanvasChart.prototype.setLineData = function (candles) { this.setData(candles); };
   CanvasChart.prototype.setDecision = function (p) { this.decision = p; this.render(); };
+  /* GARIS BANTU (guide) gaya analis: level Trade Assistant (ENTRY/TAMBAH/TARGET/POSISI) dan
+     support/resistance. Format: [{ p: harga, label: "ENTRY L1", cls: "g-entry"|"g-add"|"g-target"|"g-pos"|"g-sr" }] */
+  CanvasChart.prototype.setGuides = function (list) {
+    this.guides = (list || []).filter((g) => g && g.p != null && isFinite(g.p));
+    this.render();
+  };
   CanvasChart.prototype.setProjection = function (pts) { this.projection = pts || []; this.render(); };
   CanvasChart.prototype.setTrendFit = function (pts) { this.trendFit = pts || []; this.render(); };
   CanvasChart.prototype.setMarkers = function (m) { this.markers = m || []; this.render(); };
@@ -150,6 +158,7 @@
       if (cs[i].high > pMax) pMax = cs[i].high;
     }
     if (this.decision != null) { pMin = Math.min(pMin, this.decision); pMax = Math.max(pMax, this.decision); }
+    if (this.guides && this.guides.length) for (const g of this.guides) { pMin = Math.min(pMin, g.p); pMax = Math.max(pMax, g.p); }
     this.projection.forEach((p) => { pMin = Math.min(pMin, p.value); pMax = Math.max(pMax, p.value); });
     if (!isFinite(pMin)) { pMin = 0; pMax = 1; }
     const pad = (pMax - pMin) * 0.08 || pMax * 0.01;
@@ -229,6 +238,22 @@
       ctx.fillStyle = ACCENT; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
       ctx.fillText("LOCK " + fmtAxis(this.decision), plotL + 4, y - 2);
       ctx.textBaseline = "middle";
+
+      // ===== GARIS BANTU (TA + Support/Resistance) =====
+      if (this.guides && this.guides.length) {
+        for (const g of this.guides) {
+          const gy = yOf(g.p);
+          if (gy < plotT - 2 || gy > plotB + 2) continue;                 // di luar area plot
+          const col = g.cls === "g-entry" ? "#0ecb81" : g.cls === "g-target" ? "#f0b90b"
+            : g.cls === "g-pos" ? "#f0b90b" : g.cls === "g-sr" ? "rgba(255,255,255,.45)" : "#7aa2f7";
+          ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash(g.cls === "g-sr" ? [1, 4] : [4, 3]);
+          ctx.beginPath(); ctx.moveTo(plotL, gy); ctx.lineTo(plotR, gy); ctx.stroke();
+          ctx.setLineDash([]);
+          if (g.label) { ctx.fillStyle = col; ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+            ctx.fillText(g.label, plotR - 3, gy - 2); ctx.textBaseline = "middle"; }
+        }
+        ctx.textAlign = "left";
+      }
 
       // price zone overlay (Entry Zone / Sell Zone — smooth blink ONLY on active zone)
       const now = Date.now();

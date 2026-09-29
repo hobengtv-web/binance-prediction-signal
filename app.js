@@ -101,7 +101,16 @@ INTERVALS.forEach((tf) => {
 let chart;
 let lastSignalState = null;  // Track previous signal untuk trigger alarm otomatis
 
-function setSrc(label) { document.getElementById("src").textContent = "SRC " + (label || "—"); }
+function setSrc(label) {
+  const txt = "SRC " + (label || "—");
+  const srcEl = document.getElementById("src");
+  if (srcEl) { srcEl.textContent = txt; srcEl.title = txt; }
+  // Label sumber bisa sangat panjang ("langsung (Binance/ TradingView)"). Di layar sempit
+  // #src disembunyikan (lihat styles.css) supaya header tetap SATU baris — nilainya tetap
+  // bisa dibaca di tooltip dot status koneksi:
+  const connEl = document.getElementById("conn");
+  if (connEl) connEl.title = "Status koneksi · sumber data: " + (label || "—");
+}
 function showErr(msg) {
   const el = document.getElementById("err");
   if (!msg) { el.hidden = true; el.textContent = ""; return; }
@@ -624,6 +633,7 @@ function applyType() {
     const dirWord = o.verdict === "up" ? "UP" : "DOWN";
     return "Entry " + dirWord + ". " + reasons.join(". ") + ".";
   }
+
    
    function updateSignal(o) {
     const z = document.getElementById("s-zone");
@@ -641,11 +651,20 @@ function applyType() {
     const reasonEl = document.getElementById("entryReason");
     const statusEl = document.getElementById("calcStatus");
     
-    // Live calculation status (when and how the signal is produced)
-    if (statusEl) statusEl.textContent = o.calcStatus || "";
-    // Generate dynamic entry reason based on analysis (volume token emphasised inline)
+    // Live calculation status (when and how the signal is produced) — diringkas 1 baris.
+    // Teks aslinya disimpan di tooltip supaya detail teknis tidak hilang.
+    if (statusEl) {
+      const cs = String(o.calcStatus || "");
+      statusEl.textContent = cs
+        .replace(/^Signal locked (\d+)s after session open · mode /, "lock +$1s · ")
+        .replace(/^Evaluating session, open \+(\d+)s · /, "evaluasi +$1s · ");
+      statusEl.title = cs;
+    }
+    // REASON ringkas: 1 baris (dot berwarna arah + label mode + vol/RSI/OFI).
+    // Teks lengkap versi generateEntryReason() tetap dipasang sebagai tooltip.
     if (reasonEl) {
-      reasonEl.innerHTML = emphasizeVolume(generateEntryReason(o), o.vol5m);
+      reasonEl.innerHTML = shortReason(o);
+      reasonEl.title = generateEntryReason(o);
     }
     if (z) { z.textContent = o.zone; z.className = o.zone.indexOf("ATAS") >= 0 ? "down" : o.zone.indexOf("BAWAH") >= 0 ? "up" : ""; }
     if (m) { m.textContent = o.momentum; m.className = o.momentum === "BULLISH" ? "up" : o.momentum === "BEARISH" ? "down" : ""; }
@@ -704,6 +723,8 @@ function applyType() {
     }
     // TRADE ASSISTANT panel (entry zone / averaging levels / hold / close)
     const tpAction = document.getElementById("tp-action");
+    const tpKey = document.getElementById("tp-key");
+    const tpFull = document.getElementById("tp-full");
     const tpLevels = document.getElementById("tp-levels");
     const tpMeta = document.getElementById("tp-meta");
     const tpStEntry = document.getElementById("tp-st-entry");
@@ -732,6 +753,8 @@ function applyType() {
       }
       if (!tp) {
         tpAction.textContent = "—"; tpAction.className = "tp-action wait";
+        if (tpKey) { tpKey.textContent = ""; tpKey.className = "tp-key"; }
+        if (tpFull) tpFull.textContent = "";
         if (tpBias) { tpBias.textContent = ""; tpBias.className = "tp-bias"; }
         if (tpLevels) tpLevels.textContent = "";
         if (tpMeta) tpMeta.textContent = "";
@@ -746,8 +769,27 @@ function applyType() {
           tpBias.innerHTML = `SINYAL <b>${esc(sd)}</b> · entry <b>contra-lock</b>: tunggu harga <b>${isUpSig ? "DI BAWAH" : "DI ATAS"} LOCK</b> (${isUpSig ? "beli" : "jual"}) · close setelah melewati LOCK`;
           tpBias.title = `Arah posisi = arah rekomendasi (sumber tunggal: main signal). LOCK ${lockTxt}. ENTRY hanya saat harga CONTRA-LOCK (${isUpSig ? "di bawah" : "di atas"} LOCK), CLOSE saat harga sudah searah rekomendasi & melewati LOCK (${isUpSig ? "di atas" : "di bawah"} LOCK).`;
         }
-        tpAction.textContent = tp.action;
+        tpAction.textContent = shortAction(tp.action);
         tpAction.className = "tp-action " + (tp.cls || "wait");
+        const tpTitle = [tp.action, tp.reason, tp.why && tp.why.length ? "alasan: " + tp.why.join(", ") : ""]
+          .filter(Boolean).join(" — ");
+        if (tpTitle) tpAction.title = tpTitle;
+        // Baris harga kunci: 1 baris, hanya 2 angka yang benar-benar dipakai user.
+        if (tpKey) {
+          const lv = tp.levels || {};
+          const inPos = tp.entryPrice != null;
+          const rw = lv.rNow != null ? ` <i>(+${lv.rNow.toFixed(2)}% ke target)</i>` : "";
+          tpKey.className = "tp-key " + (tp.cls || "wait");
+          tpKey.innerHTML = inPos
+            ? `<span>POSISI <b>@${fmtPrice(tp.entryPrice)}</b>${o.recPnl != null ? ` <i>(${o.recPnl >= 0 ? "+" : ""}${o.recPnl.toFixed(2)}%)</i>` : ""}</span>` +
+              `<span>TARGET <b>${fmtPrice(lv.target)}</b>${rw}</span>`
+            : `<span>ENTRY <b>${fmtPrice(lv.l1)}</b></span>` +
+              `<span>TARGET <b>${fmtPrice(lv.target)}</b>${rw}</span>`;
+          tpKey.title = inPos
+            ? `Posisi aktif @${fmtPrice(tp.entryPrice)} · target = LOCK (harga open sesi) ${fmtPrice(lv.target)}`
+            : `Entry contra-lock di sekitar ${fmtPrice(lv.l1)} · target = LOCK (harga open sesi) ${fmtPrice(lv.target)}`;
+        }
+        if (tpFull) tpFull.textContent = tp.action;
         if (tpLevels) {
           tpLevels.innerHTML = tp.levels
             ? `<span title="Zona entry (${tp.levels.r1.toFixed(2)}% dari LOCK, sisi contra) — entry boleh dilakukan begitu harga melewati LOCK, tidak perlu menunggu level ini">ENTRY L1 <b>${fmtPrice(tp.levels.l1)}</b> <i>(+${tp.levels.r1.toFixed(2)}%)</i></span>` +
@@ -780,38 +822,19 @@ function applyType() {
     lastSignalState = { verdict: o.verdict, mode: o.mode, highConf: !!o.highConf };
   }
 
-  let confSegs = null;
-  const CONF_SEG = 20;
   function updateConfidenceDisplay(dir, val) {
     const dirEl = document.getElementById("conf-dir");
     const valEl = document.getElementById("conf-val");
     const track = document.getElementById("conf-track");
     if (!dirEl || !track) return;
     if (!dir) {
-      dirEl.textContent = "—"; valEl.textContent = "—";
-      if (confSegs) confSegs.forEach((s) => { s.className = "conf-seg off"; s.style.background = ""; });
+      dirEl.textContent = "—"; if (valEl) valEl.textContent = "—";
+      clearLedBar(track);
       return;
     }
     dirEl.textContent = dir === "down" ? "DOWN" : "UP";
-    valEl.textContent = val + "%";
-    if (!confSegs) {
-      confSegs = [];
-      track.innerHTML = "";
-      for (let i = 0; i < CONF_SEG; i++) {
-        const s = document.createElement("i");
-        s.className = "conf-seg off";
-        track.appendChild(s);
-        confSegs.push(s);
-      }
-    }
-    for (let i = 0; i < CONF_SEG; i++) {
-      const seg = confSegs[i];
-      const p = (i + 0.5) / CONF_SEG;           // posisi 0..1 sepanjang gradasi
-      const hue = Math.round(p * 120);            // 0 merah -> 120 hijau
-      const lit = ((i + 1) / CONF_SEG) * 100 <= val;
-      seg.style.background = "hsl(" + hue + ", 85%, 50%)";
-      seg.className = "conf-seg " + (lit ? "on" : "off");
-    }
+    if (valEl) valEl.textContent = val + "%";
+    paintLedBar(track, val);   // implementasi bersama (lihat paintLedBar di scope global)
   }
 
   // Distribusi per-candle volume trailing (~15 menit) utk threshold LIQUIDITAS dinamis.
@@ -1430,10 +1453,11 @@ function applyType() {
     }
 
     // ===== LED bar INLINE dengan MAIN SIGNAL =====
-    // Bila rekomendasi utama UP/DOWN, LED confidence WAJIB searah rekomendasi itu (bukan
-    // arah fade internal). Bila tidak ada sinyal (flat), pakai perilaku lama apa adanya.
+    // KUNCI hanya berlaku di tab SIGNAL: di tab itu LED WAJIB searah rekomendasi utama.
+    // Tab UP/DOWN = pilihan MANUAL user -> LED mengikuti arah tab (fadeDir sudah = arah tab),
+    // jadi tab tetap berfungsi walau ada rekomendasi berjalan.
     let ledDir = fadeDir, ledConf = fadeConf;
-    if (finalVerdict === "up" || finalVerdict === "down") {
+    if (confMode === "SIGNAL" && (finalVerdict === "up" || finalVerdict === "down")) {
       ledDir = finalVerdict;
       ledConf = confForDir(finalVerdict);
       const ledAlign = !!curTrendDir && curTrendDir !== "flat" && curTrendDir === ledDir;
@@ -1613,7 +1637,8 @@ function trendOfCandles(candles) {
   return "flat";
 }
 function confidenceFromPastSessions(sym, tf, dn) {
-  const candles = state.cache[sym][tf].candles;
+  // Guard: cache candle bisa belum terisi saat render pertama -> kembalikan 0, bukan crash.
+  const candles = (state.cache[sym] && state.cache[sym][tf]) ? state.cache[sym][tf].candles : null;
   if (!candles || candles.length < TREND_SESSIONS + 1) return 0;
   const prev = candles.slice(-1 - TREND_SESSIONS, -1);   // 3 sesi sebelumnya (exclude sesi aktif)
   if (prev.length < 2) return 0;
@@ -2068,6 +2093,40 @@ function partList(parts) {
 function volClass(v) {
   return v == null ? "v-na" : v < 1.0 ? "v-low" : v < 1.5 ? "v-mid" : v < 2.5 ? "v-good" : v < 4 ? "v-strong" : "v-hot";
 }
+/* ===== LED bar confidence (SATU implementasi untuk panel confidence mobile & kartu dual) =====
+   Segmen dibuat sekali per elemen lalu hanya kelas/warnanya yang diperbarui, supaya render
+   250ms tidak membangun ulang DOM. Warna: merah (0%) -> hijau (100%) seperti versi mobile. */
+const LED_SEGMENTS = 20;
+const _ledSegCache = new WeakMap();
+function paintLedBar(trackEl, val) {
+  if (!trackEl) return;
+  let segs = _ledSegCache.get(trackEl);
+  if (!segs) {
+    segs = [];
+    trackEl.innerHTML = "";
+    for (let i = 0; i < LED_SEGMENTS; i++) {
+      const s = document.createElement("i");
+      s.className = "conf-seg off";
+      trackEl.appendChild(s);
+      segs.push(s);
+    }
+    _ledSegCache.set(trackEl, segs);
+  }
+  const v = Math.max(0, Math.min(100, Number(val) || 0));
+  for (let i = 0; i < LED_SEGMENTS; i++) {
+    const seg = segs[i];
+    const p = (i + 0.5) / LED_SEGMENTS;              // posisi 0..1 sepanjang gradasi
+    const hue = Math.round(p * 120);                 // 0 merah -> 120 hijau
+    const lit = ((i + 1) / LED_SEGMENTS) * 100 <= v;
+    seg.style.background = "hsl(" + hue + ", 85%, 50%)";
+    seg.className = "conf-seg " + (lit ? "on" : "off");
+  }
+}
+function clearLedBar(trackEl) {
+  if (!trackEl) return;
+  paintLedBar(trackEl, 0);
+}
+
 // Wrap only the volume ratio that follows a "volume" phrase, leaving RSI/strength numbers alone.
 function emphasizeVolume(text, vol) {
   const esc = String(text).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -2377,9 +2436,15 @@ function updateLearnChip() {
   const learned = G && G.mode === "learned";
   const boot = G && G.mode === "bootstrap";
   c.className = "learn-chip" + (learned ? " learned" : boot ? " bootstrap" : "");
+  // Teks dipersingkat (LRN n/target) karena topbar mobile sempit: nama mode cukup lewat
+  // warna chip (hijau = belajar, merah = bootstrap) + tooltip, bukan teks panjang.
+  const modeTxt = learned ? "AMBANG BELAJAR" : boot ? "BOOTSTRAP" : "KONSERVATIF";
   c.textContent = L
-    ? `LEARNER ${L.canonicalWithRes || 0}/${L.target || 120} · ${learned ? "AMBANG BELAJAR" : boot ? "BOOTSTRAP" : "KONSERVATIF"}`
-    : "LEARNER —";
+    ? `LRN ${L.canonicalWithRes || 0}/${L.target || 120}`
+    : "LRN —";
+  c.title = L
+    ? `STATUS LEARNER · ${L.canonicalWithRes || 0}/${L.target || 120} referensi · ambang ${modeTxt} (klik untuk buka panel)`
+    : "Buka panel STATUS LEARNER";
   if (!_learnChipBound) {
     _learnChipBound = true;
     c.addEventListener("click", () => {
@@ -2396,10 +2461,8 @@ function renderGateLine() {
   const a = document.getElementById("help-gates"); if (a) a.textContent = sum;
   const b = document.getElementById("help-gate-mode"); if (b) b.textContent = GATES.mode;
   const c = document.getElementById("gate-line");
-  if (c) {
-    const learned = GATES.mode === "learned";
-    c.innerHTML = `${learned ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR</span>' : (GATES.mode === "strict" ? '<span class="lstat-badge def">AMBANG KONSERVATIF</span>' : '<span class="lstat-badge sup">BOOTSTRAP (DILONGGARKAN)</span>')} <b>AMBANG AKTIF:</b> ${sum}`;
-  }
+  const html = `${GATES.mode === "learned" ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR</span>' : (GATES.mode === "strict" ? '<span class="lstat-badge def">AMBANG KONSERVATIF</span>' : '<span class="lstat-badge sup">BOOTSTRAP (DILONGGARKAN)</span>')} <b>AMBANG AKTIF:</b> ${sum}`;
+  if (c) c.innerHTML = html;   // hanya versi mobile (section.confidence)
 }
 // Terapkan threshold hasil belajar (lapisan kedua setelah tier ladder).
 function gateThresholdsOK(f) {
@@ -3037,36 +3100,159 @@ function candlesFor(asset) {
   const c = state.cache[asset] && state.cache[asset][state.chartInterval];
   return c ? c.candles : [];
 }
+/* ===== ALASAN RINGKAS (dipakai BERSAMA kartu mobile & kolom dual desktop) =====
+   Diletakkan di scope global supaya updateSignal() (mobile) dan renderDual() (desktop)
+   memakai sumber kata yang sama -> tidak ada dua versi alasan yang bisa berbeda. */
+/* Label pendek per mode (kartu mobile hanya butuh inti "kenapa"). */
+const MODE_SHORT = {
+  "HIST-PREDICT": "historis 50 sesi",
+  "TREND": "tren awal sesi",
+  "REVERSAL↑": "reversal naik",
+  "REVERSAL↓": "reversal turun",
+  "MOMENTUM": "momentum",
+  "CLOSE": "menjelang settlement",
+  "CONT": "kontinuasi",
+  "WEAK-TREND": "tren lemah",
+  "FILTERED": "tidak selaras",
+  "FILTERED-REVERSAL": "reversal belum konfirmasi",
+  "BLOCKED-GOAL": "kontinuasi diblokir",
+  "WARMUP": "warmup",
+  "LOWVOL": "volume tipis",
+  "MENUNGGU": "menunggu candle",
+  "NO-SIGNAL": "tanpa sinyal",
+};
+
+/* Versi RINGKAS dari generateEntryReason(): satu baris, hanya angka yang benar-benar
+   dipakai untuk menilai sesi (vol = angka gate, RSI, OFI). Teks lengkap tetap dibuat
+   terpisah dan dipasang sebagai tooltip, jadi tidak ada informasi yang hilang. */
+function shortReason(o) {
+  const dirCls = o.verdict === "up" ? "up" : o.verdict === "down" ? "down" : "flat";
+  const sep = `<span class="rz-sep">·</span>`;
+  const bits = [];
+  // Maksimal 3 potongan supaya pasti muat 1 baris: mode (inti "kenapa") + vol + RSI.
+  // OFI & sisanya tetap tersedia lengkap di tooltip.
+  bits.push(`<b>${esc(MODE_SHORT[o.mode] || o.mode)}</b>`);
+  if (o.vol5m != null) {
+    const v = o.vol5m >= 10 ? "≥10×" : o.vol5m.toFixed(2) + "×";
+    const minTxt = o.mode === "LOWVOL" && o.volNeed != null ? `<i>(min ${o.volNeed}×)</i>` : "";
+    bits.push(`vol <b class="vol-val ${volClass(o.vol5m)}">${v}</b>${minTxt}`);
+  }
+  if (o.rsi != null) bits.push(`RSI <b>${o.rsi.toFixed(0)}</b>`);
+  return `<span class="rz-dot ${dirCls}"></span><span class="rz-txt">${bits.join(" " + sep + " ")}</span>`;
+}
+
+/* Versi PENDEK dari teks aksi Trade Assistant: ambil klausa pertama saja
+   (mis. "TUNGGU PEAK — harga contra 0.25%" -> "TUNGGU PEAK"). Dipakai kartu mobile
+   DAN kolom dual desktop supaya keduanya menampilkan teks aksi yang identik. */
+function shortAction(s) {
+  const t = String(s || "").trim();
+  if (t.includes(" — ")) return t.split(" — ")[0].trim();
+  if (t.includes(":") && t.length > 45) return t.split(":")[0].trim();
+  if (t.includes(" · ")) return t.split(" · ")[0].trim();
+  return t;
+}
+
 function buildDual() {
   const el = document.getElementById("dual");
   if (!el || dualCharts) return;
+  /* INFORMATION ARCHITECTURE kartu dual = SALINAN urutan kartu mobile yang sudah nyaman:
+       1. HEAD      identitas + harga + konteks sesi (Δ dari LOCK, Δ$, 24h, sisa waktu)
+       2. CHART     konteks visual (mobile pun menaruh chart sebelum sinyal)
+       3. SINYAL    "apa" (rekomendasi) + "kenapa" (alasan) menempel jadi satu blok
+       4. TA        aksi (hero) + 2 harga kunci + status; sisanya di balik "Detail"
+       5. PASAR     likuiditas & volume (ditonjolkan) + orderbook bar
+       6. METRIK    sesi, indikator & order flow sebagai pasangan label:nilai
+     Setiap blok dipisah garis + jarak konsisten supaya mata bisa memindai per blok. */
   el.innerHTML = ["BTC", "ETH"].map((a) => `
     <div class="dual-col" id="dc-${a}-col">
-      <div class="dc-head"><span class="dc-coin">${a}</span><span class="dc-price" id="dc-${a}-price">—</span><span class="dc-chg" id="dc-${a}-chg"></span><span class="dc-dusd" id="dc-${a}-dusd"></span><span class="dc-chg24" id="dc-${a}-chg24"></span><span class="dc-cd" id="dc-${a}-cd" title="Sisa waktu sesi">--:--</span></div>
-      <div class="dc-chart" id="dc-${a}-chart"></div>
-      <div class="dc-recrow"><span class="dc-rec" id="dc-${a}-rec">—</span><span class="rec-status" id="dc-${a}-badge"></span></div>
-      <div class="dc-act" id="dc-${a}-act">—</div>
-      <div class="tp-status"><span class="tp-st wait" id="dc-${a}-st-entry">ENTRY: <b>WAITING…</b></span><span class="tp-st wait" id="dc-${a}-st-close">EARLY CLOSE: <b>WAITING…</b></span></div>
-      <div class="dc-levels" id="dc-${a}-levels"></div>
-      <div class="dc-grid" id="dc-${a}-grid"></div>
-      <div class="dc-grid" id="dc-${a}-rows"></div>
-      <div class="dc-pred" id="dc-${a}-pred"></div>
-      <!-- VOLUME & LIQUIDITY: ditonjolkan (bold + gradasi warna) — tepat di atas orderbook bar -->
-      <div class="dc-volrow">
-        <span>LIQUIDITY <b class="vol-val v-na" id="dc-${a}-liq" title="Rasio likuiditas: proyeksi volume sesi dibanding volume 5m typical (>1 = lebih ramai)">—</b></span>
-        <span>VOL <b class="vol-val v-na" id="dc-${a}-vol" title="Pace volume 5m terhadap rata-rata (angka yang dinilai gate)">—</b></span>
+      <div class="dc-head">
+        <span class="dc-coin">${a}</span>
+        <span class="dc-price" id="dc-${a}-price">—</span>
+        <span class="dc-chg" id="dc-${a}-chg"></span>
+        <span class="dc-dusd" id="dc-${a}-dusd"></span>
+        <span class="dc-chg24" id="dc-${a}-chg24"></span>
+        <span class="dc-cd" id="dc-${a}-cd" title="Sisa waktu sesi">--:--</span>
       </div>
-      <div class="dc-ob">
+
+      <div class="dc-chart" id="dc-${a}-chart"></div>
+
+      <div class="dc-sec dc-signal">
+        <div class="dc-recrow"><span class="dc-rec" id="dc-${a}-rec">—</span><span class="rec-status" id="dc-${a}-badge"></span></div>
+        <div class="rz-line" id="dc-${a}-reason" title=""><span class="rz-dot flat"></span><span class="rz-txt">—</span></div>
+        <!-- LED bar confidence: HANYA bar + % (tanpa label), arahnya SELALU searah signal -->
+        <div class="dc-led" id="dc-${a}-led">
+          <div class="conf-track dc-led-track" id="dc-${a}-led-track"></div>
+          <span class="dc-led-val na" id="dc-${a}-led-val">—</span>
+        </div>
+      </div>
+
+      <div class="dc-sec dc-ta">
+        <div class="dc-sec-label">TRADE ASSISTANT</div>
+        <!-- 2 kolom: kiri = info sinyal (aksi + harga kunci) · kanan = status ENTRY & EARLY CLOSE
+             (ditumpuk vertikal). Menghemat 1 baris tinggi kartu tanpa memindahkan informasi. -->
+        <div class="dc-ta-row">
+          <div class="dc-ta-main">
+            <div class="dc-act" id="dc-${a}-act">—</div>
+            <div class="tp-key" id="dc-${a}-key"></div>
+          </div>
+          <div class="tp-status dc-ta-st">
+            <span class="tp-st wait" id="dc-${a}-st-entry">ENTRY: <b>WAITING…</b></span>
+            <span class="tp-st wait" id="dc-${a}-st-close">EARLY CLOSE: <b>WAITING…</b></span>
+          </div>
+        </div>
+        <details class="tp-detail">
+          <summary>Detail</summary>
+          <div class="tp-full" id="dc-${a}-full"></div>
+          <div class="tp-bias" id="dc-${a}-bias"></div>
+          <div class="tp-levels" id="dc-${a}-levels"></div>
+          <div class="tp-meta" id="dc-${a}-meta"></div>
+        </details>
+      </div>
+
+      <!-- BAGIAN BAWAH: 2 kolom di dalam kartu supaya tinggi kartu turun (panel
+           DESKTOP SIGNAL ACCURACY jadi terlihat tanpa scroll).
+           Kiri = pasar (likuiditas/volume + orderbook) · Kanan = metrik & order flow. -->
+      <div class="dc-bottom">
+      <div class="dc-sec dc-mkt">
+        <div class="dc-volrow">
+          <span title="Rasio likuiditas: proyeksi volume sesi dibanding volume 5m typical (>1 = lebih ramai)">LIQUIDITY <b class="vol-val v-na" id="dc-${a}-liq">—</b></span>
+          <span title="Pace volume 5m terhadap rata-rata (angka yang dinilai gate)">VOL <b class="vol-val v-na" id="dc-${a}-vol">—</b></span>
+        </div>
         <div class="ob-bg"><div class="ob-ask" id="dc-${a}-ask"></div><div class="ob-bid" id="dc-${a}-bid"></div></div>
         <div class="ob-label"><span class="ob-sell-pct" id="dc-${a}-askp">—</span><span class="ob-buy-pct" id="dc-${a}-bidp">—</span></div>
       </div>
-      <div class="dc-reason" id="dc-${a}-reason">—</div>
+
+      <div class="dc-sec dc-metrics-sec">
+        <!-- Judul + toggle "Lihat semua" dalam SATU baris (hemat satu baris tinggi kartu).
+             4 metrik terpenting selalu tampil; sisanya di balik tombol. -->
+        <div class="dc-metrics-head">
+          <span class="dc-sec-label">METRIK &amp; ORDER FLOW</span>
+          <button type="button" class="dc-more-btn" id="dc-${a}-more-btn" aria-expanded="false"
+                  title="Tampilkan metrik pendukung: RSI, JARAK LOCK, LOCK, PREDIKSI, CONF, REWARD">LIHAT SEMUA ▾</button>
+        </div>
+        <div class="dc-metrics dc-metrics-main" id="dc-${a}-grid"></div>
+        <div class="dc-metrics" id="dc-${a}-rows" hidden></div>
+        <div class="dc-metrics" id="dc-${a}-pred" hidden></div>
+      </div>
+      </div>
     </div>`).join("");
   dualCharts = {};
   for (const a of ["BTC", "ETH"]) {
     dualCharts[a] = new CanvasChart(document.getElementById(`dc-${a}-chart`));
     dualCharts[a].setType(state.type);
     dualCharts[a].fit();
+    // Toggle "LIHAT SEMUA": pakai <button> (bukan <details>) supaya bisa sebaris dengan
+    // judul blok. Yang disembunyikan hanya metrik pendukung — 4 metrik inti tetap terlihat.
+    const btn = document.getElementById(`dc-${a}-more-btn`);
+    const bodies = [`dc-${a}-rows`, `dc-${a}-pred`].map((id) => document.getElementById(id)).filter(Boolean);
+    if (btn && bodies.length) {
+      btn.addEventListener("click", () => {
+        const open = btn.getAttribute("aria-expanded") === "true";
+        btn.setAttribute("aria-expanded", open ? "false" : "true");
+        btn.textContent = open ? "LIHAT SEMUA ▾" : "SEMBUNYIKAN ▴";
+        bodies.forEach((b) => { b.hidden = open; });
+      });
+    }
   }
 }
 /* Arah POSISI Trade Assistant = ARAH REKOMENDASI (main signal = SATU-SATUNYA sumber kebenaran).
@@ -3290,7 +3476,56 @@ function renderDual(force) {
     }
     const bEl = g("badge");
     if (bEl) { const hl = m && m.health ? m.health.label : ""; bEl.textContent = hl; bEl.className = "rec-status " + (m && m.health ? healthClass(m.health.label) : ""); }
-    const aEl = g("act"); if (aEl) { aEl.textContent = plan ? plan.action : "—"; aEl.className = "dc-act " + (plan ? plan.cls : "wait"); }
+    const aEl = g("act");
+    if (aEl) {
+      aEl.textContent = plan ? shortAction(plan.action) : "—";
+      aEl.className = "dc-act " + (plan ? plan.cls : "wait");
+      aEl.title = plan ? plan.action : "";
+    }
+    // Baris 2 harga kunci (sama seperti kartu mobile): ENTRY/TARGET atau POSISI/TARGET
+    const keyEl = g("key");
+    if (keyEl) {
+      const lv = plan && plan.levels ? plan.levels : null;
+      if (!lv) { keyEl.textContent = ""; keyEl.className = "tp-key"; }
+      else {
+        const inPos = plan.entryPrice != null;
+        const rw = lv.rNow != null ? ` <i>(+${lv.rNow.toFixed(2)}% ke target)</i>` : "";
+        let pnl = "";
+        if (inPos && plan.tradeDir) {
+          const v = ((plan.tradeDir === "up" ? (px - plan.entryPrice) : (plan.entryPrice - px)) / plan.entryPrice) * 100;
+          if (isFinite(v)) pnl = ` <i>(${v >= 0 ? "+" : ""}${v.toFixed(2)}%)</i>`;
+        }
+        keyEl.className = "tp-key " + (plan.cls || "wait");
+        keyEl.innerHTML = inPos
+          ? `<span>POSISI <b>@${fmtPrice(plan.entryPrice)}</b>${pnl}</span><span>TARGET <b>${fmtPrice(lv.target)}</b>${rw}</span>`
+          : `<span>ENTRY <b>${fmtPrice(lv.l1)}</b></span><span>TARGET <b>${fmtPrice(lv.target)}</b>${rw}</span>`;
+        keyEl.title = inPos
+          ? `Posisi aktif @${fmtPrice(plan.entryPrice)} · target = LOCK (harga open sesi) ${fmtPrice(lv.target)}`
+          : `Entry contra-lock di sekitar ${fmtPrice(lv.l1)} · target = LOCK (harga open sesi) ${fmtPrice(lv.target)}`;
+      }
+    }
+    // Isi "Detail": teks aksi penuh, penjelasan arah, level ladder, dan metrik teknis
+    const fullEl = g("full"); if (fullEl) fullEl.textContent = plan ? plan.action : "";
+    const biasEl = g("bias");
+    if (biasEl) {
+      if (!plan) { biasEl.textContent = ""; biasEl.className = "tp-bias"; }
+      else {
+        const isUpSig = dir === "up";
+        biasEl.className = "tp-bias " + dir;
+        biasEl.innerHTML = `SINYAL <b>${esc(String(dir).toUpperCase())}</b> · entry <b>contra-lock</b>: tunggu harga <b>${isUpSig ? "DI BAWAH" : "DI ATAS"} LOCK</b> (${isUpSig ? "beli" : "jual"}) · close setelah melewati LOCK`;
+      }
+    }
+    const metaEl = g("meta");
+    if (metaEl) {
+      if (!plan) metaEl.textContent = "";
+      else {
+        const ofiTxt = sig && sig.ofi != null ? `OFI ${(sig.ofi * 100).toFixed(0)}%` : "OFI —";
+        const adv = plan.adverseStd != null ? `${plan.adverseStd >= 0 ? "-" : "+"}${Math.abs(plan.adverseStd).toFixed(2)}σ` : "—";
+        const rwNow = plan.levels && plan.levels.rNow != null ? ` · reward +${plan.levels.rNow.toFixed(2)}%` : "";
+        const pos = plan.entryPrice != null ? ` · posisi @${fmtPrice(plan.entryPrice)}` : " · belum ada posisi";
+        metaEl.textContent = `Momentum ${plan.fs} · jarak lock ${adv}${rwNow} · ${ofiTxt}${pos}${plan.why && plan.why.length ? " · " + plan.why.join(", ") : ""}`;
+      }
+    }
     // STATUS ENTRY / EARLY CLOSE per koin (sumber sama: state Trade Assistant)
     const seEl = g("st-entry"), scEl = g("st-close");
     const se = plan && plan.statusEntry, sc = plan && plan.statusClose;
@@ -3308,27 +3543,39 @@ function renderDual(force) {
     }
     const lvEl = g("levels");
     if (lvEl) lvEl.innerHTML = (plan && plan.levels)
-      ? `<b class="dc-arahtrade ${plan.tradeDir}">ARAH ${String(plan.tradeDir || "").toUpperCase()} · entry contra-lock</b> · L1 <b>${fmtPrice(plan.levels.l1)}</b> (+${plan.levels.r1.toFixed(2)}%) · TAMBAH L2 <b>${fmtPrice(plan.levels.l2)}</b> (+${plan.levels.r2.toFixed(2)}%) · TAMBAH L3 <b>${fmtPrice(plan.levels.l3)}</b> (+${plan.levels.r3.toFixed(2)}%) · TARGET (LOCK) <b>${fmtPrice(plan.levels.target)}</b>`
+      ? `<span>ENTRY L1 <b>${fmtPrice(plan.levels.l1)}</b> <i>(+${plan.levels.r1.toFixed(2)}%)</i></span>` +
+        `<span>TAMBAH L2 <b>${fmtPrice(plan.levels.l2)}</b> <i>(+${plan.levels.r2.toFixed(2)}%)</i></span>` +
+        `<span>TAMBAH L3 <b>${fmtPrice(plan.levels.l3)}</b> <i>(+${plan.levels.r3.toFixed(2)}%)</i></span>` +
+        `<span>TARGET (LOCK) <b>${fmtPrice(plan.levels.target)}</b></span>`
       : "";
+    // Metrik dirender sebagai pasangan label:nilai (chip) supaya bisa dipindai cepat —
+    // teks "LABEL nilai · LABEL nilai" sebelumnya sulit dibaca.
+    const chip = (l, v, c) => `<span class="dc-m"><i>${l}</i><b class="${c || ""}">${v}</b></span>`;
+    // INTI (selalu tampil) — 4 informasi paling penting saja: OFI, MOMENTUM, MODE, DELTA.
     const grEl = g("grid");
     if (grEl) {
-      // LIQUIDITY & VOL sudah ditampilkan (ditonjolkan) di baris tepat atas orderbook bar ->
-      // di sini hanya OFI & REWARD supaya tidak ada informasi ganda.
-      const ofi = sig && sig.ofi != null ? (sig.ofi * 100).toFixed(0) + "%" : "—";
-      const rw = plan && plan.levels ? plan.levels.rNow.toFixed(2) + "%" : "—";
-      grEl.innerHTML = `OFI <b>${ofi}</b> · REWARD <b>${rw}</b>`;
+      if (!m) grEl.innerHTML = "";
+      else {
+        const ofi = sig && sig.ofi != null ? (sig.ofi * 100).toFixed(0) + "%" : "—";
+        const mom = m.slope > 0 ? "BULLISH" : m.slope < 0 ? "BEARISH" : "FLAT";
+        const momCls = m.slope > 0 ? "up" : m.slope < 0 ? "down" : "";
+        const delta = m.O > 0 ? (m.C - m.O) / m.O * 100 : 0;
+        grEl.innerHTML = chip("OFI", ofi) + chip("MOMENTUM", mom, momCls) +
+          chip("MODE", liveMode || "—") + chip("DELTA", `${delta >= 0 ? "+" : ""}${delta.toFixed(3)}%`);
+      }
     }
+    // Detail (di balik "Lihat semua metrik") — pendukung, bukan informasi utama.
     const rwEl = g("rows");
     if (rwEl && m) {
-      const mom = m.slope > 0 ? "BULLISH" : m.slope < 0 ? "BEARISH" : "FLAT";
-      const momCls = m.slope > 0 ? "up" : m.slope < 0 ? "down" : "";
       const dev = m.std > 0 ? (m.C - m.O) / m.std : 0;
-      rwEl.innerHTML = `MOMENTUM <b class="${momCls}">${mom}</b> · RSI <b>${m.rsi != null ? m.rsi.toFixed(1) : "—"}</b> · JARAK LOCK <b>${dev >= 0 ? "+" : ""}${dev.toFixed(2)}σ</b>`;
+      rwEl.innerHTML = chip("RSI", m.rsi != null ? m.rsi.toFixed(1) : "—") +
+        chip("JARAK LOCK", `${dev >= 0 ? "+" : ""}${dev.toFixed(2)}σ`) + chip("LOCK", fmtPrice(m.O));
     }
     const prEl = g("pred");
-    if (prEl && m) {
-      const delta = m.O > 0 ? (m.C - m.O) / m.O * 100 : 0;
-      prEl.innerHTML = `LOCK <b>${fmtPrice(m.O)}</b> · PREDIKSI <b>${graded ? dir.toUpperCase() : "—"}</b> · CONF <b>${sig && sig.conf != null ? sig.conf : "—"}</b> · MODE <b>${liveMode || "—"}</b> · DELTA <b>${delta >= 0 ? "+" : ""}${delta.toFixed(3)}%</b>`;
+    if (prEl) {
+      const rw = plan && plan.levels ? plan.levels.rNow.toFixed(2) + "%" : "—";
+      prEl.innerHTML = chip("PREDIKSI", graded ? dir.toUpperCase() : "—", graded ? dir : "") +
+        chip("CONF", sig && sig.conf != null ? sig.conf : "—") + chip("REWARD", rw);
     }
     const ch = dualCharts[a];
     if (ch) {
@@ -3364,8 +3611,40 @@ function renderDual(force) {
       if (ap) ap.textContent = askPct.toFixed(0) + "%";
       if (bp) bp.textContent = (100 - askPct).toFixed(0) + "%";
     }
+    // LED BAR CONFIDENCE — tepat di bawah informasi signal.
+    // Nilai = keyakinan untuk arah SIGNAL itu sendiri (signal UP -> bar UP), memakai fungsi
+    // yang SAMA dengan panel confidence mobile saat tab SIGNAL terkunci ke rekomendasi
+    // (confidenceFromPastSessions: bukti 3 sesi sebelum sesi aktif). Tampilannya hanya
+    // bar + persen, tanpa label lain, sesuai permintaan.
+    const ledTrack = g("led-track"), ledVal = g("led-val"), ledWrap = g("led");
+    if (ledTrack) {
+      const confDir = graded ? dir : null;
+      if (!confDir) {
+        clearLedBar(ledTrack);
+        if (ledVal) { ledVal.textContent = "—"; ledVal.className = "dc-led-val na"; }
+        if (ledWrap) ledWrap.title = "Belum ada arah signal — LED keyakinan kosong";
+      } else {
+        // parameter ke-3 = BOOLEAN "apakah arahnya DOWN" (bukan string arah)
+        const conf = confidenceFromPastSessions(a, tf, confDir === "down");
+        paintLedBar(ledTrack, conf);
+        if (ledVal) { ledVal.textContent = conf + "%"; ledVal.className = "dc-led-val " + confDir; }
+        if (ledWrap) ledWrap.title = `Keyakinan arah ${confDir.toUpperCase()} (3 sesi sebelum sesi aktif) — sumber sama dengan tab SIGNAL di mobile`;
+      }
+    }
+    // ALASAN: pakai shortReason() yang SAMA dengan kartu mobile (1 baris, nilai saja).
+    // Teks lengkap tetap tersedia di tooltip supaya tidak ada informasi yang hilang.
     const rsEl = g("reason");
-    if (rsEl) rsEl.textContent = (sig && sig.reason) ? sig.reason : "—";
+    if (rsEl) {
+      const volFor = sig ? (sig.volRel2 != null ? sig.volRel2 : (sig.volRel != null ? sig.volRel : null)) : null;
+      rsEl.innerHTML = shortReason({
+        verdict: graded ? dir : "flat",
+        mode: (sig && sig.mode) || liveMode || "NO-SIGNAL",
+        vol5m: volFor,
+        volNeed: fairMinVol(tf),
+        rsi: m && m.rsi != null ? m.rsi : null,
+      });
+      rsEl.title = (sig && sig.reason) ? sig.reason : "—";
+    }
   }
 }
 
@@ -4393,12 +4672,21 @@ function bindControls() {
     segActive("chart-tf-seg", b);
     renderActive(); updateProjection();
   });
-  document.getElementById("conf-cta").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-mode]"); if (!b) return;
-    confMode = b.dataset.mode;
-    segActive("conf-cta", b);
+  // Tab arah keyakinan (hanya di mobile: tab SIGNAL/UP/DOWN tidak ditampilkan di layar lebar).
+  const applyConfMode = (mode) => {
+    confMode = mode;
+    const seg = document.getElementById("conf-cta");
+    const btn = seg && seg.querySelector(`[data-mode="${mode}"]`);
+    if (btn) segActive("conf-cta", btn);
     updateProjection();
-  });
+  };
+  {
+    const seg = document.getElementById("conf-cta");
+    if (seg) seg.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-mode]"); if (!b) return;
+      applyConfMode(b.dataset.mode);
+    });
+  }
   const cdbg = document.getElementById("conf-debug-reset");
   if (cdbg) cdbg.addEventListener("click", () => {
     // PENTING: reset ini SENGAJA hanya mengosongkan tampilan akurasi lokal (MobilePredLog) dan
@@ -4464,11 +4752,12 @@ function updateAudioHint() {
   const el = document.getElementById("audio-hint"); if (!el) return;
   const on = !!(audioCtx && audioCtx.state === "running");
   if (on) audioBlocked = false;
-  el.textContent = on ? "🔊 suara" : "🔇 suara";
+  el.textContent = on ? "🔊" : "🔇";
   el.className = "audio-hint " + (on ? "on" : "off");
   el.title = on
-    ? "Suara notifikasi AKTIF (klik untuk tes suara)"
+    ? "Suara notifikasi AKTIF (klik untuk tes 3 suara)"
     : "Suara notifikasi DIBLOKIR browser sampai ada interaksi. Klik di sini untuk mengaktifkan.";
+  el.setAttribute("aria-label", on ? "Suara notifikasi aktif" : "Suara notifikasi diblokir — klik untuk mengaktifkan");
 }
 
 // Shared tone sequencer with a GENTLE timbre: sine/triangle only, a low-pass filter and
@@ -4597,10 +4886,18 @@ document.addEventListener("click", unlockAudio);
 document.addEventListener("touchstart", unlockAudio);
 document.addEventListener("keydown", unlockAudio);
 document.addEventListener("pointerdown", unlockAudio);
-// tombol indikator suara: aktifkan + tes 1 nada (dipasang langsung; elemen sudah ada di DOM)
+// SATU-SATUNYA kontrol suara (chip status di topbar): aktifkan audio + tes 3 nada sekaligus.
+// Chip inilah pengganti tombol tes terpisah di baris kontrol, supaya header/controls tidak
+// menambah elemen yang mendorong tata letak keluar frame di mobile.
 (function bindAudioHint() {
   const b = document.getElementById("audio-hint");
-  if (b) b.addEventListener("click", (ev) => { ev.stopPropagation(); unlockAudio(); setTimeout(() => playSoundAlert(), 60); });
+  if (b) b.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    unlockAudio();
+    setTimeout(() => playSoundAlert(), 60);        // 1) danger alarm (sinyal entry)
+    setTimeout(playTradeEntrySound, 1300);         // 2) beep autopilot (entry trade)
+    setTimeout(playCloseSound, 2100);              // 3) whoop turun (close)
+  });
   updateAudioHint();
   setTimeout(updateAudioHint, 1200);
 })();
@@ -4744,7 +5041,7 @@ function ensureLearnerPanel() {
     if (brand) {
       const b = document.createElement("button");
       b.id = "learn-chip"; b.className = "learn-chip"; b.type = "button";
-      b.title = "Buka panel STATUS LEARNER"; b.textContent = "LEARNER —";
+      b.title = "Buka panel STATUS LEARNER"; b.textContent = "LRN —";
       brand.appendChild(b);
     }
   }
@@ -4836,21 +5133,8 @@ function start() {
   setInterval(updateVisitors, 15000);
   updateVisitors();
 
-  // Audio test button
-  const audioTestBtn = document.getElementById("audio-test-btn");
-  if (audioTestBtn) {
-    audioTestBtn.addEventListener("click", () => {
-      try {
-        playSoundAlert();                          // 1) danger alarm (signal entry)
-        setTimeout(playTradeEntrySound, 1400);     // 2) autopilot-disconnect beeps
-        setTimeout(playCloseSound, 2200);          // 3) master warning whoop (close)
-        audioTestBtn.textContent = "✓ 3 sounds";
-      } catch (e) {
-        audioTestBtn.textContent = "❌";
-      }
-      setTimeout(() => { audioTestBtn.textContent = "🔊"; }, 3200);
-    });
-  }
+  // (Tombol tes suara terpisah DIHAPUS: kini tes 3 suara ada di chip status suara topbar,
+  //  sehingga hanya ada SATU ikon suara dan baris kontrol tidak meluber di layar sempit.)
 
   window.addEventListener("resize", () => chart && chart.fit());
 }

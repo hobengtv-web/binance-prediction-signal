@@ -14,13 +14,16 @@
     <div class="brand">
       <span class="logo">◈</span>
       <span class="title">PREDICTION&nbsp;SIGNAL</span>
+      <!-- dot online DITARUH AWAL (setelah judul) supaya SELALU ikut baris pertama header
+           dan tidak pernah terdorong turun ke baris kedua oleh chip di kanannya. -->
+      <span id="conn" class="conn conn--off" title="Connection status">●</span>
        <span id="src" class="src">SRC —</span>
       <span id="visitors" class="visitors" title="Active visitors">👁 <b>—</b></span>
       <!-- akses cepat ke panel learner (klik = buka & scroll) -->
-      <button id="learn-chip" class="learn-chip" title="Buka panel STATUS LEARNER">LEARNER —</button>
-      <!-- status suara notifikasi: klik = aktifkan (browser blokir audio sampai ada interaksi) -->
-      <button id="audio-hint" class="audio-hint off" title="Status suara notifikasi">🔇 suara</button>
-      <span id="conn" class="conn conn--off" title="Connection status">●</span>
+      <button id="learn-chip" class="learn-chip" title="Buka panel STATUS LEARNER">LRN —</button>
+      <!-- status suara notifikasi: klik = aktifkan + tes (browser blokir audio sampai ada interaksi).
+           SATU-SATUNYA kontrol suara — teks disembunyikan (ikon saja) supaya tidak mendorong elemen lain keluar frame. -->
+      <button id="audio-hint" class="audio-hint off" aria-label="Status suara notifikasi" title="Status suara notifikasi">🔇</button>
     </div>
 
     <div id="err" class="err" hidden></div>
@@ -45,7 +48,6 @@
       <button class="seg-btn" data-ctf="30s">30s</button>
       <button class="seg-btn" data-ctf="1m">1m</button>
     </div>
-    <button id="audio-test-btn" class="seg-btn" title="Test signal sound" style="margin-left:8px; padding:4px 8px;">🔊</button>
   </section>
 
   <!-- WIDE SCREENS: full detail for BOTH coins, side by side -->
@@ -76,9 +78,9 @@
 
   <section class="confidence" id="confidence">
     <div class="seg conf-cta" id="conf-cta">
-      <button class="seg-btn active" data-mode="SIGNAL">SIGNAL</button>
-      <button class="seg-btn" data-mode="UP">UP</button>
-      <button class="seg-btn" data-mode="DOWN">DOWN</button>
+      <button class="seg-btn active" data-mode="SIGNAL" title="Terkunci mengikuti rekomendasi sinyal utama">SIGNAL</button>
+      <button class="seg-btn" data-mode="UP" title="Manual: hitung keyakinan untuk arah UP (tidak terkunci ke sinyal)">UP</button>
+      <button class="seg-btn" data-mode="DOWN" title="Manual: hitung keyakinan untuk arah DOWN (tidak terkunci ke sinyal)">DOWN</button>
     </div>
     <div class="conf-trend">TREND <b id="conf-trend">—</b> · <span id="conf-src">—</span></div>
     <div class="conf-head">
@@ -91,19 +93,31 @@
       <div class="rec-status" id="rec-status"></div>
     </div>
 
+    <!-- REASON = kenapa rekomendasi di atas diambil. Nilai saja, tanpa label, dipaksa
+         1 baris (kelebihan dipotong "…"). Teks lengkap tetap tersedia di tooltip. -->
+    <div class="rz-line" id="entryReason" title=""><span class="rz-dot flat"></span><span class="rz-txt">Menunggu sinyal…</span></div>
+
     <!-- Trade Assistant: entry zone / averaging levels / hold / close -->
     <div class="trade-plan">
-      <div class="tp-head">TRADE ASSISTANT (ENTRY &amp; CLOSE)</div>
-      <!-- SINYAL (arah close sesi) vs ARAH TRADE (contra-lock, menuju LOCK) -->
-      <div class="tp-bias" id="tp-bias">—</div>
-      <!-- STATUS: apakah ENTRY dan EARLY CLOSE sudah terjadi (diisi dari state Trade Assistant) -->
+      <div class="tp-head">TRADE ASSISTANT</div>
+      <!-- INTI 1: aksi yang harus dilakukan sekarang (teks pendek, satu baris besar) -->
+      <div class="tp-action" id="tp-action">—</div>
+      <!-- INTI 2: harga kunci — boleh entry di mana, target di mana -->
+      <div class="tp-key" id="tp-key"></div>
+      <!-- INTI 3: status apakah ENTRY dan EARLY CLOSE sudah terjadi -->
       <div class="tp-status">
         <span class="tp-st wait" id="tp-st-entry">ENTRY: <b>WAITING…</b></span>
         <span class="tp-st wait" id="tp-st-close">EARLY CLOSE: <b>WAITING…</b></span>
       </div>
-      <div class="tp-action" id="tp-action">—</div>
-      <div class="tp-levels" id="tp-levels"></div>
-      <div class="tp-meta" id="tp-meta"></div>
+      <!-- Sisanya (penjelasan arah, ladder level, momentum/OFI/alasan) disembunyikan
+           di balik toggle "Detail" supaya kartu ringkas & tidak memaksa user membaca. -->
+      <details class="tp-detail">
+        <summary>Detail</summary>
+        <div class="tp-full" id="tp-full"></div>
+        <div class="tp-bias" id="tp-bias"></div>
+        <div class="tp-levels" id="tp-levels"></div>
+        <div class="tp-meta" id="tp-meta"></div>
+      </details>
     </div>
     
      <!-- Volume & Liquidity Section -->
@@ -128,19 +142,13 @@
       </div>
     </div>
 
-    <!-- INFO AMBANG AKTIF (profil gate: bootstrap / hasil belajar) — setelah VOLUME + ORDERBOOK -->
-    <div style="padding-top:8px; margin-top:12px; border-top:1px solid var(--border);">
+    <!-- Status teknis (kapan sinyal dikunci) — sengaja kecil; teks panjang ada di tooltip -->
+    <div id="calcStatus">Evaluating session…</div>
+
+    <!-- INFO AMBANG AKTIF (profil gate: bootstrap / hasil belajar) -->
+    <div style="padding-top:8px; margin-top:10px; border-top:1px solid var(--border);">
       <div style="font-size:11px; color:var(--muted); margin-bottom:4px;">AMBANG AKTIF (profil gate)</div>
       <div id="gate-line" style="font-size:10.5px;color:var(--muted);line-height:1.5;">AMBANG AKTIF: memuat…</div>
-    </div>
-    
-    <!-- Entry Reason Section -->
-    <div style="padding-top: 8px; margin-top: 12px; border-top: 1px solid var(--border);">
-      <div style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">REASON</div>
-      <div id="calcStatus" style="font-size: 11px; color: var(--muted); margin-bottom: 6px;">Evaluating session…</div>
-      <div id="entryReason" style="font-size: 13px; color: var(--text); line-height: 1.3;">
-        <span class="dot" style="opacity:0.5;">•</span> No Entry for this round
-      </div>
     </div>
     
     <!-- Signal Info Section -->

@@ -34,14 +34,19 @@ body {
   background: linear-gradient(180deg, #11161b, #0b0e11);
   border-bottom: 1px solid var(--border);
 }
-.brand { display: flex; align-items: center; gap: 8px; }
+/* flex-wrap WAJIB: tanpa ini chip/chip panjang mendorong elemen lain keluar frame
+   (gejala: ikon suara "hilang" & halaman bisa discroll horizontal di mobile). */
+.brand { display: flex; align-items: center; gap: 6px; row-gap: 5px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .logo { color: var(--accent); font-size: 16px; }
-.title { font-weight: 700; letter-spacing: .12em; font-size: 12px; color: var(--muted); }
-.conn { font-size: 10px; }
+.title { font-weight: 700; letter-spacing: .06em; font-size: 12px; color: var(--muted); white-space: nowrap; }
+/* Dot online TIDAK boleh menyusut/hilang dan tidak boleh membungkus isi */
+.conn { font-size: 10px; flex: 0 0 auto; line-height: 1; }
 .conn--on { color: var(--up); }
 .conn--off { color: var(--down); }
-.src { font-size: 9px; color: var(--muted); letter-spacing: .08em; margin-left: auto; margin-right: 8px; font-weight: 600; }
-.visitors { font-size: 9px; color: var(--muted); letter-spacing: .04em; margin-right: 8px; font-weight: 600; }
+.src { font-size: 9px; color: var(--muted); letter-spacing: .08em; margin-left: auto; margin-right: 6px; font-weight: 600;
+  min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.visitors { font-size: 9px; color: var(--muted); letter-spacing: .04em; margin-right: 6px; font-weight: 600;
+  white-space: nowrap; flex: 0 0 auto; }
 .visitors b { color: var(--accent); }
 .err {
   margin: 6px 12px 0; padding: 8px 10px; border-radius: 8px;
@@ -59,7 +64,8 @@ body {
   .topbar, .controls, .round, .signal, .help,
   .learn-status, .lessons, .conf-debug, .mobile-pred, .dual, .monitors, main.chart-wrap { flex-shrink: 0; }
 .controls {
-  display: flex; gap: 8px; padding: 8px 12px;
+  display: flex; gap: 8px; row-gap: 6px; flex-wrap: wrap;   /* melipat, bukan meluber ke luar layar */
+  padding: 8px 12px; max-width: 100%; overflow: hidden;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
 }
@@ -179,14 +185,46 @@ body {
 .rec-status.warn { background: rgba(240,185,11,.18); color: #f0b90b; }
 .rec-status.bad { background: rgba(246,70,93,.18); color: var(--down); }
 .trade-plan { margin-top:10px; padding:8px; border-radius:8px; background: var(--panel-2); }
-.tp-head { font-size:11px; color: var(--muted); margin-bottom:4px; }
-.tp-action { font-size:15px; font-weight:800; letter-spacing:.03em; }
+.tp-head { font-size:11px; color: var(--muted); margin-bottom:4px; letter-spacing:.04em; }
+/* Aksi = elemen utama kartu: paling besar, paling kontras, 1 baris. */
+.tp-action { font-size:18px; font-weight:800; letter-spacing:.01em; line-height:1.15; }
 .tp-action.entry { color: var(--up); }
 .tp-action.exit { color: var(--down); }
 .tp-action.wait { color: var(--muted); }
+/* Baris harga kunci: 2 angka saja (entry & target) — dipindai sekali lihat. */
+.tp-key { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:12px; color: var(--muted); margin-top:6px; }
+.tp-key span { display:inline-flex; align-items:baseline; gap:4px; white-space:nowrap; }
+.tp-key b { font-size:13px; font-weight:800; color: var(--text); font-variant-numeric: tabular-nums; }
+.tp-key i { font-style:normal; opacity:.8; }
+.tp-key.entry b:last-of-type { color: var(--up); }
+.tp-key.exit b:last-of-type { color: var(--down); }
+/* Detail (opsional, collapsed by default) — semua penjelasan panjang di sini. */
+.tp-detail { margin-top:7px; border-top:1px solid var(--border); padding-top:5px; }
+.tp-detail summary { font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color: var(--muted); cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;
+  padding:6px 0; min-height:26px; }   /* area sentuh/klik diperbesar tanpa menambah bobot visual */
+.tp-detail summary::-webkit-details-marker { display:none; }
+.tp-detail summary::before { content:"▸"; font-size:10px; transition: transform .15s; }
+.tp-detail[open] summary::before { transform: rotate(90deg); }
+.tp-detail summary:active { color: var(--text); }
+.tp-full { font-size:11px; color: var(--text); line-height:1.4; margin-top:5px; }
 .tp-levels { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; margin-top:6px; }
 .tp-levels b { color: var(--text); }
-.tp-meta { font-size:11px; color: var(--muted); margin-top:4px; }
+.tp-meta { font-size:11px; color: var(--muted); margin-top:4px; line-height:1.4; }
+/* ---------- REASON: tepat di bawah rekomendasi utama, nilai saja, 1 baris ---------- */
+.rz-line { display: flex; align-items: center; gap: 5px; margin-top: 6px; min-width: 0;
+  font-size: 12px; line-height: 1.3; color: var(--text);
+  white-space: nowrap; overflow: hidden; }
+.rz-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rz-line b { font-weight: 800; }
+.rz-line i { font-style: normal; color: var(--muted); }
+.rz-sep { color: var(--muted); opacity: .6; }
+.rz-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--muted); }
+.rz-dot.up { background: var(--up); box-shadow: 0 0 6px rgba(14,203,129,.6); }
+.rz-dot.down { background: var(--down); box-shadow: 0 0 6px rgba(246,70,93,.6); }
+.rz-dot.flat { background: #f0b90b; }
+.rz-line .vol-val { font-size: 12px; }
+#calcStatus { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
+
 /* Volume value: emphasised + colour-graded by magnitude (bigger = greener) */
 .vol-val { font-weight: 800; font-size: 15px; letter-spacing: .02em; transition: color .2s; }
 .vol-val.v-na { color: var(--muted); }
@@ -244,27 +282,82 @@ body {
   body { max-width: none; }
 }
 
-/* ---------- Dual detail columns (wide screens) ---------- */
+/* ---------- Kolom dual (layar lebar) — IA menyalin kartu mobile ----------
+   Skala tipografi & jarak konsisten:
+     label blok : 10px uppercase muted   (dc-sec-label)
+     hero aksi  : 17px/800               (dc-act)
+     rekomendasi: 15px/800               (dc-rec)
+     isi        : 12px                   (default kartu)
+     catatan    : 10.5px muted           (dc-m, rz-line)
+   Jarak: antar blok 12px (gap kartu), di dalam blok 6-8px. */
 .dual-col {
-  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-  padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0;
 }
-.dc-head { display: flex; align-items: baseline; gap: 8px; }
+/* --- 1. HEAD --- */
+.dc-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .dc-coin { font-weight: 800; font-size: 16px; letter-spacing: .04em; }
-.dc-price { font-weight: 700; font-variant-numeric: tabular-nums; }
-.dc-chg { font-size: 12px; font-weight: 700; }
+.dc-price { font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
+.dc-chg { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dc-chg.up { color: var(--up); } .dc-chg.down { color: var(--down); }
+/* --- 2. CHART --- */
 .dc-chart { height: 190px; }
+/* --- blok informasi (pemisah seragam) --- */
+.dc-sec { border-top: 1px solid var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dc-sec-label { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+/* LED confidence di bawah informasi signal: hanya bar + % */
+.dc-led { display: flex; align-items: center; gap: 8px; }
+.dc-led .conf-track { flex: 1; height: 10px; margin-top: 0; }
+.dc-led-val { min-width: 36px; text-align: right; font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.dc-led-val.up { color: var(--up); } .dc-led-val.down { color: var(--down); } .dc-led-val.na { color: var(--muted); }
+/* --- 3. SINYAL --- */
 .dc-recrow { display: flex; gap: 8px; align-items: center; }
-.dc-rec { flex: 1; font-size: 14px; font-weight: 800; letter-spacing: .02em; }
+.dc-rec { flex: 1; font-size: 15px; font-weight: 800; letter-spacing: .01em; }
 .dc-rec.up { color: var(--up); } .dc-rec.down { color: var(--down); } .dc-rec.flat { color: var(--muted); }
-.dc-act {
-  padding: 6px 8px; border-radius: 7px; background: var(--panel-2);
-  font-size: 12px; font-weight: 800; letter-spacing: .02em;
-}
+/* --- 4. TRADE ASSISTANT: 2 kolom (kiri info sinyal, kanan status ENTRY/EARLY CLOSE) ---
+   Kolom kanan dibuat ~44% (cukup untuk "EARLY CLOSE: SUCCESS" pada 11px) dan chip
+   ditumpuk vertikal -> satu baris tinggi kartu tersimpan. */
+/* Kolom kanan memakai `auto` (selebar chip terpanjang) supaya teks status TIDAK terpotong;
+   kolom kiri mengambil sisa ruang. */
+.dc-ta-row { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px; align-items: center; }
+.dc-ta-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dc-ta-main .tp-key { margin-top: 0; }   /* jarak diatur oleh gap kolom, bukan margin ganda */
+.dc-ta-st { flex-direction: column; gap: 4px; margin: 0; }
+/* PENTING: di kontainer kolom, `flex: 1 1 0` dari gaya dasar .tp-st berarti basis TINGGI = 0
+   -> chip terpadatkan & isinya terpotong. Kembalikan ke ukuran konten. */
+.dc-ta-st .tp-st { flex: 0 0 auto; width: 100%; }
+.dc-act { font-size: 17px; font-weight: 800; letter-spacing: .01em; line-height: 1.15; }
 .dc-act.entry { color: var(--up); } .dc-act.exit { color: var(--down); } .dc-act.wait { color: var(--muted); }
-.dc-levels, .dc-grid, .dc-pred, .dc-reason { font-size: 11px; color: var(--muted); line-height: 1.5; }
-.dc-levels b, .dc-grid b, .dc-pred b { color: var(--text); }
-.dc-reason { border-top: 1px solid var(--border); padding-top: 6px; }
+/* --- Bagian bawah kartu: 2 kolom (pasar | metrik) ---
+   Tujuannya menurunkan tinggi kartu -> panel DESKTOP SIGNAL ACCURACY naik & terlihat
+   tanpa scroll. Kolom kiri dibatasi ~40% karena isinya pendek (2 angka + 1 bar). */
+.dc-bottom { display: grid; grid-template-columns: minmax(0, 40%) minmax(0, 1fr);
+  gap: 14px; align-items: start; border-top: 1px solid var(--border); padding-top: 10px; }
+.dc-bottom .dc-sec { border-top: 0; padding-top: 0; gap: 6px; }
+
+/* --- 5. PASAR: likuiditas & volume (ditonjolkan) lalu orderbook bar --- */
+.dc-volrow { display: flex; gap: 16px; flex-wrap: wrap; align-items: baseline;
+  font-size: 11px; color: var(--muted); letter-spacing: .02em; }
+.dc-volrow .vol-val { font-size: 14px; }
+.dc-mkt .ob-bg { height: 8px; }
+/* --- 6. METRIK: pasangan label:nilai --- */
+.dc-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 5px 10px; }
+/* Inti metrik selalu 2x2 (4 chip) supaya rapi & seimbang dengan kolom kiri */
+.dc-metrics-main { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* Judul blok + toggle "LIHAT SEMUA" dalam satu baris */
+.dc-metrics-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 14px; }
+.dc-more-btn { background: none; border: 0; padding: 0; color: var(--muted); cursor: pointer;
+  font-size: 10px; font-weight: 700; letter-spacing: .05em; white-space: nowrap;
+  font-family: inherit; text-transform: uppercase; }
+.dc-more-btn:hover, .dc-more-btn:active { color: var(--text); }
+.dc-more-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+/* [hidden] harus menang atas display:grid milik .dc-metrics */
+.dc-metrics[hidden] { display: none; }
+.dc-m { display: inline-flex; align-items: baseline; gap: 5px; font-size: 10.5px; min-width: 0; }
+.dc-m i { font-style: normal; color: var(--muted); letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-m b { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.dc-m b.up { color: var(--up); } .dc-m b.down { color: var(--down); }
 
 /* ---------- Mobile Prediction ---------- */
 .mobile-pred { padding: 10px 12px; background: var(--panel); border-top: 1px solid var(--border); }
@@ -427,6 +520,14 @@ body {
 .dc-dusd { font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; padding: 0 2px; }
 .dc-dusd.up { color: var(--up); } .dc-dusd.down { color: var(--down); } .dc-dusd.flat { color: var(--muted); }
 .dc-chg24 { font-size: 10px; font-weight: 600; color: var(--muted); opacity: .85; margin-left: 2px; font-variant-numeric: tabular-nums; }
+/* Header tetap SATU baris di mobile: label SRC bisa sangat panjang
+   ("langsung (Binance/ TradingView)") sehingga mendorong dot online turun ke baris kedua.
+   Nilainya tidak hilang — dipindah ke tooltip dot status koneksi (lihat setSrc di app.js). */
+@media (max-width: 480px) { .src { display: none; } }
+@media (max-width: 380px) { .visitors { display: none; } }
+/* 320-340px (iPhone SE 1): rapatkan sedikit lagi supaya dot online tetap di baris pertama */
+@media (max-width: 340px) { .brand { gap: 5px; } .title { font-size: 11px; } }
+
 @media (max-width: 1240px) { .dc-chg24 { display: none; } }   /* layar sempit: 24h masuk tooltip harga saja */
 
 /* Layar sempit: rapatkan baris countdown agar chip (harga live + Δ$ dari LOCK)
@@ -452,7 +553,6 @@ body {
 .tp-bias b { font-weight: 800; }
 .tp-bias.up b:last-of-type { color: var(--up); }
 .tp-bias.down b:last-of-type { color: var(--down); }
-.dc-arahtrade.up { color: var(--up); } .dc-arahtrade.down { color: var(--down); }
 
 /* ===== Efek visual kartu coin saat ada notifikasi (khusus layar lebar/dual) ===== */
 @keyframes dcFlashSignal {
@@ -487,13 +587,11 @@ body {
 .audio-hint:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ===== Countdown sisa durasi sesi di kanan atas kartu coin (layar lebar) ===== */
-.dc-cd { margin-left: auto; align-self: center; font-size: 11px; font-weight: 800;
+/* Sisa waktu sesi: BUKAN chip — angka besar yang langsung terbaca (informasi paling
+   menentukan di aplikasi ini), rata kanan di baris header kartu. */
+.dc-cd { margin-left: auto; align-self: center; font-size: 20px; font-weight: 800;
   font-variant-numeric: tabular-nums; letter-spacing: .04em; white-space: nowrap;
-  color: var(--text); background: var(--panel-2); border: 1px solid var(--border);
-  padding: 2px 7px; border-radius: 7px; }
-.dc-cd.warn { color: var(--down); border-color: rgba(246,70,93,.35); background: rgba(246,70,93,.12); }
+  color: var(--text); background: none; border: 0; padding: 0; line-height: 1; }
+.dc-cd.warn { color: var(--down); text-shadow: 0 0 10px rgba(246,70,93,.45); }
 
-/* ===== Baris VOLUME & LIQUIDITY di kartu dual (ditonjolkan seperti mobile) ===== */
-.dc-volrow { display: flex; gap: 16px; flex-wrap: wrap; align-items: baseline;
-  font-size: 11px; color: var(--muted); letter-spacing: .02em; }
-.dc-volrow .vol-val { font-size: 14px; }
+/* (Baris VOLUME & LIQUIDITY kartu dual didefinisikan di blok "Kolom dual" di atas.) */

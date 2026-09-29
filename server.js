@@ -66,6 +66,23 @@ setInterval(() => { if (ledgerDirty > 0) { compactLedger(); ledgerDirty = 0; } }
    -> ditandai src:"server-1m" agar tidak tertukar dengan hasil dari klien (jalur 1s). */
 const DUR_S = { "5m": 300, "15m": 900, "1h": 3600 };
 let resolving = false;
+
+// Info TRADE (entry & early close) untuk satu sesi: diambil dari state engine + dihitung
+// entryTouch (apakah LOCK tersentuh SETELAH entry) dari jalur 1m. Dipakai dua tempat: resolusi
+// hasil baru dan BACKFILL untuk record yang sudah punya `res` tetapi belum punya `trade`.
+function tradeInfoFor(asset, interval, t0, dir, lock, path) {
+  const tr = (typeof engine !== "undefined" && engine.tradeFor) ? engine.tradeFor(asset, interval, t0) : null;
+  if (!tr) return null;
+  let entryTouch = null;
+  if (tr.entered && tr.entryAt) {
+    const fromSec = Math.floor(tr.entryAt / 1000);
+    const after = (path || []).filter((b) => b.time >= fromSec);
+    entryTouch = after.some((b) => (dir === "up" ? b.high >= lock : b.low <= lock)) ? 1 : 0;
+  }
+  return { entered: !!tr.entered, entryTouch, entryPrice: tr.entryPrice, entryAt: tr.entryAt,
+           closed: !!tr.closed, closePrice: tr.closePrice, closeAt: tr.closeAt };
+}
+
 async function resolveMissing() {
   if (resolving) return;
   resolving = true;
@@ -73,13 +90,35 @@ async function resolveMissing() {
   let done = 0;
   try {
     for (const r of [...ledger.values()]) {
-      if (r.res || !r.sig || !r.t0) continue;
+      if (!r.sig || !r.t0) continue;
+      // Sudah lengkap (hasil + status trade) -> lewati.
+      if (r.res && r.res.trade) continue;
       const dir = r.sig.dir;
       if (dir !== "up" && dir !== "down") continue;
       const dur = DUR_S[r.interval];
       if (!dur) continue;
       if (now < r.t0 + dur + 5) continue;                  // ronde belum berakhir
       if (now > r.t0 + dur + 86400 * 85) continue;         // di luar jangkauan 1m klines (90d)
+      // ===== BACKFILL =====
+      // Record sudah punya HASIL tetapi belum punya status trade (mis. hasil lebih dulu datang
+      // dari klien lewat POST /api/ledger). Dulu record seperti ini dilewati selamanya sehingga
+      // baris Entry/Early Close tetap abu walau posisinya nyata. Sekarang status trade
+      // dilengkapi dari engine TANPA mengubah hasil yang sudah ada.
+      if (r.res && !r.res.trade) {
+        try {
+          const barsB = await getKlines(r.asset, "1m", r.t0 + dur, Math.ceil(dur / 60) + 2);
+          const sessB = barsB.filter((b) => b.time >= r.t0 && b.time < r.t0 + dur);
+          if (sessB.length >= 2) {
+            const pathB = sessB.slice(1);
+            const tradeB = tradeInfoFor(r.asset, r.interval, r.t0, dir, sessB[0].open, pathB);
+            if (tradeB) {
+              const mergedB = Object.assign({}, r, { res: Object.assign({}, r.res, { trade: tradeB }), upd: Date.now() });
+              ledger.set(r.k, mergedB); appendLedger(mergedB); ledgerDirty++; done++;
+            }
+          }
+        } catch (_) { /* coba lagi siklus berikutnya */ }
+        continue;
+      }
       try {
         const bars = await getKlines(r.asset, "1m", r.t0 + dur, Math.ceil(dur / 60) + 2);
         const sess = bars.filter((b) => b.time >= r.t0 && b.time < r.t0 + dur);
@@ -100,18 +139,7 @@ async function resolveMissing() {
         // Diambil dari state engine saat sesi berakhir (engine.snapshotTrade). Dipakai panel
         // akurasi supaya tiap sesi bisa dibaca: signal U/D, entry (E), early close (C).
         //   entry sukses = posisi dibuka DAN harga menyentuh LOCK setelah entry (target tercapai)
-        const tr = (typeof engine !== "undefined" && engine.tradeFor) ? engine.tradeFor(r.asset, r.interval, r.t0) : null;
-        let trade = null;
-        if (tr) {
-          let entryTouch = null;
-          if (tr.entered && tr.entryAt) {
-            const fromSec = Math.floor(tr.entryAt / 1000);
-            const after = path.filter((b) => b.time >= fromSec);
-            entryTouch = after.some((b) => (dir === "up" ? b.high >= lock : b.low <= lock)) ? 1 : 0;
-          }
-          trade = { entered: !!tr.entered, entryTouch, entryPrice: tr.entryPrice, entryAt: tr.entryAt,
-                    closed: !!tr.closed, closePrice: tr.closePrice, closeAt: tr.closeAt };
-        }
+        const trade = tradeInfoFor(r.asset, r.interval, r.t0, dir, lock, path);
         const merged = Object.assign({}, r, {
           res: {
             lock: +lock, close: +close, actual, won: dir === actual ? 1 : 0,

@@ -300,7 +300,10 @@ function buildGuides(plan, disp, lock) {
     add(L.l1, "ENTRY L1", "g-entry");
     add(L.l2, "TAMBAH L2", "g-add");
     add(L.l3, "TAMBAH L3", "g-add");
-    if (plan.cont && plan.cont.target) add(plan.cont.target, "TARGET", "g-target");
+    // TARGET: pakai nilai yang DIBEKUKAN server (disp.targetFrozen) supaya garis tidak berpindah;
+    // plan.cont.target tetap dipakai sebagai cadangan bila belum tersedia.
+    const tgt = (disp && disp.targetFrozen != null) ? disp.targetFrozen : (plan.cont && plan.cont.target);
+    if (tgt != null) add(tgt, "TARGET", "g-target");
   }
   if (plan && plan.entryPrice != null) add(plan.entryPrice, "ENTRY POSISI", "g-pos");
   if (disp) {

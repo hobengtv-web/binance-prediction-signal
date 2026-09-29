@@ -60,6 +60,7 @@ function createEngine(deps) {
     try {
       const j = JSON.parse(require("fs").readFileSync(STATE_FILE, "utf8"));
       if (j && j.finishedTrades) Object.assign(finishedTrades, j.finishedTrades);
+      if (j && j.guideLock) { for (const sy of Object.keys(guideLock)) { const src = j.guideLock[sy]; if (src) for (const t of Object.keys(src)) guideLock[sy][t] = src[t]; } }
       if (j && j.planState) {
         for (const sym of Object.keys(planState)) {
           const src = j.planState[sym];
@@ -78,13 +79,41 @@ function createEngine(deps) {
     if (!STATE_FILE || (!stateDirty && !force)) return;
     if (!force && Date.now() - stateSavedAt < 3000) return;      // throttle 3 detik
     try {
-      require("fs").writeFileSync(STATE_FILE, JSON.stringify({ at: Date.now(), finishedTrades, planState }));
+      require("fs").writeFileSync(STATE_FILE, JSON.stringify({ at: Date.now(), finishedTrades, planState, guideLock }));
       stateDirty = false; stateSavedAt = Date.now();
     } catch (_) { /* gagal tulis: coba lagi nanti */ }
   }
   // Hasil trade sesi yang SUDAH berakhir (untuk dicatat ke ledger saat hasil sesi dinilai).
   // Menyimpan: apakah posisi dibuka (entry) dan apakah early close ter-signal.
   const finishedTrades = {};
+  // ===== GARIS BANTU SESI (DIBEKUKAN) =====
+  // S/R & TARGET dihitung SEKALI di awal sesi lalu dipakai sampai sesi berakhir, supaya garis di
+  // chart TIDAK berpindah-pindah tiap tick (permintaan user: garis yang sudah dibuat di awal sesi
+  // harus lock hingga sesi selesai). Ladder ENTRY/TAMBAH memang sudah tetap karena hanya
+  // bergantung pada harga LOCK.
+  const guideLock = { BTC: {}, ETH: {} };
+  function guidesFor(sym, tf, key, C, win, tierTarget) {
+    const g = guideLock[sym][tf];
+    if (g && g.key === key) {
+      // Sudah dibekukan. Hanya SATU penyempurnaan yang diizinkan: mengisi TARGET bila saat
+      // pembekuan nilainya belum ada (mis. plan belum terkunci). S/R TIDAK pernah diubah.
+      if (g.target == null && tierTarget != null) { g.target = tierTarget; stateDirty = true; }
+      return g;
+    }
+    if (!win || win.length < 8 || C == null) return null;     // window belum cukup -> coba lagi nanti
+    let support = null, resistance = null;
+    try {
+      const sw = CONF.detectSwings(win, Math.max(3, Math.round(win.length / 6)));
+      const lows = (sw.lows || []).map((x) => x.price).filter((p) => p < C * 0.9999);
+      const highs = (sw.highs || []).map((x) => x.price).filter((p) => p > C * 1.0001);
+      if (lows.length) support = Math.max.apply(null, lows);
+      if (highs.length) resistance = Math.min.apply(null, highs);
+    } catch (_) {}
+    const rec = { key, support, resistance, target: (tierTarget != null ? tierTarget : null), at: Date.now() };
+    guideLock[sym][tf] = rec;
+    stateDirty = true;
+    return rec;
+  }
   // Dimuat SETELAH semua struktur state ada (kalau dipanggil lebih awal -> TDZ -> restore gagal senyap)
   loadState();
   // PENTING (permintaan user): yang dicatat adalah ENTRY & EARLY CLOSE yang PERTAMA.
@@ -197,7 +226,7 @@ function createEngine(deps) {
   /* ===== METRIK TAMPILAN yang dihitung SERVER =====
      Klien tidak lagi menurunkan nilai apa pun: zone/momentum/rsi/peak/reversal/reward/trend
      dihitung di sini dan dikirim lewat snapshot (assets[sym].all[tf].disp). */
-  function computeDisp(sym, tf, t0, nowSec, sig, m) {
+  function computeDisp(sym, tf, t0, nowSec, sig, m, plan) {
     const durS = DUR_S[tf] || 300;
     const win = (m.five5s || []).slice(-(TRADE.MON_WINDOW[tf] || 24));
     if (win.length < 5) return null;
@@ -257,27 +286,26 @@ function createEngine(deps) {
         }
       }
     } catch (_) {}
-    // ===== SUPPORT / RESISTANCE (gaya analis) =====
-    // Dari swing high/low pada window analisis: resistance terdekat = swing high TERENDAH yang
-    // masih di atas harga; support terdekat = swing low TERTINGGI yang masih di bawah harga.
-    let support = null, resistance = null, srFrom = "swing window";
-    try {
-      const sw = CONF.detectSwings(win, Math.max(3, Math.round(win.length / 6)));
-      const lows = (sw.lows || []).map((x) => x.price).filter((p) => p < C * 0.9999);
-      const highs = (sw.highs || []).map((x) => x.price).filter((p) => p > C * 1.0001);
-      if (lows.length) support = Math.max.apply(null, lows);
-      if (highs.length) resistance = Math.min.apply(null, highs);
-      // jaring ekstra: batas sesi dari candle tf (high/low sesi berjalan)
+    // ===== SUPPORT / RESISTANCE (gaya analis) — DIBEKUKAN di awal sesi =====
+    // Dihitung sekali dari swing high/low window analisis (resistance = swing high terendah di
+    // atas harga, support = swing low tertinggi di bawah harga), lalu TIDAK berubah sampai sesi
+    // berakhir. Fallback: batas high/low candle sesi bila swing belum tersedia.
+    const keyG = `${sym}_${tf}_${t0}`;
+    const tierTarget = (plan && plan.cont && plan.cont.target != null) ? plan.cont.target : null;
+    let gNow = guidesFor(sym, tf, keyG, C, win, tierTarget);
+    if (!gNow) return null;                                   // window belum cukup -> tunggu tick berikut
+    let support = gNow.support, resistance = gNow.resistance;
+    if (support == null || resistance == null) {
       const sessC2 = (m.tf[tf] || []).filter((x) => x.time < nowSec);
       if (sessC2.length) {
         const lastTf = sessC2[sessC2.length - 1];
-        if (support == null && lastTf.low < C) support = lastTf.low;
-        if (resistance == null && lastTf.high > C) resistance = lastTf.high;
-        if (sessC2.length < 3) srFrom = "batas candle sesi";
+        if (support == null && lastTf.low < C) { support = lastTf.low; gNow.support = support; }
+        if (resistance == null && lastTf.high > C) { resistance = lastTf.high; gNow.resistance = resistance; }
       }
-    } catch (_) {}
+    }
     return {
-      support, resistance, srFrom,
+      support, resistance, srFrom: "dibekukan awal sesi",
+      targetFrozen: gNow.target, guideAt: gNow.at,
       zone, momentum, rsi, mean: stat.mean, std, slope, slopeRecent: stat.slopeRecent, z,
       peak: peak ? { price: peak.price, dir: peak.dir, conf: peak.conf } : null,
       reversal: verdict === "flat" ? null : { dir: verdict, mode, peakPrice, reward },
@@ -377,7 +405,7 @@ function createEngine(deps) {
             cur.plan = computePlan(sym, tf, t0Live, nowSec, cur.signal, market[sym]);
             cur.conf = computeConf(sym, tf, t0Live, nowSec, cur.signal, market[sym]);
             cur.mobilePred = computeMobilePred(sym, tf, t0Live, market[sym]);
-            cur.disp = computeDisp(sym, tf, t0Live, nowSec, cur.signal, market[sym]);
+            cur.disp = computeDisp(sym, tf, t0Live, nowSec, cur.signal, market[sym], cur.plan);
           } catch (e) { stats.errors++; stats.lastErr = e && e.message; }
         }
         saveState();      // persist state trade (posisi/early close) ke volume

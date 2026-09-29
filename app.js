@@ -934,7 +934,11 @@ function applyType() {
     // mengirim sinyal untuk sesi ini, verdict = flat dan kartu menampilkan "—".
     const srvSigNow = (typeof LIVE !== "undefined") ? LIVE.signalFor(state.asset, state.interval) : null;
     const liveSig = srvSigNow;                       // sinyal server (bisa flat) -> sumber teks mode/vol
-    let uni = srvSigNow ? Object.assign({}, srvSigNow, { verdict: srvSigNow.dir }) : null;
+    // PENTING: JANGAN menimpa `verdict` dengan `dir`. `dir` = arah MENTAH (sebelum gate),
+    // `verdict` = arah yang DITAMPILKAN (gate menolak -> "flat"). Sebelumnya di sini verdict
+    // ditimpa dengan dir sehingga MOBILE menampilkan sinyal yang ditolak gate sementara DESKTOP
+    // (memakai verdict apa adanya) menampilkan "tidak ada sinyal" -> inkonsisten.
+    let uni = srvSigNow;
     let finalVerdict = "flat", mode = "—", conf = 0, gateInfo = null;
     const elapsedSec = Math.round(elapsed / 1000);
     const sessionStart = t0;                                        // awal sesi (ms) dari server
@@ -1081,7 +1085,8 @@ function applyType() {
     // whenever price crossed the lock (e.g. after switching tabs, an UP signal showed the
     // sell zone below the lock). Fallbacks below it: mobile prediction, then live direction.
     const zoneKey = `${state.asset}_${state.interval}_${t0}`;
-    const recSig = _deskSigCache[zoneKey] || _deskSigLive[zoneKey] || null;
+    // Sinyal untuk overlay prediksi/zone di chart: dari SERVER (cache lokal sudah dihapus)
+    const recSig = (typeof LIVE !== "undefined") ? LIVE.signalFor(state.asset, state.interval) : null;
     const pred = _mobilePredSession;
     const mobOk = pred && pred.prediction !== "flat" && pred.asset === state.asset &&
       pred.interval === state.interval && pred.lockPrice != null && Math.abs(pred.lockPrice - O) < 1e-9;
@@ -2371,7 +2376,6 @@ function analyzeCoin(asset, tf, now) {
 function switchAsset(asset) {
   if (state.asset === asset) return;
   state.asset = asset;
-  _deskSig = null;
   const btn = document.querySelector(`#asset-seg [data-asset="${asset}"]`);
   if (btn) segActive("asset-seg", btn);
   renderActive(); updateProjection(); updateMobilePrediction(); updateGap(); renderConfidenceReport();
@@ -3003,9 +3007,6 @@ function renderDual(force) {
 }
 
 // Universal signal cache - untuk background calculation semua coin & interval
-let _deskSigCache = {};  // key: `${sym}_${tf}_${roundStart}` -> LOCKED signal (only non-flat entries)
-const _deskSigMap = {};  // key: same -> boolean (mark sudah capture)
-const _deskSigLive = {}; // key: same -> latest evaluation each tick (for live status display)
 
 let _cap_t0 = null;        // t0 ronde yang sedang di-capture
 let _cap_pending = null;   // prediksi entry: { t0, asset, interval, mode, dir, conf, trend }
@@ -3015,7 +3016,6 @@ let _cap_asset = null;     // combo guard: asset of the round being captured
 let _cap_interval = null;  // combo guard: interval of the round being captured
 
 // Desktop signal lock - signal hanya dihitung saat sesi dimulai, kemudian lock
-let _deskSig = null;       // { roundStart, asset, interval, verdict, mode, reason, conf, timestamp }
 let _mob_t0 = null;        // t0 ronde mobile pred yang sedang di-capture
 
 /* ===== RENDER semua kartu (monitor + kolom dual) =====
@@ -3468,7 +3468,6 @@ function bindControls() {
   document.getElementById("asset-seg").addEventListener("click", (e) => {
     const b = e.target.closest("[data-asset]"); if (!b) return;
     state.asset = b.dataset.asset;
-    _deskSig = null;  // Reset desktop signal lock on asset change
     segActive("asset-seg", b);
     renderActive(); updateProjection(); updateMobilePrediction(); updateGap();
     renderConfidenceReport();
@@ -3480,8 +3479,7 @@ function bindControls() {
     const b = e.target.closest("[data-tf]"); if (!b) return;
     state.interval = b.dataset.tf;
     // Reset desktop signal lock karena interval berubah
-    _deskSig = null;
-    LIVE.connect(state.interval);      // stream sinyal server mengikuti interval aktif
+      LIVE.connect(state.interval);      // stream sinyal server mengikuti interval aktif
     segActive("tf-seg", b);
     renderActive(); updateProjection(); updateMobilePrediction(); renderConfidenceReport();
   });
@@ -3520,9 +3518,6 @@ function bindControls() {
     MobilePredLog.clear();
     PendingSig.clear();
     // Clear in-memory caches in place (they may be const)
-    for (const k in _deskSigCache) delete _deskSigCache[k];
-    for (const k in _deskSigMap) delete _deskSigMap[k];
-    for (const k in _deskSigLive) delete _deskSigLive[k];
     // Reset active session state
     _mobilePredSession = null;
     sessionStorage.removeItem(MOBILE_PRED_SESSION_KEY);
@@ -3782,8 +3777,10 @@ window.__comboStatus = function () {
       const dur = INTERVAL_MS[tf];
       const t0 = Math.floor(now / dur) * dur;
       const key = `${sym}_${tf}_${t0}`;
-      const live = _deskSigLive[key];
-      const locked = _deskSigCache[key];
+      // SERVER-ONLY: status sinyal per combo dari snapshot (cache lokal sudah dihapus)
+      const eSig = (typeof LIVE !== "undefined") ? LIVE.entryFor(sym, tf) : null;
+      const live = (eSig && eSig.signal) ? eSig.signal : null;
+      const locked = (live && (live.verdict === "up" || live.verdict === "down")) ? live : null;
       const hist = SignalLog.data().filter((e) => e.asset === sym && e.interval === tf);
       const ev = hist.filter((e) => e.won !== undefined);
       const wins = ev.reduce((a, e) => a + e.won, 0);

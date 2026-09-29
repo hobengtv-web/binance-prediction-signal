@@ -212,6 +212,33 @@ async function resolveMissing() {
     broadcast("ledger", { resolved: done, total: ledger.size, at: Date.now() });
   }
 }
+// ===== OFI SUPER-REALTIME (default 300 ms) =====
+// Loop engine berjalan tiap 2 detik, sehingga OFI terasa lambat. Poller ini KHUSUS OFI dan
+// berjalan jauh lebih cepat: mengambil klines 1 DETIK terakhir (forming candle ikut ter-update
+// di dalam detik) lalu menambahkannya ke akumulator flow dan mengirim event SSE ringan `ofi`.
+// Hanya berjalan bila ada klien (SSE) sehingga kuota Binance tetap hemat.
+// Kuota: 2 aset x (1000/OFI_POLL_MS) req/s; pada 300 ms = ~6,7 req/s (weight ~13/s) — jauh di
+// bawah limit Binance (6000 weight/menit). Set OFI_POLL_MS untuk mengubah.
+const OFI_POLL_MS = Math.max(200, parseInt(process.env.OFI_POLL_MS || "300", 10));
+async function ofiFastTick() {
+  try {
+    // kedua aset diambil PARALEL supaya durasi tick singkat (~50ms) dan cadence mendekati 300 ms
+    const ks = await Promise.all(["BTC", "ETH"].map((sym) => getKlines(sym, "1s", undefined, 6)));
+    ["BTC", "ETH"].forEach((sym, i) => FLOW.addKlines(sym, ks[i]));
+    const nowS = Math.floor(Date.now() / 1000);
+    const t0 = Math.floor(nowS / 300) * 300;                 // awal sesi 5m berjalan
+    const assets = {};
+    for (const sym of ["BTC", "ETH"]) {
+      assets[sym] = {
+        ofi: FLOW.sessionOFI(sym, t0, nowS),
+        ofiShort: FLOW.sessionOFI(sym, nowS - 120, nowS),
+      };
+    }
+    broadcast("ofi", { at: Date.now(), poll: OFI_POLL_MS, assets });
+  } catch (_) { /* lewati tick ini */ }
+}
+setInterval(() => { if (clients.size) ofiFastTick(); }, OFI_POLL_MS);
+
 // Resolver hasil sesi: dijalankan 8 detik setelah boot lalu SETIAP 15 DETIK supaya riwayat
 // (benar/salah + entry/early close) muncul maksimal ~20 detik setelah sesi berakhir — sebelumnya
 // siklus 5 menit membuat panel akurasi terasa sangat lambat terupdate.

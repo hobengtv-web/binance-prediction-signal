@@ -96,6 +96,22 @@ async function resolveMissing() {
           if (!touch && fHi >= 0) { touch = 1; tTouch = b.time; }
         }
         const actual = close >= lock ? "up" : "down";
+        // ===== STATUS TRADE ASSISTANT SESI INI (entry & early close) =====
+        // Diambil dari state engine saat sesi berakhir (engine.snapshotTrade). Dipakai panel
+        // akurasi supaya tiap sesi bisa dibaca: signal U/D, entry (E), early close (C).
+        //   entry sukses = posisi dibuka DAN harga menyentuh LOCK setelah entry (target tercapai)
+        const tr = (typeof engine !== "undefined" && engine.tradeFor) ? engine.tradeFor(r.asset, r.interval, r.t0) : null;
+        let trade = null;
+        if (tr) {
+          let entryTouch = null;
+          if (tr.entered && tr.entryAt) {
+            const fromSec = Math.floor(tr.entryAt / 1000);
+            const after = path.filter((b) => b.time >= fromSec);
+            entryTouch = after.some((b) => (dir === "up" ? b.high >= lock : b.low <= lock)) ? 1 : 0;
+          }
+          trade = { entered: !!tr.entered, entryTouch, entryPrice: tr.entryPrice, entryAt: tr.entryAt,
+                    closed: !!tr.closed, closePrice: tr.closePrice, closeAt: tr.closeAt };
+        }
         const merged = Object.assign({}, r, {
           res: {
             lock: +lock, close: +close, actual, won: dir === actual ? 1 : 0,
@@ -103,6 +119,7 @@ async function resolveMissing() {
             mfeFav: isFinite(mfe) ? +mfe.toFixed(4) : null,
             maeFav: isFinite(mae) ? +mae.toFixed(4) : null,
             endFav: +v(close).toFixed(4), bars: path.length, src: "server-1m",
+            trade,
           },
           upd: Date.now(),
         });

@@ -48,9 +48,24 @@ function createEngine(deps) {
                    ETH: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 } };
   // State Trade Assistant per (aset, tf): peak/dwell/entered/closed. Direset tiap sesi baru.
   const planState = { BTC: {}, ETH: {} };
+  // Hasil trade sesi yang SUDAH berakhir (untuk dicatat ke ledger saat hasil sesi dinilai).
+  // Menyimpan: apakah posisi dibuka (entry) dan apakah early close ter-signal.
+  const finishedTrades = {};
+  function snapshotTrade(sym, tf, key, st) {
+    if (!key || !st) return;
+    const e = st.entered ? st.entered[key] : null;
+    const c = st.closed ? st.closed[key] : null;
+    finishedTrades[key] = {
+      entered: !!e, entryPrice: e ? e.price : null, entryAt: e ? e.since : null,
+      closed: !!c, closePrice: c ? c.price : null, closeAt: c ? c.at : null,
+    };
+    const keys = Object.keys(finishedTrades);
+    if (keys.length > 1000) delete finishedTrades[keys[0]];      // batasi memori
+  }
   function planStateFor(sym, tf, key) {
     let s = planState[sym][tf];
     if (!s || s.key !== key) {
+      if (s && s.st && s.key) snapshotTrade(sym, tf, s.key, s.st);   // sesi lama berakhir -> simpan
       s = planState[sym][tf] = { key, st: { peak: {}, dwell: {}, entered: {}, closed: {} } };
     }
     return s.st;
@@ -293,6 +308,8 @@ function createEngine(deps) {
     log(`[ENGINE] aktif — sinyal server-side untuk ${TFS.join(", ")} (polling hanya bila ada subscriber)`);
   }
   return {
+    // Status trade akhir sebuah sesi (entry/early close) untuk dicatat ke ledger.
+    tradeFor: (sym, tf, t0Sec) => finishedTrades[`${sym}_${tf}_${t0Sec}`] || null,
     start, loop, snapshot,
     touch: () => { stats.demand = Date.now(); },
     addSubscriber: () => { stats.subscribers++; return () => { stats.subscribers = Math.max(0, stats.subscribers - 1); }; },

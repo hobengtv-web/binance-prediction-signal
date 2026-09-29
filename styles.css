@@ -407,6 +407,22 @@ body {
 .conf-debug .dot-win { background: var(--up); color: #fff; }
 .conf-debug .dot-lose { background: var(--down); color: #fff; }
 .conf-debug .dot-pending { background: rgba(255,255,255,0.15); color: var(--muted, #888); }
+
+/* ----- Panel akurasi versi baru: 2 kolom koin (BTC kiri, ETH kanan), tiap sesi 1 kolom
+   berisi 3 baris: S (signal U/D) · E (entry) · C (early close). Warna memakai konvensi yang
+   sama dengan dot lama: hijau benar/sukses, merah salah/gagal, abu pending / tidak ada. ----- */
+.conf-debug .sa-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+.conf-debug .sa-coin { min-width: 0; }
+.conf-debug .sa-coin-head { display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+.conf-debug .sa-coin-head b { color: var(--text); font-size: 12px; letter-spacing: .03em; }
+.conf-debug .sa-stat { font-weight: 700; color: var(--text); }
+.conf-debug .sa-sessions { display: grid; grid-auto-flow: column; grid-template-rows: repeat(3, 18px);
+  gap: 3px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+.conf-debug .sa-stack { display: grid; grid-template-rows: repeat(3, 18px); gap: 3px; }
+.conf-debug .sa-legend { margin-top: 9px; font-size: 10px; color: var(--muted); line-height: 1.5; }
+.conf-debug .sa-legend b { color: var(--text); }
+@media (max-width: 760px) { .conf-debug .sa-cols { grid-template-columns: 1fr; } }
 .conf-debug .cd-win { color: var(--up); }
 .conf-debug .cd-lose { color: var(--down); }
 

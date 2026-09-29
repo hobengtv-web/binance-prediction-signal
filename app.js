@@ -4426,30 +4426,39 @@ function renderConfidenceReport() {
   const head = document.getElementById("conf-debug-head");
   const countEl = document.getElementById("conf-debug-count");
   if (!body) return;
-  
+
   // Sumber data: LEDGER SERVER (kanonik, semua device sama). Bila server tidak terjangkau,
   // baru pakai catatan lokal (MobilePredLog) sebagai cadangan.
   const srv = (typeof LEDGER !== "undefined" && LEDGER.serverCached) ? LEDGER.serverCached() : null;
-  let allData = [];
+  let rounds = [];
   let srcLabel = "server";
   if (srv && srv.records && srv.records.length) {
-    allData = srv.records.map((r) => {
+    rounds = srv.records.map((r) => {
       const sig = r.sig || {};
+      const res = r.res || null;
       const dir = (sig.verdict === "up" || sig.verdict === "down") ? sig.verdict
         : (sig.dir === "up" || sig.dir === "down") ? sig.dir : null;
-      const res = r.res || null;
+      if (!dir) return null;
+      const tr = (res && res.trade) || null;
+      // E (entry): undefined = tidak ada entry (abu); 1 = entry & target LOCK tercapai (hijau);
+      //            0 = entry tapi LOCK tidak pernah tersentuh sampai sesi tutup (merah).
+      const e = (tr && tr.entered) ? (tr.entryTouch ? 1 : 0) : undefined;
+      // C (early close): undefined = tidak ada posisi (abu); 1 = early close ter-signal (hijau);
+      //                  0 = posisi terbuka tapi early close tidak pernah ter-signal (merah).
+      const c = (tr && tr.entered) ? (tr.closed ? 1 : 0) : undefined;
       return {
         asset: r.asset, interval: r.interval, dir,
         won: (res && res.won != null) ? res.won : undefined,
-        lock: res ? res.lock : sig.lock,
-        close: res ? res.close : null,
-        actual: res ? res.actual : null,
+        lock: res ? res.lock : sig.lock, close: res ? res.close : null,
+        actual: res ? res.actual : null, e, c,
       };
-    }).filter((r) => r.dir);
+    }).filter(Boolean);
+  } else if (typeof MobilePredLog !== "undefined") {
+    rounds = MobilePredLog.data().filter((r) => r.dir);
+    srcLabel = "lokal";
   }
-  if (!allData.length) { allData = MobilePredLog.data(); srcLabel = "lokal"; }
-  // Minta data terbaru dari server (throttle 15s di dalam modul LEDGER), lalu render ulang
-  // bila jumlahnya berubah (mis. ada sesi baru yang selesai).
+  // Minta data terbaru dari server (throttle 15s di dalam modul LEDGER), lalu render ulang bila
+  // jumlah sesi berubah (mis. ada sesi baru yang selesai).
   if (typeof LEDGER !== "undefined" && LEDGER.server) {
     LEDGER.server().then((s2) => {
       const n1 = srv && srv.records ? srv.records.length : -1;
@@ -4457,59 +4466,52 @@ function renderConfidenceReport() {
       if (n2 !== n1) renderConfidenceReport();
     });
   }
-  
-  // Count total across all combos
-  const totalAll = allData.length;
-  const pendingCount = PendingSig.size();
-  if (head) head.textContent = `DESKTOP SIGNAL ACCURACY · Universal · `;
-  if (countEl) countEl.textContent = `${totalAll} rounds total · sumber ${srcLabel}${pendingCount ? ` · ${pendingCount} waiting to settle` : ""}${GATE_STATUS === "ok" ? "" : ` · gate ${GATE_STATUS}`}${TIER_STATUS === "ok" ? "" : ` · tiers ${TIER_STATUS}`}`;
-  
-  if (!totalAll) {
-    body.innerHTML = `<div class="cd-empty">no completed rounds yet — ${pendingCount ? pendingCount + " signal(s) waiting to settle" : "let it run a few rounds"}</div>`;
-    return;
-  }
 
-  // Generate report per combo
-  const combos = [["BTC", "5m"], ["ETH", "5m"], ["BTC", "15m"], ["ETH", "15m"], ["BTC", "1h"], ["ETH", "1h"]];
-  let html = "";
-  
-  for (const [sym, tf] of combos) {
-    const data = allData.filter(r => r.asset === sym && r.interval === tf);
-    const n = data.length;
-    if (n < 1) continue;  // Skip empty combos
-    
-    // Winrate only from rounds that have finished (won defined); rest are pending
-    const evaluated = data.filter(r => r.won !== undefined);
-    const nEval = evaluated.length;
-    const pending = n - nEval;
-    const totW = evaluated.reduce((a, r) => a + r.won, 0);
-    const overall = nEval > 0 ? (totW / nEval * 100).toFixed(1) : "—";
-    const wins = totW, losses = nEval - totW;
-    const winClass = nEval > 0 ? (Number(overall) >= 50 ? "cd-win" : "cd-lose") : "";
-    
-    const dirLetter = (d) => d === "up" ? "U" : d === "down" ? "D" : "?";
-    const nums = (r) => `lock ${r.lock != null ? r.lock : "?"} close ${r.close != null ? r.close : "?"} actual ${r.actual || "?"}`;
-    const dots = data.slice(-20).map(r => {
-      if (r.won === undefined) {
-        return `<span class="dot dot-pending" title="${r.dir.toUpperCase()} pending | ${nums(r)}">${dirLetter(r.dir)}</span>`;
-      }
-      const cls = r.won ? "dot-win" : "dot-lose";
-      return `<span class="dot ${cls}" title="${r.dir.toUpperCase()} ${r.won ? 'BENAR' : 'SALAH'} | ${nums(r)}">${dirLetter(r.dir)}</span>`;
-    }).join('');
-    
-    html += `
-      <div class="cd-row" style="margin-bottom:6px;">
-        <span class="cd-b">${sym}/${tf}</span>
-        <span class="cd-c">${nEval}${pending ? ` (+${pending})` : ''}</span>
-        <span class="cd-wr ${winClass}">${overall}${nEval > 0 ? '%' : ''}</span>
-        <span style="text-align:right;color:${nEval > 0 ? (Number(overall) >= 50 ? 'var(--up)' : 'var(--down)') : 'var(--muted, #888)'}">
-          ${wins}W / ${losses}L${pending ? ` · ${pending} pending` : ''}
-        </span>
+  const tf = state.interval;
+  const COINS = ["BTC", "ETH"];
+  const PER_COIN = 24;                       // berapa sesi terakhir yang ditampilkan per koin
+
+  // Satu sesi = SATU KOLOM berisi 3 baris: signal (U/D), entry (E), early close (C).
+  // Warna memakai konvensi yang sudah ada: hijau = benar/sukses, merah = salah/gagal,
+  // abu = belum ada hasil / tidak ada entry / tidak ada posisi.
+  const stack = (r) => {
+    const sCls = r.won === undefined ? "dot-pending" : (r.won ? "dot-win" : "dot-lose");
+    const sTxt = r.dir === "up" ? "U" : "D";
+    const eTxt = r.e === undefined ? "tidak ada" : (r.e ? "sukses" : "gagal");
+    const cTxt = r.c === undefined ? "tidak ada" : (r.c ? "sukses" : "gagal");
+    const eCls = r.e === undefined ? "dot-pending" : (r.e ? "dot-win" : "dot-lose");
+    const cCls = r.c === undefined ? "dot-pending" : (r.c ? "dot-win" : "dot-lose");
+    const t = `${r.asset}/${r.interval} · signal ${r.dir.toUpperCase()} ${r.won === undefined ? "(pending)" : (r.won ? "BENAR" : "SALAH")}`
+      + ` · entry ${eTxt} · early close ${cTxt}`
+      + ` · lock ${r.lock != null ? r.lock : "?"} close ${r.close != null ? r.close : "?"}`;
+    return `<div class="sa-stack" title="${t}"><span class="dot ${sCls}">${sTxt}</span>`
+      + `<span class="dot ${eCls}">E</span><span class="dot ${cCls}">C</span></div>`;
+  };
+
+  let totalShown = 0;
+  let html = `<div class="sa-cols">`;
+  for (const sym of COINS) {
+    const data = rounds.filter((r) => r.asset === sym && r.interval === tf);
+    const evald = data.filter((r) => r.won !== undefined);
+    const wins = evald.reduce((a, r) => a + r.won, 0);
+    const wr = evald.length ? Math.round(wins / evald.length * 100) : null;
+    const tail = data.slice(-PER_COIN);
+    totalShown += data.length;
+    const statCls = wr == null ? "" : (wr >= 50 ? "cd-win" : "cd-lose");
+    html += `<div class="sa-coin">
+      <div class="sa-coin-head"><b>${sym}</b> · ${tf}
+        <span class="sa-stat ${statCls}">${evald.length ? `${wins}W/${evald.length - wins}L${wr != null ? ` (${wr}%)` : ""}` : "—"}</span>
       </div>
-      <div class="cd-dots" style="margin-top:4px; margin-bottom:8px;">${dots}</div>
-    `;
+      ${tail.length
+        ? `<div class="sa-sessions">${tail.map(stack).join("")}</div>`
+        : `<div class="cd-empty">belum ada sesi</div>`}
+    </div>`;
   }
-  
+  html += `</div><div class="sa-legend">tiap kolom = 1 sesi · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> entry · baris 3 <b>C</b> early close (hijau sukses · merah gagal · abu tidak ada)</div>`;
+
+  if (head) head.textContent = "DESKTOP SIGNAL ACCURACY · per sesi (signal · entry · early close) · ";
+  if (countEl) countEl.textContent = `${totalShown} sesi ${tf} · sumber ${srcLabel}`
+    + `${GATE_STATUS === "ok" ? "" : ` · gate ${GATE_STATUS}`}${TIER_STATUS === "ok" ? "" : ` · tiers ${TIER_STATUS}`}`;
   body.innerHTML = html;
 }
 

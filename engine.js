@@ -51,14 +51,20 @@ function createEngine(deps) {
   // Hasil trade sesi yang SUDAH berakhir (untuk dicatat ke ledger saat hasil sesi dinilai).
   // Menyimpan: apakah posisi dibuka (entry) dan apakah early close ter-signal.
   const finishedTrades = {};
-  function snapshotTrade(sym, tf, key, st) {
-    if (!key || !st) return;
-    const e = st.entered ? st.entered[key] : null;
-    const c = st.closed ? st.closed[key] : null;
-    finishedTrades[key] = {
+  // PENTING (permintaan user): yang dicatat adalah ENTRY & EARLY CLOSE yang PERTAMA.
+  // State ini hanya diisi sekali per sesi ("first write wins") — entry berikutnya atau
+  // close berikutnya pada sesi yang sama TIDAK menimpa, lihat trade-plan.js buildPlan().
+  function tradeStateOf(st, key) {
+    const e = (st && st.entered) ? st.entered[key] : null;
+    const c = (st && st.closed) ? st.closed[key] : null;
+    return {
       entered: !!e, entryPrice: e ? e.price : null, entryAt: e ? e.since : null,
       closed: !!c, closePrice: c ? c.price : null, closeAt: c ? c.at : null,
     };
+  }
+  function snapshotTrade(sym, tf, key, st) {
+    if (!key || !st) return;
+    finishedTrades[key] = tradeStateOf(st, key);
     const keys = Object.keys(finishedTrades);
     if (keys.length > 1000) delete finishedTrades[keys[0]];      // batasi memori
   }
@@ -176,8 +182,13 @@ function createEngine(deps) {
 
   async function loop() {
     if (busy) return;
-    // Polling hanya bila ada penonton (SSE) ATAU endpoint JSON baru dipanggil (demand 15s).
-    if (stats.subscribers <= 0 && Date.now() - stats.demand > 15000) return;
+    // Polling penuh bila ada penonton (SSE) ATAU endpoint JSON baru dipanggil (demand 15s).
+    // Tanpa penonton tetap polling LAMBAT (5s) supaya state Trade Assistant tiap sesi ikut
+    // terbentuk — tanpa itu, catatan entry/early close di ledger bisa kosong untuk sesi yang
+    // tidak ditonton saat itu.
+    const idle = stats.subscribers <= 0 && Date.now() - stats.demand > 15000;
+    if (idle && Date.now() - (stats.lastIdlePoll || 0) < 5000) return;
+    if (idle) stats.lastIdlePoll = Date.now();
     busy = true;
     try {
       const nowSec = Math.floor(Date.now() / 1000);
@@ -312,7 +323,16 @@ function createEngine(deps) {
   }
   return {
     // Status trade akhir sebuah sesi (entry/early close) untuk dicatat ke ledger.
-    tradeFor: (sym, tf, t0Sec) => finishedTrades[`${sym}_${tf}_${t0Sec}`] || null,
+    // Diambil dari snapshot sesi yang sudah berakhir; bila sesi itu MASIH sesi berjalan
+    // (belum rollover) dibaca dari state live — supaya resolusi tetap dapat data walau
+    // sesi baru belum pernah diproses.
+    tradeFor: (sym, tf, t0Sec) => {
+      const k = `${sym}_${tf}_${t0Sec}`;
+      if (finishedTrades[k]) return finishedTrades[k];
+      const cur = planState[sym] && planState[sym][tf];
+      if (cur && cur.key === k && cur.st) return tradeStateOf(cur.st, k);
+      return null;
+    },
     start, loop, snapshot,
     touch: () => { stats.demand = Date.now(); },
     addSubscriber: () => { stats.subscribers++; return () => { stats.subscribers = Math.max(0, stats.subscribers - 1); }; },

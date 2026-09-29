@@ -16,6 +16,7 @@
    ============================================================================ */
 const { computeSignal, DUR_S } = require("./capture.js");
 const GATES_DEF = require("./gates.js");
+const FLOW = require("./flow.js");        // OFI live (order flow per menit)
 const SignalCore = require("./signal-core.js");
 
 const TFS = ["5m", "15m"];   // 1h tidak disajikan server (di 2 detik sinyalnya flat by design)
@@ -101,6 +102,9 @@ function createEngine(deps) {
         // `dir` = arah mentah (dipakai ledger/learning). `verdict` = yang DITAMPILKAN:
         // "flat" bila gate menolak (tier/likuiditas/threshold) — sama seperti app.
         signal: sig ? Object.assign({}, sig, { verdict: sig.accepted ? sig.dir : "flat" }) : null,
+        // OFI LIVE (dihitung ulang setiap snapshot, bukan beku saat sinyal dikunci):
+        // parameter sesi berjalan -> semua device menampilkan angka yang SAMA.
+        ofi: FLOW.sessionOFI(sym, t0 / 1000, Math.floor(now / 1000)),
         skipped: sameSession ? sess.skipped : "pending",
         engine: { ones: ones.length, tfs: Object.keys(market[sym].tf || {}) },
       };

@@ -128,10 +128,15 @@ function computeSignal(o) {
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
       rewardPct: +rewardPct.toFixed(4), liqRatio: +liqRatio.toFixed(3), liqLow: !!liqLow,
       touchRate, gateKey: `${tf}|${mode}|${currentDir}|rsi:${rsiBucket(rsi)}|str:${strBucket(histTrend.strength)}`,
+      // OFI sesi dari flow server (null = belum ada data). Ikut payload -> semua device
+      // menampilkan angka yang SAMA, dan ikut terekam ke ledger/learner.
+      ofi: FLOW.sessionOFI(sym, t0, nowSec),
       learn,
     },
   };
 }
+
+const FLOW = require("./flow.js");
 
 function createCapture(deps) {
   const { getKlines, SignalCore, getModel, save, log = console.log, getGates } = deps;
@@ -157,7 +162,7 @@ function createCapture(deps) {
     const rec = {
       k: `${sym}_${tf}_${t0}`, asset: sym, interval: tf, t0, src: "server",
       sig: Object.assign({}, sig, {
-        capOffsetMs: 2000, capturedAt: nowSec, prov: "server", minuteIn: 1, ofi: null, gateWr: null,
+        capOffsetMs: 2000, capturedAt: nowSec, prov: "server", minuteIn: 1, ofi: (sig.ofi != null ? sig.ofi : null), gateWr: null,
       }),
       // Keputusan gate saat perekaman: untuk membandingkan populasi diterima vs ditolak.
       gate: { grade: sig.grade, liqLow: sig.liqLow, liqRatio: sig.liqRatio, thresholdsOK: sig.thresholdsOK, accepted: sig.accepted, reject: sig.reject, profile: profile.mode },

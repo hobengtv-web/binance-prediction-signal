@@ -232,6 +232,21 @@ function sessionOFI(sym, t0Sec, nowSec) {
   const tot = buy + sell;
   return tot > 0 ? (buy - sell) / tot : 0;
 }
+/* OFI untuk TAMPILAN = metrik LIVE sesi berjalan (BUKAN nilai beku saat sinyal dikunci —
+   sinyal dikunci ~2 detik setelah sesi mulai, saat itu flow masih kosong sehingga selalu null).
+   Urutan sumber:
+     1) angka LIVE dari snapshot server  -> paling benar & identik di semua device,
+     2) hitungan flow lokal dari stream trade di browser ini (rumus sama), dan
+     3) null -> UI menampilkan "—" (artinya belum ada data, bukan 0). */
+function ofiForDisplay(asset, t0Sec, nowSec) {
+  try {
+    if (typeof LIVE !== "undefined" && LIVE.fresh()) {
+      const a = LIVE.snap && LIVE.snap.assets ? LIVE.snap.assets[asset] : null;
+      if (a && a.ofi != null) { const v = Number(a.ofi); if (isFinite(v)) return v; }
+    }
+  } catch (_) {}
+  return sessionOFI(asset, t0Sec, nowSec);
+}
 function sessionLock(sym, durMs, now) {
   const startSec = Math.floor(sessionBounds(durMs, now).start / 1000);
   const arr = state.cache[sym]["5s"].candles;
@@ -1301,8 +1316,10 @@ function applyType() {
     }
     // Keep the quality grade visible in the reason (it no longer fits in the short recommendation).
     const grade = uni && uni.grade ? uni.grade : null;
-    const ofiTxt = liveSig && liveSig.ofi != null
-      ? ` Order flow (OFI) ${(liveSig.ofi * 100).toFixed(0)} percent, ${liveSig.ofiAgree ? "agreeing" : "against"}.`
+    // OFI: server lebih dulu, else flow lokal (lihat ofiForDisplay)
+    const ofiNow = ofiForDisplay(state.asset, Math.floor(sessionStart / 1000), Math.floor(now / 1000));
+    const ofiTxt = ofiNow != null
+      ? ` Order flow (OFI) ${(ofiNow * 100).toFixed(0)} percent, ${(liveSig && liveSig.ofiAgree) ? "agreeing" : "against"}.`
       : "";
     if (finalVerdict !== "flat") {
       // Angka winrate harus jelas sumbernya: kalau profil gate BUKAN strict, kalibrasi 90d
@@ -1333,7 +1350,7 @@ function applyType() {
       reason: currentReason,
       highConf: !!gateInfo,
       gateWr: gateInfo ? gateInfo.wr : null,
-      ofi: liveSig ? liveSig.ofi : null,
+      ofi: ofiNow,
       tradePlan,
       recPnl: (tradePlan && tradePlan.entryPrice != null && tradePlan.tradeDir)
         ? (((tradePlan.tradeDir === "up" ? (C - tradePlan.entryPrice) : (tradePlan.entryPrice - C)) / tradePlan.entryPrice) * 100)
@@ -3519,7 +3536,7 @@ function renderDual(force) {
     if (metaEl) {
       if (!plan) metaEl.textContent = "";
       else {
-        const ofiTxt = sig && sig.ofi != null ? `OFI ${(sig.ofi * 100).toFixed(0)}%` : "OFI —";
+        const ofiTxt = ofiVal != null ? `OFI ${(ofiVal * 100).toFixed(0)}%` : "OFI —";
         const adv = plan.adverseStd != null ? `${plan.adverseStd >= 0 ? "-" : "+"}${Math.abs(plan.adverseStd).toFixed(2)}σ` : "—";
         const rwNow = plan.levels && plan.levels.rNow != null ? ` · reward +${plan.levels.rNow.toFixed(2)}%` : "";
         const pos = plan.entryPrice != null ? ` · posisi @${fmtPrice(plan.entryPrice)}` : " · belum ada posisi";
@@ -3550,18 +3567,23 @@ function renderDual(force) {
       : "";
     // Metrik dirender sebagai pasangan label:nilai (chip) supaya bisa dipindai cepat —
     // teks "LABEL nilai · LABEL nilai" sebelumnya sulit dibaca.
-    const chip = (l, v, c) => `<span class="dc-m"><i>${l}</i><b class="${c || ""}">${v}</b></span>`;
+    const chip = (l, v, c, t) => `<span class="dc-m"${t ? ` title="${t}"` : ""}><i>${l}</i><b class="${c || ""}">${v}</b></span>`;
+    // OFI untuk tampilan: server dulu, else flow lokal (stream trade yang sama).
+    const t0SecR = Math.floor(Math.floor(now / dur) * dur / 1000);
+    const ofiVal = ofiForDisplay(a, t0SecR, Math.floor(now / 1000));
     // INTI (selalu tampil) — 4 informasi paling penting saja: OFI, MOMENTUM, MODE, DELTA.
     const grEl = g("grid");
     if (grEl) {
       if (!m) grEl.innerHTML = "";
       else {
-        const ofi = sig && sig.ofi != null ? (sig.ofi * 100).toFixed(0) + "%" : "—";
+        const ofi = ofiVal != null ? (ofiVal * 100).toFixed(0) + "%" : "—";
         const mom = m.slope > 0 ? "BULLISH" : m.slope < 0 ? "BEARISH" : "FLAT";
         const momCls = m.slope > 0 ? "up" : m.slope < 0 ? "down" : "";
         const delta = m.O > 0 ? (m.C - m.O) / m.O * 100 : 0;
-        grEl.innerHTML = chip("OFI", ofi) + chip("MOMENTUM", mom, momCls) +
-          chip("MODE", liveMode || "—") + chip("DELTA", `${delta >= 0 ? "+" : ""}${delta.toFixed(3)}%`);
+        grEl.innerHTML = chip("OFI", ofi, ofiVal == null ? "" : (ofiVal >= 0 ? "up" : "down"),
+            "Order flow (eksekusi taker) sesi berjalan: positif = tekanan BELI, negatif = tekanan JUAL") +
+          chip("MOMENTUM", mom, momCls) + chip("MODE", liveMode || "—") +
+          chip("DELTA", `${delta >= 0 ? "+" : ""}${delta.toFixed(3)}%`);
       }
     }
     // Detail (di balik "Lihat semua metrik") — pendukung, bukan informasi utama.
@@ -3684,7 +3706,7 @@ function captureDesktopSignal() {
       const cached = _deskSigCache[cacheKey];
       const shown = srv
         ? { verdict: srv.verdict, mode: srv.mode, conf: srv.conf, grade: srv.grade, rsi: srv.rsi,
-            histStrength: srv.histStrength, gateKey: srv.gateKey, highConf: !!srv.accepted,
+            histStrength: srv.histStrength, gateKey: srv.gateKey, highConf: !!srv.accepted, ofi: srv.ofi,
             gateWr: null, reason: cached ? cached.reason : "", lock: srv.lock }
         : (cached ? { verdict: cached.verdict, mode: cached.mode, conf: cached.conf, grade: cached.grade,
             rsi: cached.rsi, histStrength: cached.histStrength, gateKey: cached.gateKey,
@@ -3744,7 +3766,7 @@ function captureDesktopSignal() {
               rewardPct: cached.rewardPct != null ? +Number(cached.rewardPct).toFixed(4) : null,
               liqRatio: cached.liqRatio != null ? +Number(cached.liqRatio).toFixed(3) : null,
               liqLow: !!cached.liqLow,
-              ofi: cached.ofi != null ? +Number(cached.ofi).toFixed(4) : null,
+              ofi: (() => { const v = ofiForDisplay(sym, t0Sec, Math.floor(now / 1000)); return v != null ? +Number(v).toFixed(4) : null; })(),
               touchRate: cached.touch ? +Number(cached.touch.rate).toFixed(4) : null,
               gateKey: gkey, gateWr: g ? +Number(g.wr).toFixed(4) : null,
               learn: L ? { label: L.label, touch: L.touch, dirWR: L.dirWR, intervalWR: L.intervalWR ? L.intervalWR.wr : null, gap: L.ctx ? L.ctx.gap : null, hour: L.ctx ? L.ctx.hour : null, trend: L.ctx ? L.ctx.trend : null, blocking: (L.blockable || []).length > 0 } : null,

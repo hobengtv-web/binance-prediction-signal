@@ -304,24 +304,30 @@ function ofiDOM(prefix) {
 function buildGuides(plan, disp, lock) {
   const out = [];
   const seen = new Set();
-  const add = (p, label, cls) => {
+  const add = (p, label, cls, active) => {
     if (p == null || !isFinite(p)) return;
     const key = cls + "|" + Math.round(p * 100);
     if (seen.has(key)) return;
     seen.add(key);
-    out.push({ p: Number(p), label, cls });
+    out.push({ p: Number(p), label, cls, active: !!active });
   };
   if (plan && plan.levels) {
     const L = plan.levels;
-    add(L.l1, "ENTRY L1", "g-entry");
-    add(L.l2, "TAMBAH L2", "g-add");
-    add(L.l3, "TAMBAH L3", "g-add");
+    add(L.l1, "ENTRY L1", "g-idle");
+    add(L.l2, "TAMBAH L2", "g-idle");
+    add(L.l3, "TAMBAH L3", "g-idle");
     // TARGET: pakai nilai yang DIBEKUKAN server (disp.targetFrozen) supaya garis tidak berpindah;
     // plan.cont.target tetap dipakai sebagai cadangan bila belum tersedia.
     const tgt = (disp && disp.targetFrozen != null) ? disp.targetFrozen : (plan.cont && plan.cont.target);
-    if (tgt != null) add(tgt, "TARGET", "g-target");
+    if (tgt != null) add(tgt, "TARGET", "g-idle");
   }
-  if (plan && plan.entryPrice != null) add(plan.entryPrice, "ENTRY POSISI", "g-pos");
+  // ===== GARIS AKTIF (KUNING) =====
+  // Hanya garis yang benar-benar MEMICU Trade Assistant yang diwarnai: harga entry yang sudah
+  // terjadi (statusEntry.ok) dan harga early close yang sudah terjadi (statusClose.ok).
+  // Labelnya memuat harga nominal supaya terbaca "entry/close di harga berapa".
+  const se = plan && plan.statusEntry, sc = plan && plan.statusClose;
+  if (se && se.ok && se.price != null) add(se.price, "ENTRY " + fmtPrice(se.price), "g-active", true);
+  if (sc && sc.ok && sc.price != null) add(sc.price, "CLOSE " + fmtPrice(sc.price), "g-active", true);
   if (disp) {
     // S/R yang terlalu dekat dengan LOCK (<=0.02%) tidak digambar supaya tidak menumpuk garis.
     const far = (p) => lock == null || Math.abs(p - lock) / lock > 0.0002;
@@ -875,15 +881,18 @@ function applyType() {
       if (tpStEntry) {
         const ok = !!(se && se.ok);
         tpStEntry.className = "tp-st" + (ok ? " ok" : " wait");
-        tpStEntry.innerHTML = `ENTRY: <b>${ok ? "SUCCESS" : "WAITING…"}</b>`;
+        // nominal harga ditampilkan langsung supaya informatif (entry di harga berapa)
+        tpStEntry.innerHTML = `ENTRY: <b>${ok ? "SUCCESS" : "WAITING…"}</b>`
+          + (ok && se && se.price != null ? ` <i>@${fmtPrice(se.price)}</i>` : "");
         tpStEntry.title = ok
-          ? `ENTRY SUCCESS · ${fmtClock(se.at)}${se.price != null ? " @ " + fmtPrice(se.price) : ""}`
+          ? `ENTRY SUCCESS · ${fmtClock(se.at)} @ ${fmtPrice(se.price)}`
           : `Menunggu entry — ${se && se.waiting ? se.waiting : "menunggu sinyal"}`;
       }
       if (tpStClose) {
         const ok = !!(sc && sc.ok);
         tpStClose.className = "tp-st" + (ok ? " ok" : " wait");
-        tpStClose.innerHTML = `EARLY CLOSE: <b>${ok ? "SUCCESS" : "WAITING…"}</b>`;
+        tpStClose.innerHTML = `EARLY CLOSE: <b>${ok ? "SUCCESS" : "WAITING…"}</b>`
+          + (ok && sc && sc.price != null ? ` <i>@${fmtPrice(sc.price)}</i>` : "");
         tpStClose.title = ok
           ? `EARLY CLOSE SUCCESS · ${fmtClock(sc.at)}`
           : (se && se.ok ? "Posisi terbuka — menunggu sinyal close" : "Belum ada posisi");
@@ -3095,14 +3104,15 @@ function renderDual(force) {
     if (seEl) {
       const ok = !!(se && se.ok);
       seEl.className = "tp-st" + (ok ? " ok" : " wait");
-      seEl.innerHTML = `ENTRY: <b>${ok ? "SUCCESS" : "WAITING…"}</b>`;
-      seEl.title = ok ? `ENTRY SUCCESS · ${fmtClock(se.at)}${se.price != null ? " @ " + fmtPrice(se.price) : ""}` : "Menunggu entry";
+      // nominal harga ditampilkan langsung (bukan hanya di tooltip) => "entry di harga berapa"
+      seEl.innerHTML = `ENTRY: <b>${ok ? "SUCCESS" : "WAITING…"}</b>` + (ok && se.price != null ? ` <i>@${fmtPrice(se.price)}</i>` : "");
+      seEl.title = ok ? `ENTRY SUCCESS · ${fmtClock(se.at)} @ ${fmtPrice(se.price)}` : "Menunggu entry";
     }
     if (scEl) {
       const ok = !!(sc && sc.ok);
       scEl.className = "tp-st" + (ok ? " ok" : " wait");
-      scEl.innerHTML = `EARLY CLOSE: <b>${ok ? "SUCCESS" : "WAITING…"}</b>`;
-      scEl.title = ok ? `EARLY CLOSE SUCCESS · ${fmtClock(sc.at)}` : "Menunggu early close";
+      scEl.innerHTML = `EARLY CLOSE: <b>${ok ? "SUCCESS" : "WAITING…"}</b>` + (ok && sc.price != null ? ` <i>@${fmtPrice(sc.price)}</i>` : "");
+      scEl.title = ok ? `EARLY CLOSE SUCCESS · ${fmtClock(sc.at)}${sc.price != null ? " @ " + fmtPrice(sc.price) : ""}` : (se && se.ok ? "Posisi terbuka — menunggu sinyal close" : "Belum ada posisi");
     }
     const lvEl = g("levels");
     if (lvEl) lvEl.innerHTML = (plan && plan.levels)

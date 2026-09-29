@@ -670,3 +670,5 @@ body {
 .dc-cd.warn { color: var(--down); text-shadow: 0 0 10px rgba(246,70,93,.45); }
 
 /* (Baris VOLUME & LIQUIDITY kartu dual didefinisikan di blok "Kolom dual" di atas.) */
+
+.tp-st i { font-style:normal; font-weight:700; opacity:.85; font-variant-numeric: tabular-nums; }

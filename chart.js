@@ -244,9 +244,13 @@
         for (const g of this.guides) {
           const gy = yOf(g.p);
           if (gy < plotT - 2 || gy > plotB + 2) continue;                 // di luar area plot
-          const col = g.cls === "g-entry" ? "#0ecb81" : g.cls === "g-target" ? "#f0b90b"
-            : g.cls === "g-pos" ? "#f0b90b" : g.cls === "g-sr" ? "rgba(255,255,255,.45)" : "#7aa2f7";
-          ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash(g.cls === "g-sr" ? [1, 4] : [4, 3]);
+          // Hanya garis yang AKTIF (memicu Trade Assistant mengambil posisi) yang berwarna
+          // (KUNING) dan digambar solid. Garis lain (ladder, support/resistance, target) ABU-ABU
+          // putus-putus supaya chart tetap bersih dan aksen kuning benar-benar menandai aksi.
+          const active = !!g.active;
+          const col = active ? "#f0b90b" : "rgba(255,255,255,.42)";
+          ctx.strokeStyle = col; ctx.lineWidth = active ? 2 : 1;
+          ctx.setLineDash(active ? [] : [4, 3]);
           ctx.beginPath(); ctx.moveTo(plotL, gy); ctx.lineTo(plotR, gy); ctx.stroke();
           ctx.setLineDash([]);
           if (g.label) { ctx.fillStyle = col; ctx.textAlign = "right"; ctx.textBaseline = "bottom";

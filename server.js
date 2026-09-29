@@ -70,6 +70,22 @@ let resolving = false;
 // Info TRADE (entry & early close) untuk satu sesi: diambil dari state engine + dihitung
 // entryTouch (apakah LOCK tersentuh SETELAH entry) dari jalur 1m. Dipakai dua tempat: resolusi
 // hasil baru dan BACKFILL untuk record yang sudah punya `res` tetapi belum punya `trade`.
+// Cek presisi: apakah LOCK tersentuh SETELAH entry — memakai klines 1 DETIK.
+// Versi lama memakai bar 1 MENIT, sehingga sentuhan yang terjadi di dalam bar yang sama dengan
+// entry (entry di detik 12, sentuhan di detik 20 pada menit yang sama) tidak terhitung -> baris E
+// salah tampil MERAH padahal target tercapai. Mengembalikan { touch, at } atau null bila gagal.
+async function entryTouch1s(asset, t0, dur, entryAt, lock, dir) {
+  try {
+    const bars = await getKlines(asset, "1s", t0 + dur, Math.min(1000, dur + 5));
+    const from = Math.floor(entryAt / 1000);
+    const after = (bars || []).filter((b) => b.time >= from);
+    if (!after.length) return null;
+    let at = null;
+    for (const b of after) { if (dir === "up" ? b.high >= lock : b.low <= lock) { at = b.time; break; } }
+    return { touch: at != null ? 1 : 0, at };
+  } catch (_) { return null; }
+}
+
 function tradeInfoFor(asset, interval, t0, dir, lock, path) {
   const tr = (typeof engine !== "undefined" && engine.tradeFor) ? engine.tradeFor(asset, interval, t0) : null;
   if (!tr) return null;
@@ -118,6 +134,10 @@ async function resolveMissing() {
         const actual = close >= lock ? "up" : "down";
         // STATUS TRADE ASSISTANT: entry & early close (engine) + entryTouch dari jalur 1m
         const trade = tradeInfoFor(r.asset, r.interval, r.t0, dir, lock, path);
+        if (trade && trade.entered && trade.entryAt) {
+          const t1 = await entryTouch1s(r.asset, r.t0, dur, trade.entryAt, lock, dir);
+          if (t1) { trade.entryTouch = t1.touch; trade.entryTouchAt = t1.at; trade.touchSrc = "1s"; }
+        }
         const merged = Object.assign({}, r, {
           res: {
             lock: +lock, close: +close, actual, won: dir === actual ? 1 : 0,
@@ -153,12 +173,37 @@ async function resolveMissing() {
       try {
         const barsB = await getKlines(r.asset, "1m", r.t0 + dur, Math.ceil(dur / 60) + 2);
         const sessB = barsB.filter((b) => b.time >= r.t0 && b.time < r.t0 + dur);
-        if (sessB.length >= 2) got = tradeInfoFor(r.asset, r.interval, r.t0, dir, sessB[0].open, sessB.slice(1));
+        if (sessB.length >= 2) {
+          got = tradeInfoFor(r.asset, r.interval, r.t0, dir, sessB[0].open, sessB.slice(1));
+          if (got && got.entered && got.entryAt) {
+            const t1b = await entryTouch1s(r.asset, r.t0, dur, got.entryAt, sessB[0].open, dir);
+            if (t1b) { got.entryTouch = t1b.touch; got.entryTouchAt = t1b.at; got.touchSrc = "1s"; }
+          }
+        }
       } catch (_) { /* dicoba lagi siklus berikutnya */ }
       const next = Object.assign({}, r, { trTry: (r.trTry || 0) + 1 });
       if (got) { next.res = Object.assign({}, r.res, { trade: got }); done++; }
       next.upd = Date.now();
       ledger.set(r.k, next); appendLedger(next); ledgerDirty++;
+    }
+    // ===== PASS 3: perbaiki entryTouch yang dihitung dari bar 1m (presisi rendah) =====
+    // Record dengan posisi tetapi touchSrc bukan "1s" dihitung ulang memakai klines 1 detik.
+    // Dibatasi seperti backfill: hanya sesi <= 45 menit terakhir, maks 10 per siklus.
+    let fixed = 0;
+    for (const r of all) {
+      if (fixed >= 10) break;
+      const tr = r.res && r.res.trade;
+      if (!tr || !tr.entered || tr.touchSrc === "1s") continue;
+      const dur = DUR_S[r.interval];
+      if (!dur || !r.t0) continue;
+      if (now < r.t0 + dur + 5) continue;
+      if (now > r.t0 + dur + 45 * 60) continue;
+      const t1 = await entryTouch1s(r.asset, r.t0, dur, tr.entryAt, r.res.lock, r.sig.dir);
+      if (!t1) continue;
+      fixed++;
+      const tr2 = Object.assign({}, tr, { entryTouch: t1.touch, entryTouchAt: t1.at, touchSrc: "1s" });
+      const next = Object.assign({}, r, { res: Object.assign({}, r.res, { trade: tr2 }), upd: Date.now() });
+      ledger.set(r.k, next); appendLedger(next); ledgerDirty++; done++;
     }
   } finally { resolving = false; }
   if (done) {

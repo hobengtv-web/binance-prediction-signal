@@ -3262,6 +3262,8 @@ function renderConfidenceReport() {
         won: (res && res.won != null) ? res.won : undefined,
         lock: res ? res.lock : sig.lock, close: res ? res.close : null,
         actual: res ? res.actual : null, e, c, tradeState, t0Sec: r.t0,
+        eAt: (tr && tr.entryTouchAt) ? tr.entryTouchAt * 1000 : null,
+        cAt: (tr && tr.closeAt) ? tr.closeAt : null,
       };
     }).filter(Boolean);
   } else if (typeof MobilePredLog !== "undefined") {
@@ -3290,10 +3292,17 @@ function renderConfidenceReport() {
   const stack = (r) => {
     const sCls = r.won === undefined ? "dot-pending" : (r.won ? "dot-win" : "dot-lose");
     const sTxt = r.dir === "up" ? "U" : "D";
+    // Teks eksplisit supaya tidak ambigu: baris E mengukur TARGET (LOCK), bukan sekadar
+    // "posisi berhasil dibuka".
     const naTxt = r.tradeState === "ok" ? "tidak ada"
       : r.tradeState === "lama" ? "tidak tercatat (data lama)" : "belum ada hasil (pending)";
-    const eTxt = r.e === undefined ? naTxt : (r.e ? "sukses" : "gagal");
-    const cTxt = r.c === undefined ? naTxt : (r.c ? "sukses" : "gagal");
+    const jamAt = (ms) => ms ? new Date(ms + 7 * 3600e3).toISOString().slice(11, 16) : "";
+    const eTxt = r.e === undefined ? naTxt
+      : (r.e ? `target LOCK tercapai${r.eAt ? " (" + jamAt(r.eAt) + ")" : ""}`
+             : "LOCK tidak tersentuh setelah entry");
+    const cTxt = r.c === undefined ? naTxt
+      : (r.c ? `ter-signal${r.cAt ? " (" + jamAt(r.cAt) + ")" : ""}`
+             : "tidak ter-signal (posisi terbuka)");
     const eCls = r.e === undefined ? "dot-pending" : (r.e ? "dot-win" : "dot-lose");
     const cCls = r.c === undefined ? "dot-pending" : (r.c ? "dot-win" : "dot-lose");
     // jam sesi ditampilkan di tooltip supaya dua sesi berdampingan yang tampak kembar
@@ -3342,7 +3351,7 @@ function renderConfidenceReport() {
         : `<div class="cd-empty">belum ada sesi</div>`}
     </div>`;
   }
-  html += `</div><div class="sa-legend">tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal (dengan % sukses) · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> entry · baris 3 <b>C</b> early close (hijau sukses · merah gagal · abu = tidak ada entry/posisi atau tidak tercatat pada data lama)</div>`;
+  html += `</div><div class="sa-legend">tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal (dengan % sukses) · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> = entry &amp; apakah target LOCK tercapai · baris 3 <b>C</b> = early close ter-signal (hijau = ya · merah = tidak · abu = tidak ada entry/posisi)</div>`;
 
   if (head) head.textContent = "DESKTOP SIGNAL ACCURACY · per sesi (signal · entry · early close) · ";
   if (countEl) countEl.textContent = `${totalShown} sesi ${tf} · sumber ${srcLabel}`

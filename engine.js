@@ -368,6 +368,22 @@ function createEngine(deps) {
   }
 
   // Snapshot untuk UI: harga live, lock, selisih $, sinyal sesi (kanonik, dari server)
+  // Harga OPEN candle sesi untuk (sym, tf) pada t0 — dipakai sebagai LOCK cadangan.
+  function lockOpenOf(sym, tf, t0Sec) {
+    const arr = (market[sym] && market[sym].tf && market[sym].tf[tf]) ? market[sym].tf[tf] : [];
+    if (!arr.length) return null;
+    // 1) candle sesi yang tepat
+    const exact = arr.find((x) => x.time === t0Sec);
+    if (exact) return exact.open;
+    // 2) candle sesi berikutnya (bila ada) -> open-nya = harga di awal sesi berikutnya
+    const after = arr.find((x) => x.time > t0Sec);
+    if (after) return after.open;
+    // 3) candle terakhir sebelum sesi -> close-nya = harga tepat di batas sesi
+    const prev = arr.filter((x) => x.time <= t0Sec).pop();
+    if (prev) return prev.close;
+    return arr[arr.length - 1].close;
+  }
+
   // Ringkas satu (sym, tf) untuk dipakai lintas-tf di snapshot.
   function tfEntry(sym, tf, price) {
     const durMs = (DUR_S[tf] || 300) * 1000;
@@ -381,6 +397,10 @@ function createEngine(deps) {
       skipped: same ? sess.skipped : "pending",
       signal: sig ? Object.assign({}, sig, { verdict: sig.accepted ? sig.dir : "flat" }) : null,
       plan: same ? (sess.plan || null) : null,
+      // LOCK sesi: harga OPEN candle sesi — SELALU tersedia walau sinyalnya belum terkunci atau
+      // di-skip. Sebelumnya nilainya hanya ada bila ada sinyal, sehingga GARIS LOCK di chart
+      // desktop bisa hilang pada sesi tanpa sinyal (mobile punya fallback lokal, desktop tidak).
+      lock: (sess && same && sess.signal && sess.signal.lock != null) ? sess.signal.lock : lockOpenOf(sym, tf, t0),
       conf: same ? (sess.conf || null) : null,
       disp: same ? (sess.disp || null) : null,
       mobilePred: same ? (sess.mobilePred || null) : null,
@@ -410,7 +430,8 @@ function createEngine(deps) {
       out.assets[sym] = {
         all,
         price: px,
-        lock: sig ? sig.lock : null,
+        // LOCK per aset: dari sinyal, atau open candle sesi (selalu ada) bila sinyal belum/skip.
+        lock: (sig && sig.lock != null) ? sig.lock : lockOpenOf(sym, tf, t0 / 1000),
         deltaUsd: (px != null && sig && sig.lock) ? +(px - sig.lock).toFixed(2) : null,
         // `dir` = arah mentah (dipakai ledger/learning). `verdict` = yang DITAMPILKAN:
         // "flat" bila gate menolak (tier/likuiditas/threshold) — sama seperti app.

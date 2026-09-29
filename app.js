@@ -1803,6 +1803,8 @@ const LIVE = (() => {
     const a = snap.assets[asset];
     if (!a) return null;
     if (a.lock != null) return Number(a.lock);
+    const e = entryFor(asset, tf);
+    if (e && e.lock != null) return Number(e.lock);
     if (a.signal && a.signal.lock != null) return Number(a.signal.lock);
     return null;
   }
@@ -2977,7 +2979,10 @@ function renderDual(force) {
       ch.setSessionDuration(dur);
       ch.setType(state.type);
       ch.setData(candlesFor(a));
-      ch.setDecision(m ? m.O : null);
+      // Garis LOCK: pakai LOCK server; bila belum ada (snapshot basi / sesi baru) tetap gambar
+      // dengan perkiraan lokal supaya TIDAK hilang dari chart (mobile pun berperilaku sama).
+      const oDual = (m && m.O != null) ? m.O : sessionLock(a, dur, now);
+      ch.setDecision(oDual);
       ch.setPrediction(graded ? dir : null, m ? m.O : null);
       ch.setCurrentPrice(px);
       // OVERLAY LENGKAP seperti chart mobile: garis proyeksi ke settlement + garis tren

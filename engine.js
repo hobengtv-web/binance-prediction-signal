@@ -224,6 +224,9 @@ function createEngine(deps) {
           const t0Live = Math.floor(nowSec / durS) * durS;
           const cur = session[sym][tf];
           if (!cur || cur.t0 !== t0Live) continue;            // belum terkunci untuk sesi ini
+          // Pastikan state sesi LAMA di-snapshot (untuk catatan entry/early close di ledger)
+          // walau sesi baru tidak menghasilkan plan (mis. sinyal flat/ditolak).
+          planStateFor(sym, tf, `${sym}_${tf}_${t0Live}`);
           try {
             cur.plan = computePlan(sym, tf, t0Live, nowSec, cur.signal, market[sym]);
             cur.conf = computeConf(sym, tf, t0Live, nowSec, cur.signal, market[sym]);

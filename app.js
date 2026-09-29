@@ -1001,6 +1001,57 @@ function applyType() {
       : (uni ? gateLookup(gateKey(state.interval, uni.mode, uni.verdict, uni.rsi, uni.histStrength)) : null);
     const currentReason = (liveSig && liveSig.reason) ? liveSig.reason : ((uni && uni.reason) ? uni.reason : "—");
     mode = modeFinal;   // mode: dari server (variabel `mode` sudah ada di fungsi ini)
+    // ===== TRADE ASSISTANT (PROSES SERVER) — HARUS di-set SEBELUM updateSignal() =====
+    // Kartu mobile diisi dari o.tradePlan; sebelumnya blok ini sempat hilang sehingga
+    // tradePlan selalu null dan kartu TA mobile tampil "—" (desktop tetap muncul karena
+    // kartu dual membacanya langsung dari analyzeCoin()).
+    tradePlan = serverPlanFor(state.asset, state.interval) || null;
+    const hHealth = (tradePlan && tradePlan.health) ? tradePlan.health : null;
+    if (hHealth) {
+      recStatus = `${hHealth.label}${hHealth.score ? ` ${hHealth.score}` : ""}`;
+      recStatusClass = healthClass(hHealth.label);
+    } else { recStatus = ""; recStatusClass = ""; }
+    if (tradePlan) {
+      // SOUND: hanya pada TRANSISI state plan pada sesi ini (pengamatan pertama senyap).
+      const prevTs = _tradeLastState[uniKey];
+      _tradeLastState[uniKey] = tradePlan.state;
+      if (prevTs !== undefined && tradePlan.state !== prevTs) {
+        if (tradePlan.state === "ENTRY" || tradePlan.state === "AVERAGE") {
+          const sk = `${uniKey}|${tradePlan.state}`;
+          if (!_entrySounded.has(sk)) { _entrySounded.add(sk); playTradeEntrySound(); }
+          flashCard(state.asset, "entry");
+          flashTitle(`▶ ${tradePlan.action} ${state.asset}/${state.interval}`);
+          console.log(`[TRADE][SOUND-ENTRY] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
+        } else if (tradePlan.state === "CLOSE" || tradePlan.state === "STAND_DOWN") {
+          if (!_closeSounded.has(uniKey)) {
+            _closeSounded.add(uniKey);
+            playCloseSound();
+            console.log(`[TRADE][SOUND-CLOSE] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
+          }
+          flashCard(state.asset, "exit");
+          flashTitle(`■ ${tradePlan.action} ${state.asset}/${state.interval}`);
+        }
+      }
+      // Peringatan health kritis (dinilai server) — sekali per sesi, priming tetap.
+      if (hHealth) {
+        const first = !_warnPrimed.has(uniKey);
+        _warnPrimed.add(uniKey);
+        if (first) { if (hHealth.score >= 75) _warnedKeys.add(uniKey); }
+        else if (hHealth.score >= 75 && !_warnedKeys.has(uniKey)) {
+          _warnedKeys.add(uniKey);
+          console.warn(`[WASPADA] ${state.asset}/${state.interval} — ${hHealth.label} (score ${hHealth.score})`);
+          flashTitle(`⚠ ${hHealth.label} ${state.asset}/${state.interval}`);
+          try {
+            if (typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
+              new Notification(`${hHealth.label} · ${state.asset}/${state.interval}`, {
+                body: `score ${hHealth.score}`, tag: `warn_${uniKey}`,
+              });
+            }
+          } catch (_) {}
+        }
+      }
+    }
+
     updateSignal({
       zone, momentum, rsi, verdict: finalVerdict, mode, trendBias, aligned, conf,
       peakPrice: peakPrice != null ? peakPrice : (peak ? peak.price : null),

@@ -322,8 +322,14 @@ body {
 .dc-led-val.up { color: var(--up); } .dc-led-val.down { color: var(--down); } .dc-led-val.na { color: var(--muted); }
 /* --- 3. SINYAL --- */
 .dc-recrow { display: flex; gap: 8px; align-items: center; }
-.dc-rec { flex: 1; font-size: 15px; font-weight: 800; letter-spacing: .01em; }
-.dc-rec.up { color: var(--up); } .dc-rec.down { color: var(--down); } .dc-rec.flat { color: var(--muted); }
+/* Rekomendasi utama = informasi paling penting di kartu. Diberi BOX berwarna seperti kartu
+   mobile (.signal-rec: latar hijau/merah 15% + teks center) supaya langsung menonjol, bukan
+   hanya teks berwarna. */
+.dc-rec { flex: 1; font-size: 15px; font-weight: 800; letter-spacing: .01em;
+  text-align: center; padding: 7px 10px; border-radius: 8px; background: var(--panel-2); }
+.dc-rec.up { background: rgba(14,203,129,.15); color: var(--up); }
+.dc-rec.down { background: rgba(246,70,93,.15); color: var(--down); }
+.dc-rec.flat { color: var(--muted); }
 /* --- 4. TRADE ASSISTANT: 2 kolom (kiri info sinyal, kanan status ENTRY/EARLY CLOSE) ---
    Kolom kanan dibuat ~44% (cukup untuk "EARLY CLOSE: SUCCESS" pada 11px) dan chip
    ditumpuk vertikal -> satu baris tinggi kartu tersimpan. */

@@ -235,6 +235,16 @@ body {
 .vol-val.v-hot { color: #0ecb81; text-shadow: 0 0 8px rgba(14,203,129,.55); }  /* >=4 strong green */
 #s-liq { font-weight: 800; font-size: 14px; letter-spacing: .02em; }
 
+/* Baris VOLUME (mobile): LIQUIDITY · VOL · OFI — semua angka ditonjolkan, boleh melipat
+   ke baris kedua di layar sempit supaya tidak pernah terpotong. */
+.vol-row { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
+/* OFI: dibedakan arahnya (positif = tekanan beli -> hijau, negatif -> merah), ukuran sama
+   besar dengan LIQUIDITY/VOL supaya setara pentingnya. */
+#s-ofi { font-weight: 800; font-size: 14px; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+#s-ofi.up { color: var(--up); }
+#s-ofi.down { color: var(--down); }
+#s-ofi.na { color: var(--muted); }
+
 /* ---------- Wide screens: dual-coin monitor ---------- */
 .monitors { display: none; }
 /* Base (mobile): the dual detail is hidden. MUST be declared BEFORE the media query below,

@@ -38,24 +38,41 @@ function addTrade(sym, tsMs, qty, isBuyerMaker) {
 
 /* Sumber ALTERNATIF yang selalu tersedia: kline REST Binance.
    Setiap kline 1s punya `tb` = taker BUY volume; sell = vol - tb.
-   Dipakai karena stream aggTrade WS diblok di sebagian host (mis. Railway), sementara REST jalan.
-   Dedupe per aset: hanya candle dengan time > terakhir yang diproses, jadi boleh dipanggil
-   berkali-kali (tiap tick) tanpa menghitung ganda. */
-const lastKline = { BTC: 0, ETH: 0 };
+
+   PENTING (realtime): candle 1s TERAKHIR masih SEDANG BERJALAN, volumenya bertambah tiap detik.
+   Versi lama hanya mencatat candle dengan `time > terakhir`, sehingga candle yang sedang berjalan
+   tercatat SAAT BARU MUNCUL (volume ~0) dan seluruh volume detik itu hilang -> OFI selalu
+   tertinggal dari pergerakan harga. Sekarang candle yang sedang berjalan di-TOPO-UP dengan
+   DELTA-nya (buy & sell) setiap kali dipanggil, jadi OFI bergerak secepat datanya (~1 detik). */
+const lastKline = { BTC: null, ETH: null };            // { time, tb, vol } candle terakhir yang dilihat
+function bucketFor(s, tsSec) {
+  const min = Math.floor(tsSec / 60) * 60;
+  let b = s[min];
+  if (!b) { b = s[min] = { buy: 0, sell: 0, n: 0 }; prune(s, min); }
+  return b;
+}
+function addVol(s, tsSec, buy, sell) {
+  if (!(buy > 0) && !(sell > 0)) return;
+  const b = bucketFor(s, tsSec);
+  b.buy += buy; b.sell += sell; b.n++;
+}
 function addKlines(sym, candles) {
   const s = flow[sym];
   if (!s || !Array.isArray(candles) || !candles.length) return;
-  let last = lastKline[sym] || 0;
+  let last = lastKline[sym];
   for (const c of candles) {
-    if (!c || !isFinite(c.time) || c.time <= last) continue;
-    if (!isFinite(c.vol) || !isFinite(c.tb)) continue;
-    const min = Math.floor(c.time / 60) * 60;
-    let b = s[min];
-    if (!b) { b = s[min] = { buy: 0, sell: 0, n: 0 }; prune(s, min); }
-    b.buy += +c.tb;
-    b.sell += Math.max(0, +c.vol - +c.tb);
-    b.n++;
-    last = c.time;
+    if (!c || !isFinite(c.time) || !isFinite(c.vol) || !isFinite(c.tb)) continue;
+    if (!last || c.time > last.time) {
+      addVol(s, c.time, +c.tb, Math.max(0, +c.vol - +c.tb));    // candle baru: volume penuh
+      last = { time: c.time, tb: +c.tb, vol: +c.vol };
+    } else if (c.time === last.time) {
+      // candle berjalan: tambahkan HANYA selisihnya (delta), jangan dihitung dua kali
+      const dBuy = +c.tb - last.tb;
+      const dSell = (+c.vol - +c.tb) - (last.vol - last.tb);
+      addVol(s, c.time, Math.max(0, dBuy), Math.max(0, dSell));
+      last = { time: c.time, tb: +c.tb, vol: +c.vol };
+    }
+    // c.time < last.time -> data lama, abaikan
   }
   lastKline[sym] = last;
 }

@@ -238,6 +238,7 @@ function createEngine(deps) {
       conf: same ? (sess.conf || null) : null,
       mobilePred: same ? (sess.mobilePred || null) : null,
       ofi: FLOW.sessionOFI(sym, t0 / 1000, Math.floor(now / 1000)),
+      ofiShort: FLOW.sessionOFI(sym, Math.floor(now / 1000) - 120, Math.floor(now / 1000)),
     };
   }
 
@@ -273,6 +274,8 @@ function createEngine(deps) {
         conf: (sess && sameSession) ? (sess.conf || null) : null,
         // Mobile prediction (diproses server).
         mobilePred: (sess && sameSession) ? (sess.mobilePred || null) : null,
+        // OFI 120 detik terakhir (lebih responsif; dipakai tooltip).
+        ofiShort: FLOW.sessionOFI(sym, Math.floor(now / 1000) - 120, Math.floor(now / 1000)),
         // OFI LIVE (dihitung ulang setiap snapshot, bukan beku saat sinyal dikunci):
         // parameter sesi berjalan -> semua device menampilkan angka yang SAMA.
         ofi: FLOW.sessionOFI(sym, t0 / 1000, Math.floor(now / 1000)),

@@ -678,6 +678,7 @@ function applyType() {
     const volEl = document.getElementById("s-vol");
     const vol5sEl = document.getElementById("s-vol5s");
     const liqEl = document.getElementById("s-liq");
+    const ofiEl = document.getElementById("s-ofi");
     const confEl = document.getElementById("s-conf");
     const confBar = document.getElementById("s-conf-bar");
     const reasonEl = document.getElementById("entryReason");
@@ -730,6 +731,18 @@ function applyType() {
       const liq = o.liquidity || "NORMAL";
       liqEl.textContent = liq;
       liqEl.className = liq === "LOW" ? "down" : liq === "THIN" ? "warn" : liq === "—" ? "" : "up";
+    }
+    // OFI (order flow eksekusi) — ditonjolkan sejajar LIQUIDITY & VOL seperti di desktop.
+    // Angka = OFI sesi; arah diwarnai (positif hijau = tekanan beli, negatif merah = jual).
+    if (ofiEl) {
+      const ov = o.ofi;
+      ofiEl.textContent = ov != null ? (ov >= 0 ? "+" : "") + (ov * 100).toFixed(0) + "%" : "—";
+      ofiEl.className = ov == null ? "na" : (ov >= 0 ? "up" : "down");
+      const os = (() => { try { const e = (typeof LIVE !== "undefined") ? LIVE.entryFor(state.asset, state.interval) : null; return e && e.ofiShort != null ? e.ofiShort : null; } catch (_) { return null; } })();
+      ofiEl.parentElement.title = ov == null
+        ? "Order flow belum ada data"
+        : `Order flow (eksekusi taker) sesi: ${(ov * 100).toFixed(1)}%` + (os != null ? ` · 2 menit terakhir: ${(os * 100).toFixed(1)}%` : "") +
+          " — positif = tekanan BELI, negatif = tekanan JUAL";
     }
     if (rec) {
       if (o.analyzing) {

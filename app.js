@@ -3434,6 +3434,10 @@ function renderDual(force) {
     const graded = !!(sig && sig.verdict !== "flat");
     const dir = graded ? sig.verdict : "flat";
     const plan = m && m.plan;
+    // OFI untuk tampilan (metrik LIVE: pakai angka server dulu, else flow lokal). Dihitung di
+    // AWAL loop karena dipakai dua tempat: baris "Detail" Trade Assistant DAN chip metrik.
+    const t0SecR = Math.floor(Math.floor(now / dur) * dur / 1000);
+    const ofiVal = ofiForDisplay(a, t0SecR, Math.floor(now / 1000));
 
     // ===== SOUND per-koin untuk tampilan DESKTOP (dual) =====
     // Mobile: hanya koin aktif yang berbunyi (jalur utama). Di layar lebar KEDUA koin harus
@@ -3601,9 +3605,6 @@ function renderDual(force) {
     // Metrik dirender sebagai pasangan label:nilai (chip) supaya bisa dipindai cepat —
     // teks "LABEL nilai · LABEL nilai" sebelumnya sulit dibaca.
     const chip = (l, v, c, t) => `<span class="dc-m"${t ? ` title="${t}"` : ""}><i>${l}</i><b class="${c || ""}">${v}</b></span>`;
-    // OFI untuk tampilan: server dulu, else flow lokal (stream trade yang sama).
-    const t0SecR = Math.floor(Math.floor(now / dur) * dur / 1000);
-    const ofiVal = ofiForDisplay(a, t0SecR, Math.floor(now / 1000));
     // INTI (selalu tampil) — 4 informasi paling penting saja: OFI, MOMENTUM, MODE, DELTA.
     const grEl = g("grid");
     if (grEl) {

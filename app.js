@@ -915,7 +915,11 @@ function applyType() {
     const now = serverNow();
     const bounds = sessionBounds(dur, now);
     const t0 = bounds.start, T = bounds.end;
-    const O = sessionLock(state.asset, dur, now);
+    // GARIS LOCK: pakai LOCK server (identik dengan Binance & rekomendasi). Hitungan lokal dari
+    // cache 5 detik hanya dipakai sebagai tampilan sementara bila server belum mengirim sinyal.
+    const O = (typeof LIVE !== "undefined" && LIVE.lockFor && LIVE.lockFor(state.asset) != null)
+      ? LIVE.lockFor(state.asset)
+      : sessionLock(state.asset, dur, now);
     const five = state.cache[state.asset]["5s"].candles;
     const last = five[five.length - 1];
     if (!O || !last) return;
@@ -1785,6 +1789,23 @@ const LIVE = (() => {
     });
   }
   const priceFor = (asset) => (fresh() && snap && snap.assets && snap.assets[asset]) ? snap.assets[asset].price : null;
+  // LOCK resmi dari server (harga OPEN sesi menurut Binance). Dipakai untuk GARIS LOCK di chart
+  // supaya angkanya identik dengan rekomendasi/TA dan dengan Binance (bukan hasil hitungan
+  // klien dari cache 5 detik yang bisa meleset / memakai candle terakhir sebagai fallback).
+  function lockFor(asset, tf) {
+    if (!fresh() || !snap || !snap.assets) return null;
+    // Bila tf diminta dan berbeda dari tf langganan, ambil dari entri per-tf (all[tf]).
+    if (tf && snap.tf && tf !== snap.tf) {
+      const e = entryFor(asset, tf);
+      if (e && e.signal && e.signal.lock != null) return Number(e.signal.lock);
+      return null;
+    }
+    const a = snap.assets[asset];
+    if (!a) return null;
+    if (a.lock != null) return Number(a.lock);
+    if (a.signal && a.signal.lock != null) return Number(a.signal.lock);
+    return null;
+  }
   // Data server untuk (aset, tf) apa pun yang dilayani server (snapshot membawa `all` per tf).
   // Dipakai untuk MEMATIKAN perhitungan sinyal lokal: bila server sudah menyediakan entri tf ini
   // (walau masih "pending"/flat), server yang berwenang -> klien tidak boleh mengarang verdict.
@@ -1796,7 +1817,7 @@ const LIVE = (() => {
   const covers = (asset, tf) => !!entryFor(asset, tf);
   // Hook uji/debug: suntikkan snapshot seolah-olah baru diterima dari stream.
   const inject = (s, tf) => { snap = s; at = Date.now(); tfSub = tf || tfSub; count++; err = null; };
-  return { connect, inject, fresh, signalFor, priceFor, entryFor, covers, get snap() { return snap; }, get at() { return at; }, get tf() { return tfSub; }, get err() { return err; }, get n() { return count; } };
+  return { connect, inject, fresh, signalFor, priceFor, lockFor, entryFor, covers, get snap() { return snap; }, get at() { return at; }, get tf() { return tfSub; }, get err() { return err; }, get n() { return count; } };
 })();
 
 /* ===== PROFIL GATE (ambang sinyal) — bisa diganti learner TANPA deploy =====
@@ -2345,7 +2366,10 @@ function analyzeCoin(asset, tf, now) {
   const plan = (e && e.plan) ? e.plan : null;
   const five = state.cache[asset]?.["5s"]?.candles || [];
   const C = (five.length ? five[five.length - 1].close : null);
-  const O = e && e.signal && e.signal.lock != null ? e.signal.lock : (disp ? disp.mean : null);
+  // LOCK dari SERVER (harga open sesi menurut Binance). disp.mean BUKAN lock -> jangan dipakai.
+  const O = (typeof LIVE !== "undefined" && LIVE.lockFor && LIVE.lockFor(asset, tf) != null)
+    ? LIVE.lockFor(asset, tf)
+    : (e && e.signal && e.signal.lock != null ? e.signal.lock : null);
   const liveSig = sig || (e && e.skipped && e.skipped !== "pending" ? { mode: String(e.skipped).toUpperCase() } : null);
   return {
     key: `${asset}_${tf}_${t0}`,
@@ -3434,7 +3458,7 @@ function restoreMobilePredSession() {
         roundStart,
         asset: state.asset,
         interval: state.interval,
-        lockPrice: sessionLock(state.asset, dur, now),
+        lockPrice: (typeof LIVE !== "undefined" && LIVE.lockFor && LIVE.lockFor(state.asset) != null) ? LIVE.lockFor(state.asset) : sessionLock(state.asset, dur, now),
         prediction: "flat",
         confidence: 50,
         mode: "MENUNGGU",
@@ -3468,7 +3492,7 @@ function restoreMobilePredSession() {
   // Model prediksi (predictSessionStart) TIDAK lagi dijalankan di klien. Bila server belum
   // mengirim hasilnya, panel menampilkan "—" (tanpa hitung sendiri).
   _mobilePredSession = { roundStart, asset: state.asset, interval: state.interval,
-    lockPrice: sessionLock(state.asset, dur, now), prediction: "flat", confidence: 0, mode: "—" };
+    lockPrice: (typeof LIVE !== "undefined" && LIVE.lockFor && LIVE.lockFor(state.asset) != null) ? LIVE.lockFor(state.asset) : sessionLock(state.asset, dur, now), prediction: "flat", confidence: 0, mode: "—" };
   try { sessionStorage.setItem(MOBILE_PRED_SESSION_KEY, JSON.stringify(_mobilePredSession)); } catch (_) {}
 
   const pred = _mobilePredSession;

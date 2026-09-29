@@ -127,10 +127,20 @@ async function resolveMissing() {
       } catch (_) { /* coba lagi pada siklus berikutnya */ }
     }
   } finally { resolving = false; }
-  if (done) console.log(`[LEDGER] resolved ${done} outcome(s) dari 1m klines · total ${ledger.size}`);
+  if (done) {
+    console.log(`[LEDGER] resolved ${done} outcome(s) dari 1m klines · total ${ledger.size}`);
+    // PUSH realtime: beri tahu klien bahwa ada hasil baru supaya panel akurasi langsung
+    // memuat ulang (tanpa menunggu polling).
+    broadcast("ledger", { resolved: done, total: ledger.size, at: Date.now() });
+  }
 }
-setTimeout(() => resolveMissing().catch(() => {}), 20000);
-setInterval(() => resolveMissing().catch(() => {}), 5 * 60 * 1000);
+// Resolver hasil sesi: dijalankan 8 detik setelah boot lalu SETIAP 15 DETIK supaya riwayat
+// (benar/salah + entry/early close) muncul maksimal ~20 detik setelah sesi berakhir — sebelumnya
+// siklus 5 menit membuat panel akurasi terasa sangat lambat terupdate.
+// Aman dijalankan sering: hanya record yang SESINYA SUDAH BERAKHIR dan belum punya hasil yang
+// diproses (sisanya `continue`), jadi tidak ada permintaan klines berulang-ulang.
+setTimeout(() => resolveMissing().catch(() => {}), 8000);
+setInterval(() => resolveMissing().catch(() => {}), 15 * 1000);
 
 /* ===== PHASE 3: MODEL SERVING + RE-FIT TERJADWAL =====
    Model belajar (gate/touch/lessons) disajikan dari volume; app mengambilnya lewat
@@ -276,7 +286,12 @@ const capture = createCapture({
   getKlines, SignalCore: require("./signal-core.js"), learner: LEARNER,
   getModel: (part) => readModelPart(part),
   getGates: () => readGates(),
-  save: (rec) => mergeRecord(rec),
+  save: (rec) => {
+    const ok = mergeRecord(rec);
+    // beri tahu klien ada sesi/record baru (pending) supaya riwayat ikut ter-update
+    try { if (ok) broadcast("ledger", { added: true, total: ledger.size, at: Date.now() }); } catch (_) {}
+    return ok;
+  },
   log: console.log,
 });
 capture.start();

@@ -1478,6 +1478,16 @@ function trySSE() {
     if (!trendTimer) trendTimer = setInterval(refreshTrends, 10000);
   });
   es.addEventListener("trade", (e) => updateLiveTrade(JSON.parse(e.data)));
+  // PUSH realtime dari server: ada hasil sesi baru / record baru -> panel akurasi langsung
+  // memuat ulang (tanpa menunggu siklus polling). Throttle 1 detik agar tidak spam.
+  es.addEventListener("ledger", () => {
+    const nowMs = Date.now();
+    if (nowMs - _ledgerPushAt < 1000) return;
+    _ledgerPushAt = nowMs;
+    if (typeof LEDGER !== "undefined" && LEDGER.server) {
+      LEDGER.server(true).then(() => renderConfidenceReport()).catch(() => {});
+    }
+  });
   es.addEventListener("ticker", (e) => updateLiveTicker(JSON.parse(e.data)));
   es.onerror = () => { if (!got) { try { es.close(); } catch (_) {} startPolling(); } };
 }
@@ -1646,6 +1656,7 @@ const _entrySounded = new Set();    // key "sesi|state" yg nada entry/average-ny
 const _sigFirstSight = new Set();   // key sesi yg sudah pernah dilihat (PRIMING: sinyal yang sudah
                                     // ada saat halaman dibuka TIDAK dibunyikan, karena kartu sudah
                                     // menampilkannya — hanya sinyal yang muncul setelah user ada)
+let _ledgerPushAt = 0;              // throttle push 'ledger' dari server (panel akurasi)
 const _sigFirstDual = new Set();    // priming TERPISAH untuk jalur dual: renderDual juga dipanggil
                                     // saat resize (bisa lebih dulu dari updateProjection) sehingga
                                     // memakai set bersama bisa "memakan" priming jalur utama ->
@@ -2137,7 +2148,7 @@ const LEDGER = (() => {
   // bukan hanya apa yang sempat tercatat di localStorage device ini.
   let srvCache = null, srvAt = 0, srvLoading = false;
   async function server(force) {
-    if (!force && srvCache && Date.now() - srvAt < 15000) return srvCache;
+    if (!force && srvCache && Date.now() - srvAt < 5000) return srvCache;
     if (srvLoading) return srvCache;
     srvLoading = true;
     try {

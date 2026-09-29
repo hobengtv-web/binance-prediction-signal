@@ -152,6 +152,7 @@ function createCapture(deps) {
     const lock = tfc[idx].open;
     if (!lock) return { skipped: "no-lock" };
     const ones = await getKlines(sym, "1s", t0 + 2, 70);
+    FLOW.addKlines(sym, ones);                              // OFI dari REST (dedupe -> aman dipanggil terus)
     const nowSec = Math.floor(Date.now() / 1000);
     let five5m = [];
     try { five5m = await getKlines(sym, "5m", nowSec - 1, 60); } catch (_) {}

@@ -232,6 +232,23 @@ function sessionOFI(sym, t0Sec, nowSec) {
   const tot = buy + sell;
   return tot > 0 ? (buy - sell) / tot : 0;
 }
+/* PLAN TRADE ASSISTANT dari SERVER (diproses di server memakai trade-plan.js).
+   Ambil hanya bila stream /api/live segar, tf-nya sama, dan sinyal snapshot masih sesi berjalan
+   yang sama; kalau tidak -> null (klien menghitung sendiri sebagai cadangan offline). */
+function serverPlanFor(asset, tf) {
+  try {
+    if (typeof LIVE === "undefined" || !LIVE.fresh()) return null;
+    if (LIVE.tf !== tf) return null;
+    const snap = LIVE.snap;
+    const a = snap && snap.assets ? snap.assets[asset] : null;
+    if (!a || !a.plan || !a.signal) return null;
+    const dur = INTERVAL_MS[tf] || 300000;
+    const t0 = Math.floor(serverNow() / dur) * dur / 1000;
+    if (a.signal.t0 !== t0) return null;              // snapshot beda sesi -> abaikan
+    return a.plan;
+  } catch (_) { return null; }
+}
+
 /* OFI untuk TAMPILAN = metrik LIVE sesi berjalan (BUKAN nilai beku saat sinyal dikunci —
    sinyal dikunci ~2 detik setelah sesi mulai, saat itu flow masih kosong sehingga selalu null).
    Urutan sumber:
@@ -3004,7 +3021,7 @@ function analyzeCoin(asset, tf, now) {
   const peakFavor = Math.max(_tradePeak[key] || -Infinity, favor);
   _tradePeak[key] = peakFavor;
   const retreat = peakFavor > 0 && (peakFavor - favor) >= 0.25 * Math.max(std, 1e-9);
-  const health = (sig && sig.verdict !== "flat")
+  let health = (sig && sig.verdict !== "flat")
     ? computeSignalHealth(sig.verdict, {
         margin: isUp ? (C - O) : (O - C),
         marginStd: std > 0 ? Math.abs(C - O) / std : null,
@@ -3018,39 +3035,55 @@ function analyzeCoin(asset, tf, now) {
   dw.fadeSince = fade.count >= 2 ? (dw.fadeSince || now) : null;
   const entered = !!(_tradeEntered[key] && _tradeEntered[key].entered);
   const taBias = taBiasTmp;   // contra-lock (menuju LOCK)
-  const trail = taBias ? trailOf(asset, t0Sec, nowSec, O, taBias === "up") : null;
-  const plan = taBias
+  // PLAN = hasil proses SERVER (satu sumber kebenaran). Klien hanya menghitung sendiri
+  // sebagai cadangan bila snapshot server belum ada/putus (offline), memakai rumus yang sama.
+  const srvPlan = taBias ? serverPlanFor(asset, tf) : null;
+  const plan = srvPlan || (taBias
     ? computeTradePlan(taBias, {
         tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
-        entered, turn, fade, trail,
+        entered, turn, fade,
+        trail: trailOf(asset, t0Sec, nowSec, O, taBias === "up"),
         dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,
         dwellFadeMs: dw.fadeSince ? now - dw.fadeSince : 0,
         histTrend,
       })
-    : null;
+    : null);
 
   // STATUS ENTRY / EARLY CLOSE untuk kartu DUAL (dan monitor). Sebelumnya status hanya direkam
   // di jalur utama (koin aktif) sehingga kartu dual selalu menampilkan WAITING walau posisi
   // sudah dibuka. Key-nya SAMA (asset_tf_sessionStart-ms) sehingga state dibagi dengan jalur
   // utama; penjaga 'belum ada' mencegah pencatatan ganda.
   if (plan) {
-    if (plan.entered && !_tradeEntered[key]) {
-      _tradeEntered[key] = { entered: true, since: now, price: C };
-      console.log(`[TRADE] position opened ${asset}/${tf} @ ${fmtPrice(C)}`);
+    if (srvPlan) {
+      // Plan dari server sudah membawa statusEntry/statusClose/entryPrice. Salin ke state lokal
+      // supaya jalur pencatatan (akurasi + ledger) memakai angka yang SAMA dengan yang ditampilkan.
+      if (plan.entryPrice != null && !_tradeEntered[key]) {
+        _tradeEntered[key] = { entered: true, since: plan.statusEntry ? plan.statusEntry.at : now, price: plan.entryPrice };
+      }
+      if (!plan.entered) { delete _tradeEntered[key]; delete _tradeClosed[key]; _closeSounded.delete(key); }
+      if (plan.statusClose && plan.statusClose.ok && !_tradeClosed[key]) {
+        _tradeClosed[key] = { at: plan.statusClose.at, price: plan.statusClose.price };
+      }
+      if (plan.health) health = plan.health;   // health dari server (dihitung server, sama dgn yg dipakai plan)
+    } else {
+      if (plan.entered && !_tradeEntered[key]) {
+        _tradeEntered[key] = { entered: true, since: now, price: C };
+        console.log(`[TRADE] position opened ${asset}/${tf} @ ${fmtPrice(C)}`);
+      }
+      if (!plan.entered) { delete _tradeEntered[key]; delete _tradeClosed[key]; _closeSounded.delete(key); }
+      if (plan.state === "CLOSE" && !_tradeClosed[key]) {
+        _tradeClosed[key] = { at: now, price: C };
+        console.log(`[TRADE] early close disinyalkan ${asset}/${tf} @ ${fmtPrice(C)}`);
+      }
+      const _ent = _tradeEntered[key], _clo = _tradeClosed[key];
+      plan.entryPrice = _ent ? _ent.price : null;
+      plan.statusEntry = {
+        ok: !!_ent, at: _ent ? _ent.since : null, price: _ent ? _ent.price : null,
+        waiting: plan.state === "STAND_DOWN" ? "reversal terdeteksi — tunggu setup baru"
+          : (plan.state === "WAIT" && /TUNGGU PEAK/.test(plan.action) ? "konfirmasi peak contra (2/4 bagian + 4s)" : "harga belum contra / belum kembali ke lock"),
+      };
+      plan.statusClose = { ok: !!_clo, at: _clo ? _clo.at : null, price: _clo ? _clo.price : null };
     }
-    if (!plan.entered) { delete _tradeEntered[key]; delete _tradeClosed[key]; _closeSounded.delete(key); }
-    if (plan.state === "CLOSE" && !_tradeClosed[key]) {
-      _tradeClosed[key] = { at: now, price: C };
-      console.log(`[TRADE] early close disinyalkan ${asset}/${tf} @ ${fmtPrice(C)}`);
-    }
-    const _ent = _tradeEntered[key], _clo = _tradeClosed[key];
-    plan.entryPrice = _ent ? _ent.price : null;
-    plan.statusEntry = {
-      ok: !!_ent, at: _ent ? _ent.since : null, price: _ent ? _ent.price : null,
-      waiting: plan.state === "STAND_DOWN" ? "reversal terdeteksi — tunggu setup baru"
-        : (plan.state === "WAIT" && /TUNGGU PEAK/.test(plan.action) ? "konfirmasi peak contra (2/4 bagian + 4s)" : "harga belum contra / belum kembali ke lock"),
-    };
-    plan.statusClose = { ok: !!_clo, at: _clo ? _clo.at : null, price: _clo ? _clo.price : null };
   }
   return { key, C, O, std, slope, slopeRecent, rsi, z, sig, health, plan, ofi, ofiShort, histTrend,
     liveMode: liveSig ? liveSig.mode : null };   // mode live (utk teks status saat tidak ada sinyal graded)

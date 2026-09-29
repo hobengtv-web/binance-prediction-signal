@@ -47,6 +47,9 @@ function mapKline(r) {
     time: Math.floor(r[0] / 1000),
     open: +r[1], high: +r[2], low: +r[3], close: +r[4],
     vol: +r[5], trades: +r[8],
+    // r[9] = taker BUY base volume. Dipakai menghitung executed order flow (OFI) tanpa WS:
+    // di Railway stream aggTrade Binance tidak bisa dibuka, sedangkan REST kline jalan.
+    tb: +r[9],
     openTime: r[0], closeTime: r[6],
   };
 }

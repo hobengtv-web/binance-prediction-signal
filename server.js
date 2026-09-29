@@ -350,8 +350,10 @@ function startBinance() {
         }
         
         // `m` = isBuyerMaker: true means the aggressor was the seller (taker sell).
-        // Akumulasi untuk OFI sesi (dipakai payload sinyal server + direkam ke ledger).
-        FLOW.addTrade(sym, d.T, +d.q, d.m);
+        // CATATAN OFI: TIDAK diakumulasi dari sini. Stream aggTrade Binance diblok di sebagian
+        // host (terbukti di Railway: log [LOCK] tidak pernah muncul), sedangkan REST kline selalu
+        // jalan -> OFI dibangun dari kline (FLOW.addKlines di engine/capture) supaya SATU sumber
+        // angka yang sama di semua environment (kalau dua-duanya diisi, volume jadi dobel).
         broadcast("trade", { sym, price: +d.p, qty: +d.q, ts: d.T, m: d.m });
       } else if (d.e === "24hrTicker") {
         const sym = d.s === "BTCUSDT" ? "BTC" : "ETH";

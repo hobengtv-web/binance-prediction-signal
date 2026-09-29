@@ -36,6 +36,30 @@ function addTrade(sym, tsMs, qty, isBuyerMaker) {
   b.n++;
 }
 
+/* Sumber ALTERNATIF yang selalu tersedia: kline REST Binance.
+   Setiap kline 1s punya `tb` = taker BUY volume; sell = vol - tb.
+   Dipakai karena stream aggTrade WS diblok di sebagian host (mis. Railway), sementara REST jalan.
+   Dedupe per aset: hanya candle dengan time > terakhir yang diproses, jadi boleh dipanggil
+   berkali-kali (tiap tick) tanpa menghitung ganda. */
+const lastKline = { BTC: 0, ETH: 0 };
+function addKlines(sym, candles) {
+  const s = flow[sym];
+  if (!s || !Array.isArray(candles) || !candles.length) return;
+  let last = lastKline[sym] || 0;
+  for (const c of candles) {
+    if (!c || !isFinite(c.time) || c.time <= last) continue;
+    if (!isFinite(c.vol) || !isFinite(c.tb)) continue;
+    const min = Math.floor(c.time / 60) * 60;
+    let b = s[min];
+    if (!b) { b = s[min] = { buy: 0, sell: 0, n: 0 }; prune(s, min); }
+    b.buy += +c.tb;
+    b.sell += Math.max(0, +c.vol - +c.tb);
+    b.n++;
+    last = c.time;
+  }
+  lastKline[sym] = last;
+}
+
 /* OFI sesi: mulai dari awal sesi (t0sec, dibulatkan ke menit) sampai nowSec. */
 function sessionOFI(sym, t0Sec, nowSec) {
   const s = flow[sym];
@@ -53,4 +77,4 @@ function sessionOFI(sym, t0Sec, nowSec) {
   return +(((buy - sell) / tot).toFixed(4));
 }
 
-module.exports = { addTrade, sessionOFI, stats: () => ({ BTC: Object.keys(flow.BTC).length, ETH: Object.keys(flow.ETH).length }) };
+module.exports = { addTrade, addKlines, sessionOFI, stats: () => ({ BTC: Object.keys(flow.BTC).length, ETH: Object.keys(flow.ETH).length }) };

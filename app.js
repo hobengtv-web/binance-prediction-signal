@@ -2236,6 +2236,10 @@ const _entrySounded = new Set();    // key "sesi|state" yg nada entry/average-ny
 const _sigFirstSight = new Set();   // key sesi yg sudah pernah dilihat (PRIMING: sinyal yang sudah
                                     // ada saat halaman dibuka TIDAK dibunyikan, karena kartu sudah
                                     // menampilkannya — hanya sinyal yang muncul setelah user ada)
+const _sigFirstDual = new Set();    // priming TERPISAH untuk jalur dual: renderDual juga dipanggil
+                                    // saat resize (bisa lebih dulu dari updateProjection) sehingga
+                                    // memakai set bersama bisa "memakan" priming jalur utama ->
+                                    // alert utama berbunyi palsu.
 const _warnPrimed = new Set();      // idem untuk peringatan health (skor kritis)
 const _tradeLastSrc = {};           // key -> "server" | "local" (asal plan pada pengamatan terakhir)
 const _tradeDwell = {};    // key -> { turnSince, fadeSince }
@@ -3536,9 +3540,10 @@ function renderDual(force) {
     if (m && m.key) {
       // PRIMING: sama seperti jalur utama — sinyal yang sudah ada sebelum halaman dibuka tidak
       // dibunyikan (kartu sudah menampilkannya), hanya sinyal yang muncul selagi user ada.
-      const dualFirstSight = !_sigFirstSight.has(m.key);
-      _sigFirstSight.add(m.key);
-      if (state.asset !== a && graded) {
+      const isOtherCoin = state.asset !== a;
+      const dualFirstSight = isOtherCoin && !_sigFirstDual.has(m.key);
+      if (isOtherCoin) _sigFirstDual.add(m.key);      // hanya koin NON-aktif yang memakai priming dual
+      if (isOtherCoin && graded) {
         if (!_wideSigSounded.has(m.key)) {
           _wideSigSounded.add(m.key);
           if (dualFirstSight) {
@@ -3550,7 +3555,7 @@ function renderDual(force) {
             console.log(`[WIDE][SOUND-SIGNAL] ${a}/${tf} ${dir}${sig && sig.grade ? " " + sig.grade : ""}`);
           }
         }
-      } else if (state.asset !== a && !graded) {
+      } else if (isOtherCoin && !graded) {
         _wideSigSounded.delete(m.key);      // flat / sesi baru -> siap berbunyi lagi
       }
       // Trade Assistant: entry / average / close (semua koin, termasuk koin aktif — dedupe via state bersama)
@@ -3992,6 +3997,7 @@ function updateProjectionUniversal() {
     if (!isNaN(t) && t < CUTOFF) _closeSounded.delete(k);
     for (const sk of _entrySounded) { const t2 = parseInt(sk.split("_")[2]); if (!isNaN(t2) && t2 < CUTOFF) _entrySounded.delete(sk); }
     for (const k2 of _sigFirstSight) { const t3 = parseInt(k2.split("_")[2]); if (!isNaN(t3) && t3 < CUTOFF) _sigFirstSight.delete(k2); }
+    for (const k2 of _sigFirstDual) { const t3 = parseInt(k2.split("_")[2]); if (!isNaN(t3) && t3 < CUTOFF) _sigFirstDual.delete(k2); }
     for (const k2 of _warnPrimed) { const t3 = parseInt(k2.split("_")[2]); if (!isNaN(t3) && t3 < CUTOFF) _warnPrimed.delete(k2); }
     for (const k2 in _tradeLastSrc) { const t3 = parseInt(k2.split("_")[2]); if (!isNaN(t3) && t3 < CUTOFF) delete _tradeLastSrc[k2]; }
   }

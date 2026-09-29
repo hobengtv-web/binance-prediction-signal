@@ -245,6 +245,14 @@ function serverPlanFor(asset, tf) {
      3) null -> UI menampilkan "—" (artinya belum ada data, bukan 0). */
 // OFI super-realtime (event SSE `ofi`, ~300ms). Kalau lebih segar dari snapshot, dipakai.
 let _fastOfi = { at: 0, assets: {} };
+/* Ambil OFI cepat untuk (aset, tf). Event SSE mengirim byTf (5m/15m/1h) karena OFI adalah
+   AKUMULASI SESI sesuai timeframe; kalau byTf belum ada, pakai nilai 5m sebagai cadangan. */
+function fastOfiFor(asset, tf) {
+  const f = _fastOfi && _fastOfi.assets ? _fastOfi.assets[asset] : null;
+  if (!f) return null;
+  const e = (f.byTf && f.byTf[tf]) ? f.byTf[tf] : f;
+  return (e && e.ofi != null) ? Number(e.ofi) : null;
+}
 /* ===== BAR OFI (diverging) — implementasi BERSAMA mobile & desktop =====
    v dalam -1..+1. Hijau ke kanan = tekanan beli, merah ke kiri = tekanan jual.
    Skala ±25% = penuh; pita tengah = netral ±5%; di luar skala diberi penanda saturasi (▶/◀). */
@@ -326,11 +334,11 @@ function buildGuides(plan, disp, lock) {
 /* Patch angka OFI (mobile + chip desktop) tanpa render penuh — dipakai oleh event SSE `ofi`. */
 function updateOfiFast() {
   const a = state.asset;
-  const fA = _fastOfi.assets[a] ? _fastOfi.assets[a].ofi : null;
+  const fA = fastOfiFor(a, state.interval);
   const dA = ofiDOM("s-ofi");
   paintOfi(fA, dA.fill, dA.sat, dA.val);
   for (const sym of ["BTC", "ETH"]) {
-    const f = _fastOfi.assets[sym] ? _fastOfi.assets[sym].ofi : null;
+    const f = fastOfiFor(sym, state.interval);
     const d = ofiDOM("dc-" + sym + "-ofi");
     paintOfi(f, d.fill, d.sat, d.val);
   }
@@ -338,8 +346,8 @@ function updateOfiFast() {
 
 function ofiForDisplay(asset, t0Sec, nowSec) {
   // OFI super-realtime (event SSE `ofi`, default ~300ms) dipakai bila lebih segar dari snapshot.
-  const f = _fastOfi && _fastOfi.assets ? _fastOfi.assets[asset] : null;
-  if (f && f.ofi != null && Date.now() - _fastOfi.at < 3000) return Number(f.ofi);
+  const fFast = (Date.now() - _fastOfi.at < 3000) ? fastOfiFor(asset, state.interval) : null;
+  if (fFast != null) return fFast;
   // SERVER-ONLY: OFI dihitung server (flow.js) dan dikirim di snapshot. Tidak ada hitungan lokal.
   try {
     if (typeof LIVE !== "undefined") {
@@ -1167,8 +1175,7 @@ function applyType() {
       highConf: !!gateInfo,
       gateWr: gateInfo ? gateInfo.wr : null,
       ofi: ofiNow,
-      fastOfi: (_fastOfi && _fastOfi.assets && _fastOfi.assets[state.asset] && Date.now() - _fastOfi.at < 3000)
-        ? _fastOfi.assets[state.asset].ofi : null,
+      fastOfi: (Date.now() - _fastOfi.at < 3000) ? fastOfiFor(state.asset, state.interval) : null,
       tradePlan,
       recPnl: (tradePlan && tradePlan.entryPrice != null && tradePlan.tradeDir)
         ? (((tradePlan.tradeDir === "up" ? (C - tradePlan.entryPrice) : (tradePlan.entryPrice - C)) / tradePlan.entryPrice) * 100)

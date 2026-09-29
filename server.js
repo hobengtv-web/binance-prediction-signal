@@ -226,13 +226,22 @@ async function ofiFastTick() {
     const ks = await Promise.all(["BTC", "ETH"].map((sym) => getKlines(sym, "1s", undefined, 6)));
     ["BTC", "ETH"].forEach((sym, i) => FLOW.addKlines(sym, ks[i]));
     const nowS = Math.floor(Date.now() / 1000);
-    const t0 = Math.floor(nowS / 300) * 300;                 // awal sesi 5m berjalan
+    // OFI = AKUMULASI SESI (buy-sell)/(buy+sell) dari awal sesi sampai sekarang, dengan definisi
+    // sesi SESUAI TIMEFRAME. Sebelumnya jalur cepat ini selalu memakai sesi 5 menit, sehingga
+    // untuk tf 15m/1h angkanya BEDA dengan snapshot (yang memakai sesi tf tsb). Kini ketiga tf
+    // dikirim sekaligus (murah: hanya menjumlah bucket menit) dan klien memilih sesuai tf aktif.
+    const TFSEC = { "5m": 300, "15m": 900, "1h": 3600 };
     const assets = {};
     for (const sym of ["BTC", "ETH"]) {
-      assets[sym] = {
-        ofi: FLOW.sessionOFI(sym, t0, nowS),
-        ofiShort: FLOW.sessionOFI(sym, nowS - 120, nowS),
-      };
+      const byTf = {};
+      for (const tf of Object.keys(TFSEC)) {
+        const t0tf = Math.floor(nowS / TFSEC[tf]) * TFSEC[tf];
+        byTf[tf] = {
+          ofi: FLOW.sessionOFI(sym, t0tf, nowS),
+          ofiShort: FLOW.sessionOFI(sym, nowS - 120, nowS),
+        };
+      }
+      assets[sym] = { ofi: byTf["5m"].ofi, ofiShort: byTf["5m"].ofiShort, byTf };
     }
     broadcast("ofi", { at: Date.now(), poll: OFI_POLL_MS, assets });
   } catch (_) { /* lewati tick ini */ }

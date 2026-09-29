@@ -289,6 +289,7 @@ function createEngine(deps) {
       bias, tf, lock: sig.lock, price,
       std: stat.std, slope: stat.slope, slopeRecent: stat.slopeRecent, rsi, z: stat.z,
       ofi, ofiShort, histTrend, win, sessionCloses: closes,
+      durMs: (DUR_S[tf] || 300) * 1000, remainMs: Math.max(0, (t0 + (DUR_S[tf] || 300)) * 1000 - Date.now()),
       key, now: Date.now(), tiers: TIERS, state: st,
     });
   }

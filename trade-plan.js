@@ -172,6 +172,19 @@ function computeTradePlan(bias, ctx) {
   // Confirmation: >=2 independent evidence parts AND a minimum dwell time, so a single
   // noisy tick cannot trigger (too fast) and waiting never drags on (too late).
   const turn = ctx.turn || { count: 0, parts: {} };
+  // ===== GATE WAKTU ENTRY (permintaan user) =====
+  // Sinyal UP dengan harga masih contra (di bawah LOCK) tetapi sisa sesi mepet -> JANGAN entry,
+  // karena tidak ada cukup waktu untuk harga mencapai LOCK. Pengecualian: reversal EKSTREM
+  // (>=3/4 bukti pembalikan DAN arus pendek kuat searah bias) yang bisa langsung melewati LOCK.
+  const durMsNow = (ctx.durMs != null) ? ctx.durMs : ((DUR_SEC[ctx.tf] || 300) * 1000);
+  const remainSecNow = (ctx.remainMs != null) ? ctx.remainMs / 1000 : null;
+  const durSecNow = durMsNow / 1000;
+  const minRemainSec = Math.min(300, Math.max(120, 0.35 * durSecNow));   // 5m->120s · 15m/1h->300s
+  const distToLockPct = Math.abs(ctx.lock - ctx.price) / (ctx.price || 1) * 100;
+  const ofiTowardStrong = ctx.ofiShort != null && (isUp ? ctx.ofiShort > 0.25 : ctx.ofiShort < -0.25);
+  const extremeReversal = turn.count >= 3 && ofiTowardStrong;
+  const timeTooShort = remainSecNow != null && remainSecNow < minRemainSec;
+  const blockLateEntry = timeTooShort && !extremeReversal;
   const fade = ctx.fade || { count: 0, parts: {} };
   const dwellTurn = ctx.dwellTurnMs || 0;
   const dwellFade = ctx.dwellFadeMs || 0;
@@ -216,10 +229,16 @@ function computeTradePlan(bias, ctx) {
     } else if (realReversal) {
       state = "STAND_DOWN"; cls = "exit";
       action = `JANGAN ENTRY — tren historis berbalik & arus kuat melawan (kemungkinan reversal nyata)`;
+    } else if (blockLateEntry) {
+      // Sisa waktu sesi tidak cukup untuk mencapai LOCK -> jangan entry sekarang.
+      state = "WAIT"; cls = "wait";
+      action = `TUNGGU — sisa sesi ${Math.round(remainSecNow)}s (minimal ${Math.round(minRemainSec)}s untuk capai lock ${fmtPrice(ctx.lock)}), jarak ${distToLockPct.toFixed(2)}%`
+        + `; entry hanya bila reversal EKSTREM terdeteksi`;
     } else if (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS) {
       state = "ENTRY"; cls = "entry";
       nowEntered = true;
-      action = `ENTRY SEKARANG ${bias.toUpperCase()} — peak contra terkonfirmasi (${rNowTxt}, ${partList(turn.parts)})`;
+      action = `ENTRY SEKARANG ${bias.toUpperCase()} — peak contra terkonfirmasi (${rNowTxt}, ${partList(turn.parts)})`
+        + (timeTooShort ? ` [reversal ekstrem; sisa sesi ${Math.round(remainSecNow)}s]` : "");
     } else {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU PEAK — harga contra ${rNowTxt}; konfirmasi pembalikan ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
@@ -338,6 +357,7 @@ function buildPlan(input) {
   const plan = computeTradePlan(bias, {
     tf: input.tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
     entered, turn, fade, trail,
+    durMs: input.durMs, remainMs: input.remainMs,   // gate waktu entry
     entryPrice: state.entered[key] ? state.entered[key].price : null,   // harga entry posisi (untuk kedalaman CUT)
     dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,
     dwellFadeMs: dw.fadeSince ? now - dw.fadeSince : 0,
@@ -385,6 +405,7 @@ function trailOfCloses(closes, lock, isUp) {
    Dipakai server untuk menghitung std/slope/z dari window candle 5s yang sama dengan
    yang dipakai klien, supaya angka plan tidak berbeda karena rumus yang berbeda. */
 const MON_WINDOW = { "5m": 24, "15m": 60, "1h": 120 };
+const DUR_SEC = { "5m": 300, "15m": 900, "1h": 3600 };
 
 function meanOf(a) { return a && a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0; }
 function stdOf(a) { const m = meanOf(a); return a && a.length ? Math.sqrt(a.reduce((s, x) => s + (x - m) * (x - m), 0) / a.length) : 0; }

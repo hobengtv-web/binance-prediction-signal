@@ -330,6 +330,11 @@ body {
 .dc-rec.up { background: rgba(14,203,129,.15); color: var(--up); }
 .dc-rec.down { background: rgba(246,70,93,.15); color: var(--down); }
 .dc-rec.flat { color: var(--muted); }
+/* Judul blok + CTA "DETAIL" dalam satu baris (hemat tinggi kartu) */
+.dc-ta-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 14px; }
+/* Isi Detail (collapsed default). [hidden] harus menang atas display default. */
+.tp-detail-body[hidden] { display: none; }
+
 /* --- 4. TRADE ASSISTANT: 2 kolom (kiri info sinyal, kanan status ENTRY/EARLY CLOSE) ---
    Kolom kanan dibuat ~44% (cukup untuk "EARLY CLOSE: SUCCESS" pada 11px) dan chip
    ditumpuk vertikal -> satu baris tinggi kartu tersimpan. */

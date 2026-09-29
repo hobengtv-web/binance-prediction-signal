@@ -2520,7 +2520,14 @@ function buildDual() {
       </div>
 
       <div class="dc-sec dc-ta">
-        <div class="dc-sec-label">TRADE ASSISTANT</div>
+        <!-- Judul + CTA "DETAIL" dalam SATU baris (hemat tinggi kartu). Pakai <button>, bukan
+             <summary>, karena <summary> wajib jadi anak pertama <details> sehingga tidak bisa
+             ditaruh sebaris dengan judul. -->
+        <div class="dc-ta-head">
+          <span class="dc-sec-label">TRADE ASSISTANT</span>
+          <button type="button" class="dc-more-btn" id="dc-${a}-detail-btn" aria-expanded="false"
+                  title="Tampilkan teks aksi penuh, penjelasan arah, level ladder L1/L2/L3, dan metrik teknis">DETAIL ▾</button>
+        </div>
         <!-- 2 kolom: kiri = info sinyal (aksi + harga kunci) · kanan = status ENTRY & EARLY CLOSE
              (ditumpuk vertikal). Menghemat 1 baris tinggi kartu tanpa memindahkan informasi. -->
         <div class="dc-ta-row">
@@ -2533,13 +2540,12 @@ function buildDual() {
             <span class="tp-st wait" id="dc-${a}-st-close">EARLY CLOSE: <b>WAITING…</b></span>
           </div>
         </div>
-        <details class="tp-detail">
-          <summary>Detail</summary>
+        <div class="tp-detail-body" id="dc-${a}-detail" hidden>
           <div class="tp-full" id="dc-${a}-full"></div>
           <div class="tp-bias" id="dc-${a}-bias"></div>
           <div class="tp-levels" id="dc-${a}-levels"></div>
           <div class="tp-meta" id="dc-${a}-meta"></div>
-        </details>
+        </div>
       </div>
 
       <!-- BAGIAN BAWAH: 2 kolom di dalam kartu supaya tinggi kartu turun (panel
@@ -2576,6 +2582,17 @@ function buildDual() {
     dualCharts[a].fit();
     // Toggle "LIHAT SEMUA": pakai <button> (bukan <details>) supaya bisa sebaris dengan
     // judul blok. Yang disembunyikan hanya metrik pendukung — 4 metrik inti tetap terlihat.
+    // Toggle DETAIL Trade Assistant (sebaris dengan judul)
+    const dBtn = document.getElementById(`dc-${a}-detail-btn`);
+    const dBody = document.getElementById(`dc-${a}-detail`);
+    if (dBtn && dBody) {
+      dBtn.addEventListener("click", () => {
+        const open = dBtn.getAttribute("aria-expanded") === "true";
+        dBtn.setAttribute("aria-expanded", open ? "false" : "true");
+        dBtn.textContent = open ? "DETAIL ▾" : "TUTUP ▴";
+        dBody.hidden = open;
+      });
+    }
     const btn = document.getElementById(`dc-${a}-more-btn`);
     const bodies = [`dc-${a}-rows`, `dc-${a}-pred`].map((id) => document.getElementById(id)).filter(Boolean);
     if (btn && bodies.length) {

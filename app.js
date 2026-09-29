@@ -1284,7 +1284,8 @@ function applyType() {
     _tradeLastState[uniKey] = tradePlan.state;
     if (prevTradeState !== undefined && tradePlan.state !== prevTradeState) {
       if (tradePlan.state === "ENTRY" || tradePlan.state === "AVERAGE") {
-        playTradeEntrySound();
+        const sk = `${uniKey}|${tradePlan.state}`;
+        if (!_entrySounded.has(sk)) { _entrySounded.add(sk); playTradeEntrySound(); }
         flashCard(state.asset, "entry");
         console.log(`[TRADE][SOUND-ENTRY] ${tradePlan.state} ${state.asset}/${state.interval}: ${tradePlan.action}`);
         flashTitle(`▶ ${tradePlan.action} ${state.asset}/${state.interval}`);
@@ -2211,6 +2212,7 @@ const _tradeClosed = {};   // key -> { at, price }  (kapan EARLY CLOSE pertama k
 const _wideSigSounded = new Set();  // key koin yg sudah dibunyikan di tampilan dual (hindari dobel)
 const _mainSigAlerted = new Set();  // key sesi yg alarm sinyalnya sudah dibunyikan (jalur utama)
 const _closeSounded = new Set();    // key sesi yg nada close-nya sudah dibunyikan (cegah berulang)
+const _entrySounded = new Set();    // key "sesi|state" yg nada entry/average-nya sudah dibunyikan
 const _tradeDwell = {};    // key -> { turnSince, fadeSince }
 function computeTradePlan(bias, ctx) {
   if (bias !== "up" && bias !== "down") {
@@ -3522,7 +3524,8 @@ function renderDual(force) {
         const prevW = _tradeLastState[m.key];
         if (prevW !== undefined && plan.state !== prevW) {
           if (plan.state === "ENTRY" || plan.state === "AVERAGE") {
-            playTradeEntrySound();
+            const sk = `${m.key}|${plan.state}`;
+            if (!_entrySounded.has(sk)) { _entrySounded.add(sk); playTradeEntrySound(); }
             flashCard(a, "entry");
             flashTitle(`▶ ${plan.action} ${a}/${tf}`);
             console.log(`[WIDE][SOUND-ENTRY] ${a}/${tf} ${plan.state}: ${plan.action}`);
@@ -3948,6 +3951,7 @@ function updateProjectionUniversal() {
   for (const k of _closeSounded) {
     const t = parseInt(k.split("_")[2]);
     if (!isNaN(t) && t < CUTOFF) _closeSounded.delete(k);
+    for (const sk of _entrySounded) { const t2 = parseInt(sk.split("_")[2]); if (!isNaN(t2) && t2 < CUTOFF) _entrySounded.delete(sk); }
   }
   for (const k of _warnedKeys) {
     const t = parseInt(k.split("_")[2]);
@@ -3988,7 +3992,13 @@ function updateProjectionUniversal() {
           sig.lockedAt = now;                         // when the session signal was locked
           _deskSigCache[cacheKey] = sig;
           console.log(`[SIGNAL] early ${sym}/${tf} at +${Math.round((now - t0) / 1000)}s:`, sig.grade, sig.mode, sig.verdict, `expected ${sig.expectedWR != null ? (sig.expectedWR * 100).toFixed(1) + "%" : "—"}`);
-          notifySignal(sym, tf, sig);                 // background alert (all combos)
+          // NOTIFIKASI HANYA BILA SERVER TIDAK TERSEDIA (mode cadangan) dan HANYA untuk
+          // timeframe yang sedang ditampilkan. Sebelumnya sinyal lokal (yang bisa BEDA dari
+          // sinyal server yang dipakai kartu) juga memicu notifikasi -> notif terasa "palsu":
+          // muncul padahal kartu tidak menampilkan sinyal apa pun (atau beda arah/tf).
+          if ((typeof LIVE === "undefined" || !LIVE.fresh()) && tf === state.interval) {
+            notifySignal(sym, tf, sig);
+          }
         }
       }
     }
@@ -5143,10 +5153,9 @@ function notifySignal(sym, tf, sig) {
   _alertedKeys.add(key);
 
   const dir = String(sig.verdict || "").toUpperCase();
-  flashTitle(`${dir} ${sym}/${tf}`);          // visible in the tab bar even when unfocused
-
   const hidden = typeof document.hidden === "boolean" ? document.hidden : false;
-  if (!hidden) return;                         // tab focused -> UI already shows it
+  if (!hidden) return;                         // tab fokus -> UI sudah menampilkan, jangan ganggu
+  flashTitle(`${dir} ${sym}/${tf}`);          // terlihat di judul tab saat tab tidak fokus
   const nowMs = Date.now();
   if (nowMs - _lastNotifAt < 5000) return;     // throttle notifications
   _lastNotifAt = nowMs;

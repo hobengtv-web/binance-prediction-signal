@@ -48,9 +48,45 @@ function createEngine(deps) {
                    ETH: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 } };
   // State Trade Assistant per (aset, tf): peak/dwell/entered/closed. Direset tiap sesi baru.
   const planState = { BTC: {}, ETH: {} };
+  // ===== PERSISTENSI STATE TRADE ASSISTANT =====
+  // State (posisi terbuka + early close + snapshot sesi) sebelumnya hanya di MEMORI, sehingga
+  // setiap restart container (mis. saat deploy) menghapusnya -> chip ENTRY/EARLY CLOSE yang tadinya
+  // SUCCESS bisa "hilang", dan sesi itu tercatat tanpa entry. Sekarang state disimpan ke file di
+  // volume (deps.stateFile) dan dimuat kembali saat boot supaya tidak hilang oleh restart.
+  const STATE_FILE = deps.stateFile || null;
+  let stateDirty = false, stateSavedAt = 0, stateLoaded = false;
+  function loadState() {
+    if (!STATE_FILE) return;
+    try {
+      const j = JSON.parse(require("fs").readFileSync(STATE_FILE, "utf8"));
+      if (j && j.finishedTrades) Object.assign(finishedTrades, j.finishedTrades);
+      if (j && j.planState) {
+        for (const sym of Object.keys(planState)) {
+          const src = j.planState[sym];
+          if (!src) continue;
+          for (const tf of Object.keys(src)) {
+            const e = src[tf];
+            if (e && e.key && e.st) planState[sym][tf] = { key: e.key, st: e.st };
+          }
+        }
+      }
+      log(`[ENGINE] state trade dipulihkan dari ${STATE_FILE} (finishedTrades=${Object.keys(finishedTrades).length})`);
+    } catch (_) { /* belum ada / rusak -> mulai bersih */ }
+    stateLoaded = true;
+  }
+  function saveState(force) {
+    if (!STATE_FILE || (!stateDirty && !force)) return;
+    if (!force && Date.now() - stateSavedAt < 3000) return;      // throttle 3 detik
+    try {
+      require("fs").writeFileSync(STATE_FILE, JSON.stringify({ at: Date.now(), finishedTrades, planState }));
+      stateDirty = false; stateSavedAt = Date.now();
+    } catch (_) { /* gagal tulis: coba lagi nanti */ }
+  }
   // Hasil trade sesi yang SUDAH berakhir (untuk dicatat ke ledger saat hasil sesi dinilai).
   // Menyimpan: apakah posisi dibuka (entry) dan apakah early close ter-signal.
   const finishedTrades = {};
+  // Dimuat SETELAH semua struktur state ada (kalau dipanggil lebih awal -> TDZ -> restore gagal senyap)
+  loadState();
   // PENTING (permintaan user): yang dicatat adalah ENTRY & EARLY CLOSE yang PERTAMA.
   // State ini hanya diisi sekali per sesi ("first write wins") — entry berikutnya atau
   // close berikutnya pada sesi yang sama TIDAK menimpa, lihat trade-plan.js buildPlan().
@@ -64,6 +100,7 @@ function createEngine(deps) {
   }
   function snapshotTrade(sym, tf, key, st) {
     if (!key || !st) return;
+    stateDirty = true;
     finishedTrades[key] = tradeStateOf(st, key);
     const keys = Object.keys(finishedTrades);
     if (keys.length > 1000) delete finishedTrades[keys[0]];      // batasi memori
@@ -73,6 +110,7 @@ function createEngine(deps) {
     if (!s || s.key !== key) {
       if (s && s.st && s.key) snapshotTrade(sym, tf, s.key, s.st);   // sesi lama berakhir -> simpan
       s = planState[sym][tf] = { key, st: { peak: {}, dwell: {}, entered: {}, closed: {} } };
+      stateDirty = true;
     }
     return s.st;
   }
@@ -305,6 +343,7 @@ function createEngine(deps) {
         // adalah metrik hidup: dwell turn/fade, status entry/close, jarak ke lock, sisa waktu,
         // dan feasibilitas berubah tiap detik. Jadi keduanya dihitung ULANG di sini setiap tick
         // (bukan memakai hasil saat lock) supaya angka yang dikirim = keadaan sekarang.
+        // simpan state (entry/close/dwell) ke volume — throttle 3 detik di dalam saveState()
         for (const tf of TFS) {
           const durS = DUR_S[tf] || 300;
           const t0Live = Math.floor(nowSec / durS) * durS;
@@ -320,6 +359,7 @@ function createEngine(deps) {
             cur.disp = computeDisp(sym, tf, t0Live, nowSec, cur.signal, market[sym]);
           } catch (e) { stats.errors++; stats.lastErr = e && e.message; }
         }
+        saveState();      // persist state trade (posisi/early close) ke volume
       }
       stats.refreshes++; stats.lastAt = Date.now();
     } catch (e) { stats.errors++; stats.lastErr = e && e.message; }

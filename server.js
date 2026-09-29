@@ -327,6 +327,9 @@ capture.start();
 // ---- ENGINE sinyal server-side: satu sumber kebenaran untuk semua device ----
 const { createEngine } = require("./engine.js");
 const engine = createEngine({
+  // state Trade Assistant disimpan di volume yang sama dengan ledger supaya tidak hilang
+  // saat container restart (deploy) -> chip ENTRY/EARLY CLOSE tidak "menghilang" lagi.
+  stateFile: path.join(LEDGER_DIR, "trade_state.json"),
   getKlines,
   getModel: (part) => readModelPart(part),
   getGates: () => readGates(),

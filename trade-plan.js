@@ -232,7 +232,7 @@ function computeTradePlan(bias, ctx) {
       if (ctx.retreat || closeReady || fs < 65) {
         state = "CLOSE"; cls = "exit";
         const why = ctx.retreat ? "harga mundur dari puncak" : closeReady ? "momentum melemah" : "momentum mulai lemah";
-        action = `JUAL SEMUA SEKARANG${lockWin != null ? ` (dasar win ${(lockWin * 100).toFixed(0)}%)` : ""} — ${why}${trailTxt}${exTxt}`;
+        action = `JUAL SEMUA SEKARANG${lockWin != null ? ` (WIN ${(lockWin * 100).toFixed(0)}%)` : ""} — ${why}${trailTxt}${exTxt}`;
       } else {
         state = "HOLD"; cls = "entry";
         action = ladderTxt;

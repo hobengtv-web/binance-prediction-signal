@@ -89,36 +89,17 @@ async function resolveMissing() {
   const now = Math.floor(Date.now() / 1000);
   let done = 0;
   try {
-    for (const r of [...ledger.values()]) {
-      if (!r.sig || !r.t0) continue;
-      // Sudah lengkap (hasil + status trade) -> lewati.
-      if (r.res && r.res.trade) continue;
+    const all = [...ledger.values()];
+    // ===== PASS 1 (PRIORITAS): sesi yang BELUM punya hasil =====
+    // Dijalankan lebih dulu supaya hasil sesi baru tidak pernah tertunda oleh pekerjaan backfill.
+    for (const r of all) {
+      if (r.res || !r.sig || !r.t0) continue;
       const dir = r.sig.dir;
       if (dir !== "up" && dir !== "down") continue;
       const dur = DUR_S[r.interval];
       if (!dur) continue;
       if (now < r.t0 + dur + 5) continue;                  // ronde belum berakhir
       if (now > r.t0 + dur + 86400 * 85) continue;         // di luar jangkauan 1m klines (90d)
-      // ===== BACKFILL =====
-      // Record sudah punya HASIL tetapi belum punya status trade (mis. hasil lebih dulu datang
-      // dari klien lewat POST /api/ledger). Dulu record seperti ini dilewati selamanya sehingga
-      // baris Entry/Early Close tetap abu walau posisinya nyata. Sekarang status trade
-      // dilengkapi dari engine TANPA mengubah hasil yang sudah ada.
-      if (r.res && !r.res.trade) {
-        try {
-          const barsB = await getKlines(r.asset, "1m", r.t0 + dur, Math.ceil(dur / 60) + 2);
-          const sessB = barsB.filter((b) => b.time >= r.t0 && b.time < r.t0 + dur);
-          if (sessB.length >= 2) {
-            const pathB = sessB.slice(1);
-            const tradeB = tradeInfoFor(r.asset, r.interval, r.t0, dir, sessB[0].open, pathB);
-            if (tradeB) {
-              const mergedB = Object.assign({}, r, { res: Object.assign({}, r.res, { trade: tradeB }), upd: Date.now() });
-              ledger.set(r.k, mergedB); appendLedger(mergedB); ledgerDirty++; done++;
-            }
-          }
-        } catch (_) { /* coba lagi siklus berikutnya */ }
-        continue;
-      }
       try {
         const bars = await getKlines(r.asset, "1m", r.t0 + dur, Math.ceil(dur / 60) + 2);
         const sess = bars.filter((b) => b.time >= r.t0 && b.time < r.t0 + dur);
@@ -135,10 +116,7 @@ async function resolveMissing() {
           if (!touch && fHi >= 0) { touch = 1; tTouch = b.time; }
         }
         const actual = close >= lock ? "up" : "down";
-        // ===== STATUS TRADE ASSISTANT SESI INI (entry & early close) =====
-        // Diambil dari state engine saat sesi berakhir (engine.snapshotTrade). Dipakai panel
-        // akurasi supaya tiap sesi bisa dibaca: signal U/D, entry (E), early close (C).
-        //   entry sukses = posisi dibuka DAN harga menyentuh LOCK setelah entry (target tercapai)
+        // STATUS TRADE ASSISTANT: entry & early close (engine) + entryTouch dari jalur 1m
         const trade = tradeInfoFor(r.asset, r.interval, r.t0, dir, lock, path);
         const merged = Object.assign({}, r, {
           res: {
@@ -154,11 +132,38 @@ async function resolveMissing() {
         ledger.set(r.k, merged); appendLedger(merged); ledgerDirty++; done++;
       } catch (_) { /* coba lagi pada siklus berikutnya */ }
     }
+    // ===== PASS 2: BACKFILL status trade (DIBATASI) =====
+    // Melengkapi `trade` untuk record yang sudah punya hasil (mis. hasil lebih dulu dikirim klien).
+    // Dulu loop ini berjalan untuk SEMUA record lama -> ratusan permintaan klines tiap siklus dan
+    // resolusi sesi baru tertunda (13s -> ~100s). Sekarang: hanya sesi <= 45 menit terakhir,
+    // maksimum 10 percobaan per siklus, dan maksimum 3 percobaan per record (dicatat di trTry).
+    let tried = 0;
+    for (const r of all) {
+      if (tried >= 10) break;
+      if (!r.res || r.res.trade || !r.sig || !r.t0) continue;
+      const dir = r.sig.dir;
+      if (dir !== "up" && dir !== "down") continue;
+      const dur = DUR_S[r.interval];
+      if (!dur) continue;
+      if (now < r.t0 + dur + 5) continue;
+      if (now > r.t0 + dur + 45 * 60) continue;              // hanya sesi baru (state engine masih ada)
+      if ((r.trTry || 0) >= 3) continue;                     // sudah dicoba 3x -> berhenti
+      tried++;
+      let got = null;
+      try {
+        const barsB = await getKlines(r.asset, "1m", r.t0 + dur, Math.ceil(dur / 60) + 2);
+        const sessB = barsB.filter((b) => b.time >= r.t0 && b.time < r.t0 + dur);
+        if (sessB.length >= 2) got = tradeInfoFor(r.asset, r.interval, r.t0, dir, sessB[0].open, sessB.slice(1));
+      } catch (_) { /* dicoba lagi siklus berikutnya */ }
+      const next = Object.assign({}, r, { trTry: (r.trTry || 0) + 1 });
+      if (got) { next.res = Object.assign({}, r.res, { trade: got }); done++; }
+      next.upd = Date.now();
+      ledger.set(r.k, next); appendLedger(next); ledgerDirty++;
+    }
   } finally { resolving = false; }
   if (done) {
     console.log(`[LEDGER] resolved ${done} outcome(s) dari 1m klines · total ${ledger.size}`);
-    // PUSH realtime: beri tahu klien bahwa ada hasil baru supaya panel akurasi langsung
-    // memuat ulang (tanpa menunggu polling).
+    // PUSH realtime: beri tahu klien bahwa ada hasil baru supaya panel akurasi langsung memuat ulang.
     broadcast("ledger", { resolved: done, total: ledger.size, at: Date.now() });
   }
 }

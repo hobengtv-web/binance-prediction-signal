@@ -4440,6 +4440,11 @@ function renderConfidenceReport() {
         : (sig.dir === "up" || sig.dir === "down") ? sig.dir : null;
       if (!dir) return null;
       const tr = (res && res.trade) || null;
+      // Tiga keadaan (semuanya tampil ABU, hanya tooltip-nya yang beda):
+      //   "pending"        -> sesi belum dinilai (belum ada res)
+      //   "lama"           -> sudah dinilai tetapi SEBELUM fitur ini (tidak ada res.trade)
+      //   (tercatat)       -> ada res.trade, dipakai untuk menentukan sukses/gagal
+      const tradeState = tr ? "ok" : (res ? "lama" : "pending");
       // E (entry): undefined = tidak ada entry (abu); 1 = entry & target LOCK tercapai (hijau);
       //            0 = entry tapi LOCK tidak pernah tersentuh sampai sesi tutup (merah).
       const e = (tr && tr.entered) ? (tr.entryTouch ? 1 : 0) : undefined;
@@ -4450,7 +4455,7 @@ function renderConfidenceReport() {
         asset: r.asset, interval: r.interval, dir,
         won: (res && res.won != null) ? res.won : undefined,
         lock: res ? res.lock : sig.lock, close: res ? res.close : null,
-        actual: res ? res.actual : null, e, c,
+        actual: res ? res.actual : null, e, c, tradeState,
       };
     }).filter(Boolean);
   } else if (typeof MobilePredLog !== "undefined") {
@@ -4477,8 +4482,10 @@ function renderConfidenceReport() {
   const stack = (r) => {
     const sCls = r.won === undefined ? "dot-pending" : (r.won ? "dot-win" : "dot-lose");
     const sTxt = r.dir === "up" ? "U" : "D";
-    const eTxt = r.e === undefined ? "tidak ada" : (r.e ? "sukses" : "gagal");
-    const cTxt = r.c === undefined ? "tidak ada" : (r.c ? "sukses" : "gagal");
+    const naTxt = r.tradeState === "ok" ? "tidak ada"
+      : r.tradeState === "lama" ? "tidak tercatat (data lama)" : "belum ada hasil (pending)";
+    const eTxt = r.e === undefined ? naTxt : (r.e ? "sukses" : "gagal");
+    const cTxt = r.c === undefined ? naTxt : (r.c ? "sukses" : "gagal");
     const eCls = r.e === undefined ? "dot-pending" : (r.e ? "dot-win" : "dot-lose");
     const cCls = r.c === undefined ? "dot-pending" : (r.c ? "dot-win" : "dot-lose");
     const t = `${r.asset}/${r.interval} · signal ${r.dir.toUpperCase()} ${r.won === undefined ? "(pending)" : (r.won ? "BENAR" : "SALAH")}`
@@ -4507,7 +4514,7 @@ function renderConfidenceReport() {
         : `<div class="cd-empty">belum ada sesi</div>`}
     </div>`;
   }
-  html += `</div><div class="sa-legend">tiap kolom = 1 sesi · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> entry · baris 3 <b>C</b> early close (hijau sukses · merah gagal · abu tidak ada)</div>`;
+  html += `</div><div class="sa-legend">tiap kolom = 1 sesi · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> entry · baris 3 <b>C</b> early close (hijau sukses · merah gagal · abu = tidak ada entry/posisi atau tidak tercatat pada data lama)</div>`;
 
   if (head) head.textContent = "DESKTOP SIGNAL ACCURACY · per sesi (signal · entry · early close) · ";
   if (countEl) countEl.textContent = `${totalShown} sesi ${tf} · sumber ${srcLabel}`

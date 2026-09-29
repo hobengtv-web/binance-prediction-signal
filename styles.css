@@ -443,7 +443,11 @@ body {
 .conf-debug .sa-sfpct { font-weight: 700; }
 
 .conf-debug .sa-sessions { display: flex; gap: 3px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
-.conf-debug .sa-stack { display: grid; grid-template-rows: repeat(3, 18px); gap: 3px; flex: 0 0 auto; width: 18px; }
+.conf-debug .sa-stack { display: grid; grid-template-rows: repeat(3, 18px); gap: 3px; flex: 0 0 auto; width: 18px;
+  border-radius: 4px; }
+/* Pembeda visual antar sesi: sesi genap diberi latar tipis supaya dua sesi berdampingan yang
+   kebetulan berwarna sama (mis. dua "U" abu) tidak tampak seperti duplikat. */
+.conf-debug .sa-stack:nth-child(even) { background: rgba(255,255,255,.045); }
 .conf-debug .sa-legend { margin-top: 9px; font-size: 10px; color: var(--muted); line-height: 1.5; }
 .conf-debug .sa-legend b { color: var(--text); }
 @media (max-width: 760px) { .conf-debug .sa-cols { grid-template-columns: 1fr; } }

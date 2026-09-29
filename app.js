@@ -3254,7 +3254,7 @@ function renderConfidenceReport() {
         asset: r.asset, interval: r.interval, dir,
         won: (res && res.won != null) ? res.won : undefined,
         lock: res ? res.lock : sig.lock, close: res ? res.close : null,
-        actual: res ? res.actual : null, e, c, tradeState,
+        actual: res ? res.actual : null, e, c, tradeState, t0Sec: r.t0,
       };
     }).filter(Boolean);
   } else if (typeof MobilePredLog !== "undefined") {
@@ -3289,7 +3289,10 @@ function renderConfidenceReport() {
     const cTxt = r.c === undefined ? naTxt : (r.c ? "sukses" : "gagal");
     const eCls = r.e === undefined ? "dot-pending" : (r.e ? "dot-win" : "dot-lose");
     const cCls = r.c === undefined ? "dot-pending" : (r.c ? "dot-win" : "dot-lose");
-    const t = `${r.asset}/${r.interval} · signal ${r.dir.toUpperCase()} ${r.won === undefined ? "(pending)" : (r.won ? "BENAR" : "SALAH")}`
+    // jam sesi ditampilkan di tooltip supaya dua sesi berdampingan yang tampak kembar
+    // (mis. dua-duanya "U" abu) tetap bisa dibedakan dengan jelas.
+    const jam = (r.t0Sec != null) ? new Date(r.t0Sec * 1000 + 7 * 3600e3).toISOString().slice(11, 16) : "";
+    const t = `${jam ? jam + " · " : ""}${r.asset}/${r.interval} · signal ${r.dir.toUpperCase()} ${r.won === undefined ? "(pending)" : (r.won ? "BENAR" : "SALAH")}`
       + ` · entry ${eTxt} · early close ${cTxt}`
       + ` · lock ${r.lock != null ? r.lock : "?"} close ${r.close != null ? r.close : "?"}`;
     return `<div class="sa-stack" title="${t}"><span class="dot ${sCls}">${sTxt}</span>`

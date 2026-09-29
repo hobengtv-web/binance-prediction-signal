@@ -4474,7 +4474,9 @@ function renderConfidenceReport() {
 
   const tf = state.interval;
   const COINS = ["BTC", "ETH"];
-  const PER_COIN = 24;                       // berapa sesi terakhir yang ditampilkan per koin
+  // Isi sisa lebar kartu (di layar lebar ~31 kolom @21px per blok koin). Kelebihannya bisa
+  // di-scroll; di mobile default tampil dari KIRI = sesi TERBARU karena urutannya terbaru->lama.
+  const PER_COIN = 40;
 
   // Satu sesi = SATU KOLOM berisi 3 baris: signal (U/D), entry (E), early close (C).
   // Warna memakai konvensi yang sudah ada: hijau = benar/sukses, merah = salah/gagal,
@@ -4502,19 +4504,32 @@ function renderConfidenceReport() {
     const evald = data.filter((r) => r.won !== undefined);
     const wins = evald.reduce((a, r) => a + r.won, 0);
     const wr = evald.length ? Math.round(wins / evald.length * 100) : null;
-    const tail = data.slice(-PER_COIN);
+    // Ringkasan TRADE ASSISTANT: S = entry sukses & early close sukses; F = ada posisi (entry
+    // terjadi) tetapi tidak keduanya sukses. Sesi tanpa posisi tidak dinilai (tidak ada yang
+    // bisa sukses/gagal) sehingga tidak masuk hitungan S/F.
+    const withPos = data.filter((r) => r.tradeState === "ok" && r.e !== undefined);
+    const sOk = withPos.filter((r) => r.e === 1 && r.c === 1).length;
+    const fBad = withPos.length - sOk;
+    // TERBARU -> TERLAMA (kiri = sesi paling baru). Di mobile scroll default dari kiri = terbaru.
+    const tail = data.slice(-PER_COIN).reverse();
     totalShown += data.length;
     const statCls = wr == null ? "" : (wr >= 50 ? "cd-win" : "cd-lose");
+    const sfTxt = withPos.length
+      ? `<span class="sa-sf"><span class="sa-s">S:${sOk}</span> <span class="sa-f">F:${fBad}</span></span>`
+      : `<span class="sa-sf sa-na">S:— F:—</span>`;
     html += `<div class="sa-coin">
       <div class="sa-coin-head"><b>${sym}</b> · ${tf}
-        <span class="sa-stat ${statCls}">${evald.length ? `${wins}W/${evald.length - wins}L${wr != null ? ` (${wr}%)` : ""}` : "—"}</span>
+        <span class="sa-head-right">
+          <span class="sa-stat ${statCls}" title="signal: benar/salah">${evald.length ? `${wins}W/${evald.length - wins}L${wr != null ? ` (${wr}%)` : ""}` : "—"}</span>
+          <span class="sa-stat-sf" title="Trade Assistant: S = entry &amp; early close sukses · F = ada entry tapi tidak keduanya sukses (${withPos.length} sesi berposisi)">${sfTxt}</span>
+        </span>
       </div>
       ${tail.length
         ? `<div class="sa-sessions">${tail.map(stack).join("")}</div>`
         : `<div class="cd-empty">belum ada sesi</div>`}
     </div>`;
   }
-  html += `</div><div class="sa-legend">tiap kolom = 1 sesi · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> entry · baris 3 <b>C</b> early close (hijau sukses · merah gagal · abu = tidak ada entry/posisi atau tidak tercatat pada data lama)</div>`;
+  html += `</div><div class="sa-legend">tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> entry · baris 3 <b>C</b> early close (hijau sukses · merah gagal · abu = tidak ada entry/posisi atau tidak tercatat pada data lama)</div>`;
 
   if (head) head.textContent = "DESKTOP SIGNAL ACCURACY · per sesi (signal · entry · early close) · ";
   if (countEl) countEl.textContent = `${totalShown} sesi ${tf} · sumber ${srcLabel}`

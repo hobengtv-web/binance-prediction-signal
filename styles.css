@@ -417,6 +417,12 @@ body {
   gap: 8px; font-size: 11px; color: var(--muted); margin-bottom: 5px; }
 .conf-debug .sa-coin-head b { color: var(--text); font-size: 12px; letter-spacing: .03em; }
 .conf-debug .sa-stat { font-weight: 700; color: var(--text); }
+/* Ringkasan kanan header koin: W/L (signal) + S/F (entry & early close) */
+.conf-debug .sa-head-right { display: inline-flex; gap: 10px; align-items: baseline; }
+.conf-debug .sa-stat-sf { font-weight: 700; }
+.conf-debug .sa-sf .sa-s { color: var(--up); }
+.conf-debug .sa-sf .sa-f { color: var(--down); }
+.conf-debug .sa-sf.sa-na { color: var(--muted); }
 /* Satu sesi = SATU kolom berisi 3 baris (S di atas, E tengah, C bawah).
    FLEX (bukan grid auto-flow column): kalau memakai grid, setiap .sa-stack dianggap SATU sel
    sehingga sel-sel S/E/C dari sesi berbeda tercampur dalam kolom yang sama (bug tampilan). */

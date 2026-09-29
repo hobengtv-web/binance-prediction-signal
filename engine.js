@@ -156,6 +156,81 @@ function createEngine(deps) {
     } catch (_) { return null; }
   }
 
+  /* ===== METRIK TAMPILAN yang dihitung SERVER =====
+     Klien tidak lagi menurunkan nilai apa pun: zone/momentum/rsi/peak/reversal/reward/trend
+     dihitung di sini dan dikirim lewat snapshot (assets[sym].all[tf].disp). */
+  function computeDisp(sym, tf, t0, nowSec, sig, m) {
+    const durS = DUR_S[tf] || 300;
+    const win = (m.five5s || []).slice(-(TRADE.MON_WINDOW[tf] || 24));
+    if (win.length < 5) return null;
+    const ones = m.ones || [];
+    const price = ones.length ? ones[ones.length - 1].close : null;
+    if (price == null) return null;
+    const stat = TRADE.statsOfWindow(win);
+    const conf = computeConf(sym, tf, t0, nowSec, sig, m) || {};
+    const sessC = (m.tf[tf] || []).find((c) => c.time === t0);
+    const O = sessC ? sessC.open : ((sig && sig.lock != null) ? sig.lock : price);
+    const C = price, std = stat.std, slope = stat.slope, z = stat.z;
+    let rsi = null;
+    try { rsi = SignalCore.rsiFromSeries((m.tf["5m"] || []).filter((c) => c.time < nowSec).slice(-50), 14); } catch (_) {}
+    const peak = conf.peak ? { price: conf.peak.price, dir: conf.peak.dir, conf: conf.peak.conf } : null;
+    const tol = Math.max(O * 0.001, std * 0.5);
+    const isTopPeak = !!(peak && peak.dir === "top");
+    const isBotPeak = !!(peak && peak.dir === "bot");
+    const nearTop = isTopPeak && Math.abs(C - peak.price) < tol;
+    const nearBot = isBotPeak && Math.abs(C - peak.price) < tol;
+    const droppedFromPeak = isTopPeak && C <= peak.price - tol;
+    const roseFromPeak = isBotPeak && C >= peak.price + tol;
+    const overbought = z > 1.6, oversold = z < -1.6;
+    const rollOver = slope < 0, turnUp = slope > 0;
+    const momentum = slope > 0 ? "BULLISH" : slope < 0 ? "BEARISH" : "FLAT";
+    let zone = "NETRAL";
+    if (isTopPeak) zone = nearTop ? "TOP PEAK" : "NEAR TOP PEAK";
+    else if (isBotPeak) zone = nearBot ? "BOTTOM PEAK" : "NEAR BOTTOM PEAK";
+    else if (z > 1.2) zone = "NEAR TOP PEAK";
+    else if (z < -1.2) zone = "NEAR BOTTOM PEAK";
+    // proyeksi penutup + arah kontinuasi (dipakai untuk reward/REVERSAL)
+    const remSec = Math.max(0, (t0 + durS) * 1000 - Date.now()) / 1000;
+    const projectedClose = C + Math.max(-std * 3, Math.min(std * 3, slope * remSec));
+    const trend = conf.trendDir || "flat";
+    const trendBias = trend === "up" ? "up" : trend === "down" ? "down" : "flat";
+    let verdict = "flat", mode = "CONT", peakPrice = null, reward = 0;
+    if (isTopPeak && rollOver && (nearTop || droppedFromPeak || overbought) && peak.conf && trendBias !== "up") { verdict = "down"; mode = "REVERSAL↓"; peakPrice = peak.price; }
+    else if (isBotPeak && turnUp && (nearBot || roseFromPeak || oversold) && peak.conf && trendBias !== "down") { verdict = "up"; mode = "REVERSAL↑"; peakPrice = peak.price; }
+    else { verdict = "flat"; mode = "CONT"; }
+    if (peakPrice != null && verdict !== "flat") {
+      reward = verdict === "down" ? (peakPrice - projectedClose) / peakPrice * 100 : (projectedClose - peakPrice) / peakPrice * 100;
+    }
+    // kekuatan trend: run-length candle searah di ujung deret (+ penalti bila peak berlawanan)
+    let trendPct = 0;
+    try {
+      const cs = (m.tf[tf] || []).filter((c) => c.time < nowSec);
+      const mainDir = trend === "up" ? 1 : trend === "down" ? -1 : 0;
+      if (mainDir !== 0) {
+        const dirs = cs.map((c) => (c.close > c.open ? 1 : c.close < c.open ? -1 : 0));
+        let last = dirs.length - 1;
+        while (last >= 0 && dirs[last] === 0) last--;
+        if (last >= 0 && dirs[last] === mainDir) {
+          let run = 0;
+          for (let i = last; i >= 0; i--) { if (dirs[i] === mainDir) run++; else if (dirs[i] === 0) continue; else break; }
+          trendPct = Math.min(100, run * 14);
+          const rev = (trend === "up" && peak && peak.dir === "top") || (trend === "down" && peak && peak.dir === "bot");
+          if (rev) trendPct = Math.max(0, trendPct - (peak.conf ? 40 : 20));
+        }
+      }
+    } catch (_) {}
+    return {
+      zone, momentum, rsi, mean: stat.mean, std, slope, slopeRecent: stat.slopeRecent, z,
+      peak: peak ? { price: peak.price, dir: peak.dir, conf: peak.conf } : null,
+      reversal: verdict === "flat" ? null : { dir: verdict, mode, peakPrice, reward },
+      reward, projectedClose,
+      vol5s: conf.rel != null ? conf.rel : null,
+      liquidity: conf.liquidity || null,
+      trendDir: trend, trendPct,
+      lockedAt: (sig && sig.lockedAt) || null,
+    };
+  }
+
   function computePlan(sym, tf, t0, nowSec, sig, m) {
     const bias = (sig && sig.accepted && (sig.dir === "up" || sig.dir === "down")) ? sig.dir : null;
     const key = `${sym}_${tf}_${t0}`;
@@ -242,6 +317,7 @@ function createEngine(deps) {
             cur.plan = computePlan(sym, tf, t0Live, nowSec, cur.signal, market[sym]);
             cur.conf = computeConf(sym, tf, t0Live, nowSec, cur.signal, market[sym]);
             cur.mobilePred = computeMobilePred(sym, tf, t0Live, market[sym]);
+            cur.disp = computeDisp(sym, tf, t0Live, nowSec, cur.signal, market[sym]);
           } catch (e) { stats.errors++; stats.lastErr = e && e.message; }
         }
       }
@@ -265,6 +341,7 @@ function createEngine(deps) {
       signal: sig ? Object.assign({}, sig, { verdict: sig.accepted ? sig.dir : "flat" }) : null,
       plan: same ? (sess.plan || null) : null,
       conf: same ? (sess.conf || null) : null,
+      disp: same ? (sess.disp || null) : null,
       mobilePred: same ? (sess.mobilePred || null) : null,
       ofi: FLOW.sessionOFI(sym, t0 / 1000, Math.floor(now / 1000)),
       ofiShort: FLOW.sessionOFI(sym, Math.floor(now / 1000) - 120, Math.floor(now / 1000)),
@@ -301,6 +378,7 @@ function createEngine(deps) {
         plan: (sess && sameSession) ? (sess.plan || null) : null,
         // Model confidence (diproses server): angka untuk arah up/down + konteks.
         conf: (sess && sameSession) ? (sess.conf || null) : null,
+        disp: (sess && sameSession) ? (sess.disp || null) : null,
         // Mobile prediction (diproses server).
         mobilePred: (sess && sameSession) ? (sess.mobilePred || null) : null,
         // OFI 120 detik terakhir (lebih responsif; dipakai tooltip).

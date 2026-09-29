@@ -1256,6 +1256,22 @@ function applyType() {
     const dwellTurnMs = dw.turnSince ? now - dw.turnSince : 0;
     const dwellFadeMs = dw.fadeSince ? now - dw.fadeSince : 0;
     const taBias = taBiasNow;                      // = arah rekomendasi (entry contra-lock)
+    // ===== SUMBER PLAN: SERVER LEBIH DULU =====
+    // Kartu (ENTRY/EARLY CLOSE) dan riwayat harus membaca state yang SAMA. Sebelumnya jalur ini
+    // hanya menghitung plan LOKAL, sehingga kartu bisa menampilkan 'ENTRY SUCCESS' dari state
+    // lokal padahal server (yang dipakai panel riwayat/ledger) tidak pernah entry -> riwayat
+    // tampil abu sementara kartu hijau. Sekarang server jadi acuan; lokal hanya cadangan.
+    const srvPlan = taBias ? serverPlanFor(state.asset, state.interval) : null;
+    if (srvPlan) {
+      tradePlan = srvPlan;
+      if (tradePlan.entryPrice != null && !_tradeEntered[uniKey]) {
+        _tradeEntered[uniKey] = { entered: true, since: tradePlan.statusEntry ? tradePlan.statusEntry.at : now, price: tradePlan.entryPrice };
+      }
+      if (!tradePlan.entered) { delete _tradeEntered[uniKey]; delete _tradeClosed[uniKey]; _closeSounded.delete(uniKey); }
+      if (tradePlan.statusClose && tradePlan.statusClose.ok && !_tradeClosed[uniKey]) {
+        _tradeClosed[uniKey] = { at: tradePlan.statusClose.at, price: tradePlan.statusClose.price };
+      }
+    } else {
     const trail = taBias ? trailOf(state.asset, Math.floor(sessionStart / 1000), Math.floor(now / 1000), O, taBias === "up") : null;
     tradePlan = taBias ? computeTradePlan(taBias, {
       tf: state.interval, lock: O, price: C, std, slope, slopeRecent, rsi, z,
@@ -1285,6 +1301,7 @@ function applyType() {
           : (tradePlan.state === "WAIT" && /TUNGGU PEAK/.test(tradePlan.action) ? "konfirmasi peak contra (2/4 bagian + 4s)" : "harga belum contra / belum kembali ke lock"),
       };
       tradePlan.statusClose = { ok: !!clo, at: clo ? clo.at : null, price: clo ? clo.price : null };
+    }
     }
     }
     // State-transition alerts with DISTINCT sounds:

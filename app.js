@@ -245,20 +245,48 @@ function serverPlanFor(asset, tf) {
      3) null -> UI menampilkan "—" (artinya belum ada data, bukan 0). */
 // OFI super-realtime (event SSE `ofi`, ~300ms). Kalau lebih segar dari snapshot, dipakai.
 let _fastOfi = { at: 0, assets: {} };
+/* ===== BAR OFI (diverging) — implementasi BERSAMA mobile & desktop =====
+   v dalam -1..+1. Hijau ke kanan = tekanan beli, merah ke kiri = tekanan jual.
+   Skala ±25% = penuh; pita tengah = netral ±5%; di luar skala diberi penanda saturasi (▶/◀). */
+const OFI_BAR_FULL = 0.25;
+function paintOfi(v, fillEl, satEl, valEl) {
+  if (valEl) {
+    valEl.textContent = v != null ? (v >= 0 ? "+" : "") + (v * 100).toFixed(0) + "%" : "—";
+    const cls = v == null ? "na" : (v >= 0 ? "up" : "down");
+    if (valEl.classList) { valEl.classList.remove("up", "down", "na"); valEl.classList.add(cls); }
+    else valEl.className = "ofi-val " + cls;
+  }
+  if (!fillEl) return;
+  const vv = v == null ? 0 : v;
+  const mag = Math.min(1, Math.abs(vv) / OFI_BAR_FULL) * 50;      // persen lebar track
+  fillEl.style.left = (vv >= 0 ? 50 : 50 - mag) + "%";
+  fillEl.style.width = mag + "%";
+  const fcls = "ofi-fill" + (vv < 0 ? " neg" : "");
+  if (fillEl.classList) { fillEl.classList.toggle("neg", vv < 0); } else fillEl.className = fcls;
+  if (satEl) {
+    const clamped = Math.abs(vv) > OFI_BAR_FULL;
+    satEl.textContent = clamped ? (vv > 0 ? "▶" : "◀") : "";
+    if (satEl.classList) satEl.classList.toggle("neg", vv < 0); else satEl.className = "ofi-sat" + (vv < 0 ? " neg" : "");
+  }
+}
+function ofiDOM(prefix) {
+  return {
+    fill: document.getElementById(prefix + "-fill"),
+    sat: document.getElementById(prefix + "-sat"),
+    val: document.getElementById(prefix),
+  };
+}
+
 /* Patch angka OFI (mobile + chip desktop) tanpa render penuh — dipakai oleh event SSE `ofi`. */
 function updateOfiFast() {
-  const paint = (el, v) => {
-    if (!el) return;
-    el.textContent = v != null ? (v >= 0 ? "+" : "") + (v * 100).toFixed(0) + "%" : "—";
-    const cls = v == null ? "na" : (v >= 0 ? "up" : "down");
-    if (el.id === "s-ofi") { el.className = cls; }
-    else { el.className = cls; if (el.parentElement) el.parentElement.title = v != null ? `Order flow (eksekusi taker) sesi: ${(v * 100).toFixed(1)}%` : "Order flow belum ada data"; }
-  };
   const a = state.asset;
-  paint(document.getElementById("s-ofi"), _fastOfi.assets[a] ? _fastOfi.assets[a].ofi : null);
+  const fA = _fastOfi.assets[a] ? _fastOfi.assets[a].ofi : null;
+  const dA = ofiDOM("s-ofi");
+  paintOfi(fA, dA.fill, dA.sat, dA.val);
   for (const sym of ["BTC", "ETH"]) {
-    const f = _fastOfi.assets[sym];
-    paint(document.getElementById(`dc-${sym}-ofi`), f ? f.ofi : null);
+    const f = _fastOfi.assets[sym] ? _fastOfi.assets[sym].ofi : null;
+    const d = ofiDOM("dc-" + sym + "-ofi");
+    paintOfi(f, d.fill, d.sat, d.val);
   }
 }
 
@@ -746,10 +774,10 @@ function applyType() {
     // Angka = OFI sesi; arah diwarnai (positif hijau = tekanan beli, negatif merah = jual).
     if (ofiEl) {
       const ov = o.ofi;
-      ofiEl.textContent = ov != null ? (ov >= 0 ? "+" : "") + (ov * 100).toFixed(0) + "%" : "—";
-      ofiEl.className = ov == null ? "na" : (ov >= 0 ? "up" : "down");
+      const dOfi = ofiDOM("s-ofi");
+      paintOfi(ov, dOfi.fill, dOfi.sat, dOfi.val);
       const os = (() => { try { const e = (typeof LIVE !== "undefined") ? LIVE.entryFor(state.asset, state.interval) : null; return e && e.ofiShort != null ? e.ofiShort : null; } catch (_) { return null; } })();
-      ofiEl.parentElement.title = ov == null
+      if (ofiEl.parentElement) ofiEl.parentElement.title = ov == null
         ? "Order flow belum ada data"
         : `Order flow (eksekusi taker) sesi: ${(ov * 100).toFixed(1)}%` + (os != null ? ` · 2 menit terakhir: ${(os * 100).toFixed(1)}%` : "") +
           " — positif = tekanan BELI, negatif = tekanan JUAL";
@@ -3036,7 +3064,9 @@ function renderDual(force) {
         const mom = m.slope > 0 ? "BULLISH" : m.slope < 0 ? "BEARISH" : "FLAT";
         const momCls = m.slope > 0 ? "up" : m.slope < 0 ? "down" : "";
         const delta = m.O > 0 ? (m.C - m.O) / m.O * 100 : 0;
-        const ofiChip = `<span class="dc-m" title="Order flow (eksekusi taker) sesi berjalan: positif = tekanan BELI, negatif = tekanan JUAL"><i>OFI</i><b id="dc-${a}-ofi" class="${ofiVal == null ? "" : (ofiVal >= 0 ? "up" : "down")}">${ofi}</b></span>`;
+        const ofiChip = `<span class="dc-m" title="Order flow (eksekusi taker) sesi berjalan: positif = tekanan BELI, negatif = tekanan JUAL. Bar menyimpang dari garis tengah (skala ±25% = penuh)."><i>OFI</i>`
+          + `<i class="ofi-track"><b class="ofi-band"></b><b class="ofi-fill" id="dc-${a}-ofi-fill"></b><b class="ofi-mid"></b><b class="ofi-sat" id="dc-${a}-ofi-sat"></b></i>`
+          + `<b class="ofi-val ${ofiVal == null ? "na" : (ofiVal >= 0 ? "up" : "down")}" id="dc-${a}-ofi">${ofi}</b></span>`;
         grEl.innerHTML = ofiChip +
           chip("MOMENTUM", mom, momCls) + chip("MODE", liveMode || "—") +
           chip("DELTA", `${delta >= 0 ? "+" : ""}${delta.toFixed(3)}%`);

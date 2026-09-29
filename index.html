@@ -126,7 +126,16 @@
       <div class="vol-row">
         <span>LIQUIDITY: <b id="s-liq">—</b></span>
         <span>VOL 5m: <b id="s-vol">—</b> · 5s: <b id="s-vol5s">—</b></span>
-        <span title="Order flow (eksekusi taker) sesi berjalan: positif = tekanan BELI, negatif = tekanan JUAL">OFI: <b id="s-ofi" class="na">—</b></span>
+        <span class="ofi-wrap" title="Order flow (eksekusi taker) sesi berjalan: positif = tekanan BELI, negatif = tekanan JUAL. Bar menyimpang dari garis tengah: skala ±25% = penuh, pita tengah = netral ±5%">
+          OFI:
+          <i class="ofi-track">
+            <b class="ofi-band"></b>
+            <b class="ofi-fill" id="s-ofi-fill"></b>
+            <b class="ofi-mid"></b>
+            <b class="ofi-sat" id="s-ofi-sat"></b>
+          </i>
+          <b class="ofi-val na" id="s-ofi">—</b>
+        </span>
       </div>
     </div>
     

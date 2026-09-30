@@ -236,6 +236,15 @@ function computeTradePlan(bias, ctx) {
   let state, action, cls, nowEntered = entered;
   const rNowTxt = levels.rNow.toFixed(2) + "%";
 
+  // ===== ATURAN CUT (permintaan user) =====
+  // Jangan CUT karena "reversal terdeteksi" saat sisa sesi masih panjang. CUT hanya bila:
+  //  (1) sisa sesi < 2 menit DAN harga diperkirakan tak kembali ke lock (arus/momentum melawan), ATAU
+  //  (2) ESCAPE: reversal KUAT (tren historis berbalik + arus kuat melawan + posisi sudah dalam).
+  const timeForCut = remainSecNow != null && remainSecNow < 120;
+  const cantReturn = ofiStrongAgainst || (ctx.slope != null && (isUp ? ctx.slope < 0 : ctx.slope > 0));
+  const cutAllowed = timeForCut && cantReturn;
+  const escapeReversal = histFlipped && ofiStrongAgainst && deepEnough;
+
   if (!entered) {
     // ---------------- PHASE 1: no position ----------------
     // Behaviour: wait for the CONTRA PEAK (the adverse move exhausting), enter there, then sell
@@ -276,12 +285,18 @@ function computeTradePlan(bias, ctx) {
       // Sedang UNTUNG + risiko berbalik -> amankan profit (darurat), bukan "cut".
       state = "CLOSE"; cls = "exit";
       action = `JUAL SEMUA SEKARANG — posisi ${pnlTxt} dari target (DARURAT: ${hWhy})`;
-    } else if (biasAtRisk) {
+    } else if (biasAtRisk && (cutAllowed || escapeReversal)) {
       state = "STAND_DOWN"; cls = "exit";
       // Sebut alasan NYATA (bukan klaim "sinyal berbalik" bila tren historis tidak berbalik).
       action = `CUT SEKARANG — posisi ${pnlTxt}`
         + (cutAdverseStd != null ? ` (${Math.abs(cutAdverseStd).toFixed(1)}σ di bawah entry)` : "")
-        + `; ${histFlippedNow ? "tren historis berbalik" : hWhy}`;
+        + `; ${escapeReversal && !cutAllowed ? "REVERSAL KUAT" : (histFlippedNow ? "tren historis berbalik" : hWhy)}`
+        + (timeForCut ? `; sisa sesi ${Math.round(remainSecNow)}s` : "");
+    } else if (biasAtRisk) {
+      // Risiko tinggi TAPI sisa sesi masih panjang & tidak ada reversal kuat -> TAHAN dulu.
+      state = "HOLD_POS"; cls = "wait";
+      action = `TAHAN — risiko: ${hWhy}; sisa sesi ${remainSecNow != null ? Math.round(remainSecNow) + "s" : "-"}`
+        + ` (cut hanya bila <2 mnt & harga tak kembali ke lock ${fmtPrice(ctx.lock)}, atau reversal kuat)`;
     } else if (hRisk && favor >= 0 && pnlPct != null && pnlPct > 0) {
       // TARGET SUDAH TERSENTUH + risiko berbalik -> amankan profit (aturan DARURAT user).
       // Syarat favor>=0 penting: jangan "close karena untung" saat harga belum sampai lock —

@@ -62,11 +62,12 @@ function computeSignalHealth(dir, ctx) {
   return { score, label, fired, confirmedReversal };
 }
 
-const DWELL_ENTRY_MS = 2000;    // entry: peak/turn hold ~2s (turun dari 4s agar tidak telat ambil posisi)
-const ENTRY_RETRACE_PCT = 0.02; // entry peak: retrace minimal dari harga EKSTREM contra (%) agar masuk dekat puncak
-const ENTRY_MIN_EXTREME_PCT = 0.03; // kedalaman ekstrem contra minimal (L2 0.03%) sebelum retrace-entry boleh jalan
-const DWELL_AVG_MS = 15000;     // averaging: hold ~15s (be more careful adding)
-const DWELL_CLOSE_MS = 10000;   // close: fade must hold ~10s
+const TA = require("./ta-config.js");
+const DWELL_ENTRY_MS = TA.DWELL_ENTRY_MS;    // entry: peak/turn hold (turun dari 4s agar tidak telat)
+const ENTRY_RETRACE_PCT = TA.ENTRY_RETRACE_PCT; // entry peak: retrace minimal dari harga EKSTREM contra (%)
+const ENTRY_MIN_EXTREME_PCT = TA.ENTRY_MIN_EXTREME_PCT; // kedalaman ekstrem contra minimal sebelum retrace-entry
+const DWELL_AVG_MS = TA.DWELL_AVG_MS;     // averaging: hold (be more careful adding)
+const DWELL_CLOSE_MS = TA.DWELL_CLOSE_MS;   // close: fade must hold
 function turnEvidence(isUp, ctx) {
   const p = {};
   p.momentum = ctx.slope != null && (isUp ? ctx.slope > 0 : ctx.slope < 0);
@@ -184,7 +185,7 @@ function computeTradePlan(bias, ctx) {
   const durMsNow = (ctx.durMs != null) ? ctx.durMs : ((DUR_SEC[ctx.tf] || 300) * 1000);
   const remainSecNow = (ctx.remainMs != null) ? ctx.remainMs / 1000 : null;
   const durSecNow = durMsNow / 1000;
-  const minRemainSec = Math.min(300, Math.max(120, 0.35 * durSecNow));   // 5m->120s · 15m/1h->300s
+  const minRemainSec = Math.min(300, Math.max(TA.ENTRY_MIN_REMAIN_SEC, 0.35 * durSecNow));   // 5m->120s · 15m/1h->300s
   const distToLockPct = Math.abs(ctx.lock - ctx.price) / (ctx.price || 1) * 100;
   const ofiTowardStrong = ctx.ofiShort != null && (isUp ? ctx.ofiShort > 0.25 : ctx.ofiShort < -0.25);
   const extremeReversal = turn.count >= 3 && ofiTowardStrong;
@@ -244,7 +245,7 @@ function computeTradePlan(bias, ctx) {
   // Jangan CUT karena "reversal terdeteksi" saat sisa sesi masih panjang. CUT hanya bila:
   //  (1) sisa sesi < 2 menit DAN harga diperkirakan tak kembali ke lock (arus/momentum melawan), ATAU
   //  (2) ESCAPE: reversal KUAT (tren historis berbalik + arus kuat melawan + posisi sudah dalam).
-  const timeForCut = remainSecNow != null && remainSecNow < 120;
+  const timeForCut = remainSecNow != null && remainSecNow < TA.CUT_MIN_REMAIN_SEC;
   const cantReturn = ofiStrongAgainst || (ctx.slope != null && (isUp ? ctx.slope < 0 : ctx.slope > 0));
   const cutAllowed = timeForCut && cantReturn;
   const escapeReversal = histFlipped && ofiStrongAgainst && deepEnough;
@@ -341,7 +342,7 @@ function computeTradePlan(bias, ctx) {
       const trailHit = !!(ctx.trail && ctx.trail.armed && ctx.price != null && (isUp ? ctx.price <= ctx.trail.exitPrice : ctx.price >= ctx.trail.exitPrice));
       const closeSignal = ctx.retreat || trailHit;
       const whyClose = ctx.retreat ? "harga mundur dari puncak" : "trail puncak tersentuh";
-      if (closeSignal && (capturedPct >= 50 || emergency)) {
+      if (closeSignal && (capturedPct >= TA.EARLYCLOSE_MIN_CAPTURED_PCT || emergency)) {
         state = "CLOSE"; cls = "exit";
         action = `JUAL SEMUA SEKARANG${lockWin != null ? ` (WIN ${(lockWin * 100).toFixed(0)}%)` : ""}`
           + ` — ${whyClose} · profit ${capturedPct}% dari potensi`
@@ -454,21 +455,29 @@ function buildPlan(input) {
   if (!plan) return null;
 
   // STATUS ENTRY / EARLY CLOSE (state dibagi per sesi; penjaga mencegah pencatatan ganda)
+  // Simpan KONTEKS entry (kedalaman/retrace/ekstrem/sisa waktu) + alasan close -> untuk learner.
   if (plan.entered && !state.entered[key]) {
-    state.entered[key] = { entered: true, since: now, price: C };
+    state.entered[key] = {
+      entered: true, since: now, price: C,
+      rNow: plan.levels ? plan.levels.rNow : null,
+      retrace: retraceFromPeakPct, extremeDepth: extremeDepthPct,
+      remainSec: (input.remainMs != null ? input.remainMs / 1000 : null),
+      taVer: TA.VER,
+    };
   }
   if (!plan.entered) { delete state.entered[key]; delete state.closed[key]; }
-  if (plan.state === "CLOSE" && !state.closed[key]) {
-    state.closed[key] = { at: now, price: C };
+  if ((plan.state === "CLOSE" || plan.state === "STAND_DOWN") && !state.closed[key]) {
+    state.closed[key] = { at: now, price: C, reason: plan.state === "CLOSE" ? "close" : "cut" };
   }
   const _ent = state.entered[key], _clo = state.closed[key];
+  plan.taVer = TA.VER;
   plan.entryPrice = _ent ? _ent.price : null;
   plan.statusEntry = {
     ok: !!_ent, at: _ent ? _ent.since : null, price: _ent ? _ent.price : null,
     waiting: plan.state === "STAND_DOWN" ? "reversal terdeteksi — tunggu setup baru"
       : (plan.state === "WAIT" && /TUNGGU PEAK/.test(plan.action) ? "konfirmasi peak contra (2/4 bagian + 4s)" : "harga belum contra / belum kembali ke lock"),
   };
-  plan.statusClose = { ok: !!_clo, at: _clo ? _clo.at : null, price: _clo ? _clo.price : null };
+  plan.statusClose = { ok: !!_clo, at: _clo ? _clo.at : null, price: _clo ? _clo.price : null, reason: _clo ? _clo.reason : null };
   plan.health = health;
   return plan;
 }

@@ -124,7 +124,10 @@ function createEngine(deps) {
     const c = (st && st.closed) ? st.closed[key] : null;
     return {
       entered: !!e, entryPrice: e ? e.price : null, entryAt: e ? e.since : null,
-      closed: !!c, closePrice: c ? c.price : null, closeAt: c ? c.at : null,
+      entryRNow: e ? e.rNow : null, entryRetrace: e ? e.retrace : null,
+      entryExtremeDepth: e ? e.extremeDepth : null, entryRemainSec: e ? e.remainSec : null,
+      closed: !!c, closePrice: c ? c.price : null, closeAt: c ? c.at : null, closeReason: c ? c.reason : null,
+      taVer: (require("./ta-config.js").VER),
     };
   }
   function snapshotTrade(sym, tf, key, st) {

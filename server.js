@@ -96,7 +96,9 @@ function tradeInfoFor(asset, interval, t0, dir, lock, path) {
     entryTouch = after.some((b) => (dir === "up" ? b.high >= lock : b.low <= lock)) ? 1 : 0;
   }
   return { entered: !!tr.entered, entryTouch, entryPrice: tr.entryPrice, entryAt: tr.entryAt,
-           closed: !!tr.closed, closePrice: tr.closePrice, closeAt: tr.closeAt };
+           entryRNow: tr.entryRNow, entryRetrace: tr.entryRetrace, entryExtremeDepth: tr.entryExtremeDepth, entryRemainSec: tr.entryRemainSec,
+           closed: !!tr.closed, closePrice: tr.closePrice, closeAt: tr.closeAt, closeReason: tr.closeReason,
+           taVer: tr.taVer };
 }
 
 async function resolveMissing() {

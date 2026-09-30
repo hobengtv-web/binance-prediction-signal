@@ -201,6 +201,9 @@ function computeTradePlan(bias, ctx) {
   const closeReady = fade.count >= 2 && dwellFade >= DWELL_CLOSE_MS;
   const retraceFromPeakPct = (ctx.retraceFromPeakPct != null) ? ctx.retraceFromPeakPct : null;
   const extremeDepthPct = (ctx.extremeDepthPct != null) ? ctx.extremeDepthPct : null;
+  const exitLeg = ctx.exitLeg || 0;
+  const newPeakHigher = !!ctx.newPeakHigher;
+  const retrace2Pct = (ctx.retrace2Pct != null) ? ctx.retrace2Pct : null;
 
   // momentum in favour (only used in PHASE 2)
   let fs = 0; const why = [];
@@ -292,9 +295,9 @@ function computeTradePlan(bias, ctx) {
   } else {
     // ---------------- PHASE 2: position open ----------------
     if (biasAtRisk && pnlPct != null && pnlPct > 0) {
-      // Sedang UNTUNG + risiko berbalik -> amankan profit (darurat), bukan "cut".
-      state = "CLOSE"; cls = "exit";
-      action = `JUAL SEMUA SEKARANG — posisi ${pnlTxt} dari target (DARURAT: ${hWhy})`;
+      // Sedang UNTUNG + risiko berbalik -> amankan profit (darurat) = jual SISA/semua.
+      state = "CLOSE2"; cls = "exit";
+      action = `JUAL SISA SEKARANG — posisi ${pnlTxt} dari target (DARURAT: ${hWhy})`;
     } else if (biasAtRisk && (cutAllowed || escapeReversal)) {
       state = "STAND_DOWN"; cls = "exit";
       // Sebut alasan NYATA (bukan klaim "sinyal berbalik" bila tren historis tidak berbalik).
@@ -311,8 +314,8 @@ function computeTradePlan(bias, ctx) {
       // TARGET SUDAH TERSENTUH + risiko berbalik -> amankan profit (aturan DARURAT user).
       // Syarat favor>=0 penting: jangan "close karena untung" saat harga belum sampai lock —
       // kasus nyata ETH entry 2.673,13 -> close 2.673,07 hanya untung 0,002%.
-      state = "CLOSE"; cls = "exit";
-      action = `JUAL SEMUA SEKARANG — amankan profit ${pnlTxt} (DARURAT: ${hWhy})`;
+      state = "CLOSE2"; cls = "exit";
+      action = `JUAL SISA SEKARANG — amankan profit ${pnlTxt} (DARURAT: ${hWhy})`;
     } else if (hRisk) {
       // Risiko tinggi TAPI posisi belum untung & belum cukup dalam -> tahan dulu, jelaskan.
       state = "HOLD_POS"; cls = "wait";
@@ -343,20 +346,31 @@ function computeTradePlan(bias, ctx) {
       const trailHit = !!(ctx.trail && ctx.trail.armed && ctx.price != null && (isUp ? ctx.price <= ctx.trail.exitPrice : ctx.price >= ctx.trail.exitPrice));
       const closeSignal = ctx.retreat || trailHit;
       const whyClose = ctx.retreat ? "harga mundur dari puncak" : "trail puncak tersentuh";
-      if (closeSignal && (capturedPct >= TA.EARLYCLOSE_MIN_CAPTURED_PCT || emergency)) {
-        state = "CLOSE"; cls = "exit";
-        action = `JUAL SEMUA SEKARANG${lockWin != null ? ` (WIN ${(lockWin * 100).toFixed(0)}%)` : ""}`
-          + ` — ${whyClose} · profit ${capturedPct}% dari potensi`
-          + (emergency && capturedPct < 50 ? " (DARURAT: risiko berbalik)" : "")
-          + `${trailTxt}${exTxt}`;
-      } else if (closeSignal) {
-        // Sinyal close muncul tetapi profit masih < 50% dan tidak darurat -> TAHAN (permintaan user).
-        state = "HOLD"; cls = "entry";
-        action = `TAHAN — profit baru ${capturedPct}% dari potensi (minimal 50% untuk early close); `
-          + `${whyClose}. ${(ctx.trail && ctx.trail.armed) ? "ikuti TRAIL" : "tunggu harga mendekati lock " + fmtPrice(ctx.lock)}`;
+      if (exitLeg === 0) {
+        // LEG-1: jual SEBAGIAN (50%) saat puncak pertama / trail.
+        if (closeSignal && (capturedPct >= TA.EARLYCLOSE_MIN_CAPTURED_PCT || emergency)) {
+          state = "CLOSE"; cls = "exit";
+          action = `JUAL SEBAGIAN (50%)${lockWin != null ? ` (WIN ${(lockWin * 100).toFixed(0)}%)` : ""}`
+            + ` — ${whyClose} · profit ${capturedPct}% dari potensi`
+            + (emergency && capturedPct < 50 ? " (DARURAT: risiko berbalik)" : "")
+            + `${trailTxt}${exTxt}`;
+        } else if (closeSignal) {
+          state = "HOLD"; cls = "entry";
+          action = `TAHAN — profit baru ${capturedPct}% dari potensi (minimal ${TA.EARLYCLOSE_MIN_CAPTURED_PCT}% untuk jual sebagian); ${whyClose}`;
+        } else {
+          state = "HOLD"; cls = "entry";
+          action = ladderTxt;
+        }
       } else {
-        state = "HOLD"; cls = "entry";
-        action = ladderTxt;
+        // LEG-2: jual SISA hanya bila puncak BARU lebih tinggi + micro-retrace (puncak terdeteksi, sebelum reversal).
+        // Selama belum ada puncak baru / belum terdeteksi pembalikan -> HOLD sampai akhir sesi.
+        if (newPeakHigher && retrace2Pct != null && retrace2Pct >= TA.CLOSE2_RETRACE_PCT) {
+          state = "CLOSE2"; cls = "exit";
+          action = `JUAL SISA SEKARANG — puncak BARU lebih tinggi & mundur ${retrace2Pct.toFixed(3)}% dari puncak`;
+        } else {
+          state = "HOLD"; cls = "entry";
+          action = `TAHAN SISA — tunggu puncak BARU lebih tinggi (belum ada pembalikan)`;
+        }
       }
     } else if (inZone2 && avgReady && !blockLateAdd) {
       state = "AVERAGE"; cls = "entry";
@@ -373,7 +387,7 @@ function computeTradePlan(bias, ctx) {
       action = `TUNGGU — harga baru ${rNowTxt} dari lock (zona tambah entry ${RLV[1]}%)`;
     }
   }
-  const CMD = { ENTRY: "ENTRY SEKARANG", AVERAGE: "TAMBAH ENTRY SEKARANG", HOLD: "HOLD", CAUTION: "SIAP CLOSE", CLOSE: "CLOSE SEKARANG", STAND_DOWN: "CUT SEKARANG", WAIT: "TUNGGU", HOLD_POS: "TUNGGU", NO_SIGNAL: "—" };
+  const CMD = { ENTRY: "ENTRY SEKARANG", AVERAGE: "TAMBAH ENTRY SEKARANG", HOLD: "HOLD", CAUTION: "SIAP CLOSE", CLOSE: "CLOSE SEKARANG", CLOSE2: "JUAL SISA SEKARANG", STAND_DOWN: "CUT SEKARANG", WAIT: "TUNGGU", HOLD_POS: "TUNGGU", NO_SIGNAL: "—" };
   return { state, action, cls, tradeDir: bias, cmd: CMD[state] || state, levels, fs, cp, cont, adverseStd, favor, why, entered: nowEntered, turn, fade, dwellTurnMs: dwellTurn, dwellFadeMs: dwellFade };
 }
 
@@ -427,6 +441,14 @@ function buildPlan(input) {
   const retraceFromPeakPct = (C || 0) ? (taUp ? ((C - ext) / C * 100) : ((ext - C) / C * 100)) : 0;
   // kedalaman (contra) dari ekstrem tsb, dalam % — dipakai agar entry menunggu ekstrem yang CUKUP DALAM
   const extremeDepthPct = (ext || 0) ? (taUp ? ((O - ext) / ext * 100) : ((ext - O) / ext * 100)) : 0;
+  // ===== STAGE EXIT: leg-1 (CLOSE 50%) -> leg-2 (CLOSE2 = puncak BARU lebih tinggi + micro-retrace) =====
+  if (!state.exitLeg) state.exitLeg = {};
+  if (!state.peakAtLeg1) state.peakAtLeg1 = {};
+  const exitLeg = state.exitLeg[key] || 0;
+  const peakAtLeg1 = state.peakAtLeg1[key] || 0;
+  const retrace2Pct = (C || 0) ? ((peakFavor - favor) / C * 100) : 0;      // mundur dari puncak (favorable)
+  const newPeakPct = (C || 0) ? ((peakFavor - peakAtLeg1) / C * 100) : 0;  // puncak baru vs puncak saat leg-1
+  const newPeakHigher = exitLeg >= 1 && newPeakPct >= TA.CLOSE2_MIN_NEW_PEAK_PCT;
 
   const turn = turnEvidence(taUp, { slope, slopeRecent, ofiShort, win });
   const fade = fadeEvidence(taUp, { slope, slopeRecent, ofiShort, retreat, rsi });
@@ -447,6 +469,7 @@ function buildPlan(input) {
   const plan = computeTradePlan(bias, {
     tf: input.tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
     entered, turn, fade, trail, retreatStd, retraceFromPeakPct, extremeDepthPct,
+    exitLeg, newPeakHigher, retrace2Pct,
     durMs: input.durMs, remainMs: input.remainMs,   // gate waktu entry
     entryPrice: state.entered[key] ? state.entered[key].price : null,   // harga entry posisi (untuk kedalaman CUT)
     dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,
@@ -466,10 +489,17 @@ function buildPlan(input) {
       taVer: TA.VER,
     };
   }
-  if (!plan.entered) { delete state.entered[key]; delete state.closed[key]; }
-  if ((plan.state === "CLOSE" || plan.state === "STAND_DOWN") && !state.closed[key]) {
-    state.closed[key] = { at: now, price: C, reason: plan.state === "CLOSE" ? "close" : "cut" };
+  if (!plan.entered) {
+    delete state.entered[key]; delete state.closed[key];
+    if (state.exitLeg) delete state.exitLeg[key];
+    if (state.peakAtLeg1) delete state.peakAtLeg1[key];
   }
+  if ((plan.state === "CLOSE" || plan.state === "CLOSE2" || plan.state === "STAND_DOWN") && !state.closed[key]) {
+    state.closed[key] = { at: now, price: C, reason: plan.state === "STAND_DOWN" ? "cut" : (plan.state === "CLOSE2" ? "close2" : "close") };
+  }
+  // majukan stage exit: CLOSE pertama = leg-1 (50%); CLOSE2/CUT = selesai
+  if (plan.state === "CLOSE" && exitLeg === 0 && state.exitLeg) { state.exitLeg[key] = 1; if (state.peakAtLeg1) state.peakAtLeg1[key] = peakFavor; }
+  if ((plan.state === "CLOSE2" || plan.state === "STAND_DOWN") && state.exitLeg) state.exitLeg[key] = 2;
   const _ent = state.entered[key], _clo = state.closed[key];
   plan.taVer = TA.VER;
   plan.entryPrice = _ent ? _ent.price : null;

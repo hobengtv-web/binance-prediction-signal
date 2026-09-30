@@ -254,6 +254,13 @@ function computeTradePlan(bias, ctx) {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU — sisa sesi ${Math.round(remainSecNow)}s (minimal ${Math.round(minRemainSec)}s untuk capai lock ${fmtPrice(ctx.lock)}), jarak ${distToLockPct.toFixed(2)}%`
         + `; entry hanya bila reversal EKSTREM terdeteksi`;
+    } else if (levels.rNow < RLV[0]) {
+      // Kedalaman contra belum mencapai L1 (0,01%) -> entry terlalu dini: harga baru bergerak
+      // sangat sedikit, sehingga potensi profitnya pun sangat kecil (kasus nyata ETH: entry hanya
+      // ~0,002% dari lock -> close hanya untung 0,002%). Tunggu harga turun/naik minimal ke L1.
+      state = "WAIT"; cls = "wait";
+      action = `TUNGGU PEAK — kedalaman contra baru ${rNowTxt} (minimal ${RLV[0]}% untuk entry di L1)`
+        + `; konfirmasi pembalikan ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
     } else if (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS) {
       state = "ENTRY"; cls = "entry";
       nowEntered = true;
@@ -275,11 +282,12 @@ function computeTradePlan(bias, ctx) {
       action = `CUT SEKARANG — posisi ${pnlTxt}`
         + (cutAdverseStd != null ? ` (${Math.abs(cutAdverseStd).toFixed(1)}σ di bawah entry)` : "")
         + `; ${histFlippedNow ? "tren historis berbalik" : hWhy}`;
-    } else if (hRisk && pnlPct != null && pnlPct > 0) {
-      // UNTUNG (walau baru sebagian, bahkan masih di bawah lock) + risiko berbalik -> amankan
-      // profit sekarang (aturan DARURAT user: profit <50% tetap dieksekusi bila tren mau balik).
+    } else if (hRisk && favor >= 0 && pnlPct != null && pnlPct > 0) {
+      // TARGET SUDAH TERSENTUH + risiko berbalik -> amankan profit (aturan DARURAT user).
+      // Syarat favor>=0 penting: jangan "close karena untung" saat harga belum sampai lock —
+      // kasus nyata ETH entry 2.673,13 -> close 2.673,07 hanya untung 0,002%.
       state = "CLOSE"; cls = "exit";
-      action = `JUAL SEMUA SEKARANG — amankan profit ${pnlTxt} dari potensi (DARURAT: ${hWhy})`;
+      action = `JUAL SEMUA SEKARANG — amankan profit ${pnlTxt} (DARURAT: ${hWhy})`;
     } else if (hRisk) {
       // Risiko tinggi TAPI posisi belum untung & belum cukup dalam -> tahan dulu, jelaskan.
       state = "HOLD_POS"; cls = "wait";

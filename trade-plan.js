@@ -346,17 +346,19 @@ function computeTradePlan(bias, ctx) {
       const trailHit = !!(ctx.trail && ctx.trail.armed && ctx.price != null && (isUp ? ctx.price <= ctx.trail.exitPrice : ctx.price >= ctx.trail.exitPrice));
       const closeSignal = ctx.retreat || trailHit;
       const whyClose = ctx.retreat ? "harga mundur dari puncak" : "trail puncak tersentuh";
+      // Reversal NYATA (bukan sekadar "retreat + risiko") yang boleh memaksa leg-1 lebih awal.
+      const realRev = histFlippedNow && ofiStrongAgainst;
       if (exitLeg === 0) {
-        // LEG-1: jual SEBAGIAN (50%) saat puncak pertama / trail.
-        if (closeSignal && (capturedPct >= TA.EARLYCLOSE_MIN_CAPTURED_PCT || emergency)) {
+        // LEG-1: jual SEBAGIAN (50%) hanya bila profit sudah >= ambang ATAU reversal NYATA.
+        // (Emergency lama tidak lagi menutup posisi prematur -> hindari kehilangan potensi profit besar.)
+        if (closeSignal && (capturedPct >= TA.EARLYCLOSE_MIN_CAPTURED_PCT || realRev)) {
           state = "CLOSE"; cls = "exit";
           action = `JUAL SEBAGIAN (50%)${lockWin != null ? ` (WIN ${(lockWin * 100).toFixed(0)}%)` : ""}`
             + ` — ${whyClose} · profit ${capturedPct}% dari potensi`
-            + (emergency && capturedPct < 50 ? " (DARURAT: risiko berbalik)" : "")
             + `${trailTxt}${exTxt}`;
         } else if (closeSignal) {
           state = "HOLD"; cls = "entry";
-          action = `TAHAN — profit baru ${capturedPct}% dari potensi (minimal ${TA.EARLYCLOSE_MIN_CAPTURED_PCT}% untuk jual sebagian); ${whyClose}`;
+          action = `TAHAN — profit baru ${capturedPct}% dari potensi (minimal ${TA.EARLYCLOSE_MIN_CAPTURED_PCT}% untuk jual sebagian, atau reversal nyata); ${whyClose}`;
         } else {
           state = "HOLD"; cls = "entry";
           action = ladderTxt;

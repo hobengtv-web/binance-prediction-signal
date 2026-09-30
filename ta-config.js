@@ -16,10 +16,10 @@ const CFG = {
   ENTRY_RETRACE_PCT: num(process.env.TA_ENTRY_RETRACE_PCT, 0.02),    // retrace dari ekstrem contra (%)
   ENTRY_MIN_EXTREME_PCT: num(process.env.TA_ENTRY_MIN_EXTREME_PCT, 0.03), // kedalaman ekstrem minimal (%)
   CUT_MIN_REMAIN_SEC: num(process.env.TA_CUT_MIN_REMAIN_SEC, 120),   // CUT hanya bila sisa sesi < ini (detik)
-  EARLYCLOSE_MIN_CAPTURED_PCT: num(process.env.TA_EARLYCLOSE_MIN_CAPTURED_PCT, 50), // early close min % potensi
+  EARLYCLOSE_MIN_CAPTURED_PCT: num(process.env.TA_EARLYCLOSE_MIN_CAPTURED_PCT, 70), // early close min % potensi
   ENTRY_MIN_REMAIN_SEC: num(process.env.TA_ENTRY_MIN_REMAIN_SEC, 120), // entry butuh sisa sesi >= ini
-  CLOSE2_MIN_NEW_PEAK_PCT: num(process.env.TA_CLOSE2_MIN_NEW_PEAK_PCT, 0.01), // CLOSE-2: puncak baru harus lebih tinggi >= ini (%)
-  CLOSE2_RETRACE_PCT: num(process.env.TA_CLOSE2_RETRACE_PCT, 0.02),  // CLOSE-2: micro-retrace dari puncak baru (%)
+  CLOSE2_MIN_NEW_PEAK_PCT: num(process.env.TA_CLOSE2_MIN_NEW_PEAK_PCT, 0.008), // CLOSE-2: puncak baru harus lebih tinggi >= ini (%)
+  CLOSE2_RETRACE_PCT: num(process.env.TA_CLOSE2_RETRACE_PCT, 0.01),  // CLOSE-2: micro-retrace dari puncak baru (%)
 };
 
 // Versi ringkas (hash) — berubah otomatis bila salah satu nilai berubah.

@@ -206,6 +206,7 @@ function computeTradePlan(bias, ctx) {
   const retrace2Pct = (ctx.retrace2Pct != null) ? ctx.retrace2Pct : null;
   const trailArmed = !!ctx.trailArmed;
   const trailRetracePct = (ctx.trailRetracePct != null) ? ctx.trailRetracePct : null;
+  const trailHeldMs = ctx.trailHeldMs || 0;
 
   // momentum in favour (only used in PHASE 2)
   let fs = 0; const why = [];
@@ -276,12 +277,12 @@ function computeTradePlan(bias, ctx) {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU — sisa sesi ${Math.round(remainSecNow)}s (minimal ${Math.round(minRemainSec)}s untuk capai lock ${fmtPrice(ctx.lock)}), jarak ${distToLockPct.toFixed(2)}%`
         + `; entry hanya bila reversal EKSTREM terdeteksi`;
-    } else if (levels.rNow < RLV[0]) {
+    } else if (levels.rNow < Math.max(RLV[0], TA.ENTRY_MIN_NOW_PCT)) {
       // Kedalaman contra belum mencapai L1 (0,01%) -> entry terlalu dini: harga baru bergerak
       // sangat sedikit, sehingga potensi profitnya pun sangat kecil (kasus nyata ETH: entry hanya
       // ~0,002% dari lock -> close hanya untung 0,002%). Tunggu harga turun/naik minimal ke L1.
       state = "WAIT"; cls = "wait";
-      action = `TUNGGU PEAK — kedalaman contra baru ${rNowTxt} (minimal ${RLV[0]}% untuk entry di L1)`
+      action = `TUNGGU PEAK — kedalaman contra baru ${rNowTxt} (minimal ${Math.max(RLV[0], TA.ENTRY_MIN_NOW_PCT)}% untuk entry)`
         + `; konfirmasi pembalikan ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
     } else if (extremeDepthPct != null && extremeDepthPct >= ENTRY_MIN_EXTREME_PCT
       && ((retraceFromPeakPct != null && retraceFromPeakPct >= ENTRY_RETRACE_PCT && turn.count >= 1)
@@ -352,12 +353,12 @@ function computeTradePlan(bias, ctx) {
       const realRev = histFlippedNow && ofiStrongAgainst;
       if (TA.TRAIL_MODE && trailArmed) {
         // EXIT TRAILING: jual (100%) saat harga mundur >= CB% dari puncak; selama belum -> TAHAN (ikuti puncak).
-        if (trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT) {
+        if (trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT && trailHeldMs >= TA.TRAIL_MIN_HOLD_MS) {
           state = "CLOSE"; cls = "exit";
           action = `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${TA.TRAIL_CB_PCT}%) · profit ${capturedPct}% dari potensi`;
         } else {
           state = "HOLD"; cls = "entry";
-          action = `TAHAN (TRAIL armed) — ikuti puncak; jual bila mundur ${TA.TRAIL_CB_PCT}% dari puncak`;
+          action = `TAHAN (TRAIL armed ${(trailHeldMs/1000).toFixed(0)}s) — ikuti puncak; jual bila tahan >=${TA.TRAIL_MIN_HOLD_MS/1000}s & mundur ${TA.TRAIL_CB_PCT}%`;
         }
       } else if (exitLeg === 0) {
         // LEG-1: jual SEBAGIAN (50%) hanya bila profit sudah >= ambang ATAU reversal NYATA.
@@ -473,6 +474,9 @@ function buildPlan(input) {
   const lockTouch = taUp ? (C >= O) : (C <= O);
   const trailArmed = state.trailArmed[key] || (capturedPct2 >= TA.TRAIL_ARM_PCT) || lockTouch;
   state.trailArmed[key] = trailArmed;
+  if (!state.trailSince) state.trailSince = {};
+  if (trailArmed && !state.trailSince[key]) state.trailSince[key] = now;
+  const trailHeldMs = (trailArmed && state.trailSince[key]) ? (now - state.trailSince[key]) : 0;
   const trailRetracePct = (C || 0) ? ((peakFavor - favor) / C * 100) : 0;
 
   const turn = turnEvidence(taUp, { slope, slopeRecent, ofiShort, win });
@@ -494,7 +498,7 @@ function buildPlan(input) {
   const plan = computeTradePlan(bias, {
     tf: input.tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
     entered, turn, fade, trail, retreatStd, retraceFromPeakPct, extremeDepthPct,
-    exitLeg, newPeakHigher, retrace2Pct, trailArmed, trailRetracePct,
+    exitLeg, newPeakHigher, retrace2Pct, trailArmed, trailRetracePct, trailHeldMs,
     durMs: input.durMs, remainMs: input.remainMs,   // gate waktu entry
     entryPrice: state.entered[key] ? state.entered[key].price : null,   // harga entry posisi (untuk kedalaman CUT)
     dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,
@@ -519,6 +523,7 @@ function buildPlan(input) {
     if (state.exitLeg) delete state.exitLeg[key];
     if (state.peakAtLeg1) delete state.peakAtLeg1[key];
     if (state.trailArmed) delete state.trailArmed[key];
+    if (state.trailSince) delete state.trailSince[key];
   }
   if ((plan.state === "CLOSE" || plan.state === "CLOSE2" || plan.state === "STAND_DOWN") && !state.closed[key]) {
     state.closed[key] = { at: now, price: C, reason: plan.state === "STAND_DOWN" ? "cut" : (plan.state === "CLOSE2" ? "close2" : "close") };

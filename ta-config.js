@@ -24,6 +24,8 @@ const CFG = {
   TRAIL_MODE: num(process.env.TA_TRAIL_MODE, 1),                     // 1 = pakai exit TRAILING (arm+callback), 0 = leg1/CLOSE2 lama
   TRAIL_ARM_PCT: num(process.env.TA_TRAIL_ARM_PCT, 40),              // arm saat profit >= X% potensi (atau sentuh lock)
   TRAIL_CB_PCT: num(process.env.TA_TRAIL_CB_PCT, 0.02),              // callback: jual saat mundur >= X% dari puncak
+  TRAIL_MIN_HOLD_MS: num(process.env.TA_TRAIL_MIN_HOLD_MS, 10000),   // min tahan sejak arm sebelum boleh exit (hindari prematur)
+  ENTRY_MIN_NOW_PCT: num(process.env.TA_ENTRY_MIN_NOW_PCT, 0.03),    // kedalaman contra SAAT INI minimal utk entry (jangan entry dekat lock)
 };
 
 // Versi ringkas (hash) — berubah otomatis bila salah satu nilai berubah.

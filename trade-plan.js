@@ -482,7 +482,8 @@ function buildPlan(input) {
   const traveled = (entPx != null) ? (taUp ? (C - entPx) : (entPx - C)) : null;
   const capturedPct2 = (pot && pot > C * 0.00001) ? (traveled / pot) * 100 : (traveled > 0 ? 100 : 0);
   const lockTouch = taUp ? (C >= O) : (C <= O);
-  const trailArmed = state.trailArmed[key] || (capturedPct2 >= TA.TRAIL_ARM_PCT) || lockTouch;
+  const armOnLock = TA.TRAIL_ARM_ON_LOCK ? lockTouch : false;   // default: arm hanya bila capture>=ARM
+  const trailArmed = state.trailArmed[key] || (capturedPct2 >= TA.TRAIL_ARM_PCT) || armOnLock;
   state.trailArmed[key] = trailArmed;
   if (!state.trailSince) state.trailSince = {};
   if (trailArmed && !state.trailSince[key]) state.trailSince[key] = now;

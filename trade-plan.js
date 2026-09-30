@@ -300,7 +300,8 @@ function computeTradePlan(bias, ctx) {
   } else {
     // ---------------- PHASE 2: position open ----------------
     if (_simple) {
-      if (trailArmed && trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT && trailHeldMs >= TA.TRAIL_MIN_HOLD_MS) {
+      const hybEarly = TA.HYBRID && ((capturedPct >= TA.HYB_MIN_CAP_PCT) || (trailRetracePct != null && trailRetracePct >= TA.HYB_MIN_RETRACE_PCT));
+      if (trailArmed && trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT && (trailHeldMs >= TA.TRAIL_MIN_HOLD_MS || hybEarly)) {
         state = "CLOSE"; cls = "exit";
         action = `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${TA.TRAIL_CB_PCT}%) · profit ${capturedPct}% dari potensi`;
       } else {
@@ -363,7 +364,8 @@ function computeTradePlan(bias, ctx) {
       const realRev = histFlippedNow && ofiStrongAgainst;
       if (TA.TRAIL_MODE && trailArmed) {
         // EXIT TRAILING: jual (100%) saat harga mundur >= CB% dari puncak; selama belum -> TAHAN (ikuti puncak).
-        if (trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT && trailHeldMs >= TA.TRAIL_MIN_HOLD_MS) {
+        const hybEarly2 = TA.HYBRID && ((capturedPct >= TA.HYB_MIN_CAP_PCT) || (trailRetracePct != null && trailRetracePct >= TA.HYB_MIN_RETRACE_PCT));
+        if (trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT && (trailHeldMs >= TA.TRAIL_MIN_HOLD_MS || hybEarly2)) {
           state = "CLOSE"; cls = "exit";
           action = `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${TA.TRAIL_CB_PCT}%) · profit ${capturedPct}% dari potensi`;
         } else {

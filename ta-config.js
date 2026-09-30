@@ -18,6 +18,7 @@ const CFG = {
   CUT_MIN_REMAIN_SEC: num(process.env.TA_CUT_MIN_REMAIN_SEC, 120),   // CUT hanya bila sisa sesi < ini (detik)
   EARLYCLOSE_MIN_CAPTURED_PCT: num(process.env.TA_EARLYCLOSE_MIN_CAPTURED_PCT, 70), // early close min % potensi
   ENTRY_MIN_REMAIN_SEC: num(process.env.TA_ENTRY_MIN_REMAIN_SEC, 120), // entry butuh sisa sesi >= ini
+  SIMPLE: num(process.env.TA_SIMPLE, 0),                             // 1 = pakai logika TEST (entry depth+retrace, exit trailing saja)
   CLOSE2_MIN_NEW_PEAK_PCT: num(process.env.TA_CLOSE2_MIN_NEW_PEAK_PCT, 0.008), // CLOSE-2: puncak baru harus lebih tinggi >= ini (%)
   CLOSE2_RETRACE_PCT: num(process.env.TA_CLOSE2_RETRACE_PCT, 0.01),  // CLOSE-2: micro-retrace dari puncak baru (%)
   // ===== MODE TRAILING (exit) =====

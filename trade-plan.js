@@ -174,6 +174,7 @@ function computeTradePlan(bias, ctx) {
   const histFlipped = !!ctx.histTrend && ctx.histTrend.predictDir !== "flat" && ctx.histTrend.predictDir !== bias && ctx.histTrend.strength >= 35;
   const ofiStrongAgainst = ctx.ofi != null && (isUp ? ctx.ofi < -0.25 : ctx.ofi > 0.25);
   const realReversal = histFlipped && ofiStrongAgainst;
+  const _simple = !!TA.SIMPLE;   // mode test: entry depth+retrace, exit trailing saja
   // Evidence the move against the bias is about to turn back toward it.
   // Confirmation: >=2 independent evidence parts AND a minimum dwell time, so a single
   // noisy tick cannot trigger (too fast) and waiting never drags on (too late).
@@ -277,16 +278,17 @@ function computeTradePlan(bias, ctx) {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU — sisa sesi ${Math.round(remainSecNow)}s (minimal ${Math.round(minRemainSec)}s untuk capai lock ${fmtPrice(ctx.lock)}), jarak ${distToLockPct.toFixed(2)}%`
         + `; entry hanya bila reversal EKSTREM terdeteksi`;
-    } else if (levels.rNow < Math.max(RLV[0], TA.ENTRY_MIN_NOW_PCT)) {
+    } else if (!_simple && levels.rNow < Math.max(RLV[0], TA.ENTRY_MIN_NOW_PCT)) {
       // Kedalaman contra belum mencapai L1 (0,01%) -> entry terlalu dini: harga baru bergerak
       // sangat sedikit, sehingga potensi profitnya pun sangat kecil (kasus nyata ETH: entry hanya
       // ~0,002% dari lock -> close hanya untung 0,002%). Tunggu harga turun/naik minimal ke L1.
       state = "WAIT"; cls = "wait";
       action = `TUNGGU PEAK — kedalaman contra baru ${rNowTxt} (minimal ${Math.max(RLV[0], TA.ENTRY_MIN_NOW_PCT)}% untuk entry)`
         + `; konfirmasi pembalikan ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
-    } else if (extremeDepthPct != null && extremeDepthPct >= ENTRY_MIN_EXTREME_PCT
-      && ((retraceFromPeakPct != null && retraceFromPeakPct >= ENTRY_RETRACE_PCT && turn.count >= 1)
-        || (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS && hasStructPeak))) {
+    } else if ((_simple && extremeDepthPct != null && extremeDepthPct >= ENTRY_MIN_EXTREME_PCT && retraceFromPeakPct != null && retraceFromPeakPct >= ENTRY_RETRACE_PCT)
+      || (!_simple && extremeDepthPct != null && extremeDepthPct >= ENTRY_MIN_EXTREME_PCT
+        && ((retraceFromPeakPct != null && retraceFromPeakPct >= ENTRY_RETRACE_PCT && turn.count >= 1)
+          || (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS && hasStructPeak)))) {
       state = "ENTRY"; cls = "entry";
       nowEntered = true;
       action = `ENTRY SEKARANG ${bias.toUpperCase()} — peak contra terkonfirmasi (${rNowTxt}, ${partList(turn.parts)})`
@@ -297,7 +299,15 @@ function computeTradePlan(bias, ctx) {
     }
   } else {
     // ---------------- PHASE 2: position open ----------------
-    if (biasAtRisk && pnlPct != null && pnlPct > 0) {
+    if (_simple) {
+      if (trailArmed && trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT && trailHeldMs >= TA.TRAIL_MIN_HOLD_MS) {
+        state = "CLOSE"; cls = "exit";
+        action = `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${TA.TRAIL_CB_PCT}%) · profit ${capturedPct}% dari potensi`;
+      } else {
+        state = "HOLD"; cls = "entry";
+        action = `TAHAN (TRAIL ${trailArmed ? "armed" : "-"}) — profit ${capturedPct}% dari potensi`;
+      }
+    } else if (biasAtRisk && pnlPct != null && pnlPct > 0) {
       // Sedang UNTUNG + risiko berbalik -> amankan profit (darurat) = jual SISA/semua.
       state = "CLOSE2"; cls = "exit";
       action = `JUAL SISA SEKARANG — posisi ${pnlTxt} dari target (DARURAT: ${hWhy})`;

@@ -62,7 +62,7 @@ function computeSignalHealth(dir, ctx) {
   return { score, label, fired, confirmedReversal };
 }
 
-const DWELL_ENTRY_MS = 4000;    // entry: peak/turn must hold ~4s (fast, but not a single tick)
+const DWELL_ENTRY_MS = 2000;    // entry: peak/turn hold ~2s (turun dari 4s agar tidak telat ambil posisi)
 const DWELL_AVG_MS = 15000;     // averaging: hold ~15s (be more careful adding)
 const DWELL_CLOSE_MS = 10000;   // close: fade must hold ~10s
 function turnEvidence(isUp, ctx) {
@@ -244,6 +244,9 @@ function computeTradePlan(bias, ctx) {
   const cantReturn = ofiStrongAgainst || (ctx.slope != null && (isUp ? ctx.slope < 0 : ctx.slope > 0));
   const cutAllowed = timeForCut && cantReturn;
   const escapeReversal = histFlipped && ofiStrongAgainst && deepEnough;
+  // PEAK-BASED ENTRY (permintaan user): entry hanya bila ada konfirmasi STRUKTURAL puncak contra
+  // (higher-low utk bias up / lower-high utk bias down) atau peak lawan terkonfirmasi.
+  const hasStructPeak = (turn.parts && turn.parts.structure === true) || !!ctx.peakAgainst;
 
   if (!entered) {
     // ---------------- PHASE 1: no position ----------------
@@ -270,7 +273,7 @@ function computeTradePlan(bias, ctx) {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU PEAK — kedalaman contra baru ${rNowTxt} (minimal ${RLV[0]}% untuk entry di L1)`
         + `; konfirmasi pembalikan ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
-    } else if (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS) {
+    } else if (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS && hasStructPeak) {
       state = "ENTRY"; cls = "entry";
       nowEntered = true;
       action = `ENTRY SEKARANG ${bias.toUpperCase()} — peak contra terkonfirmasi (${rNowTxt}, ${partList(turn.parts)})`
@@ -328,8 +331,11 @@ function computeTradePlan(bias, ctx) {
       const ladderTxt = (ctx.trail && ctx.trail.armed)
         ? `LADDER (3 level, win ~70%): 40% di lock ${fmtPrice(ctx.lock)} · 30% di ${fmtPrice(l2Price)} (+0.02%) · 30% TRAIL puncak-halus ${fmtPrice(ctx.trail.smaPeak)} → exit ${fmtPrice(ctx.trail.exitPrice)}`
         : `TAHAN — tunggu harga menyentuh lock ${fmtPrice(ctx.lock)} untuk mulai ladder`;
-      const closeSignal = ctx.retreat || closeReady || fs < 65;
-      const whyClose = ctx.retreat ? "harga mundur dari puncak" : closeReady ? "momentum melemah" : "momentum mulai lemah";
+      // EARLY CLOSE berbasis PEAK (permintaan user): jangan close hanya karena harga sudah lewat lock.
+      // Wajib ada puncak: harga MUNDUR dari puncak (retreat) atau TRAIL puncak tersentuh.
+      const trailHit = !!(ctx.trail && ctx.trail.armed && ctx.price != null && (isUp ? ctx.price <= ctx.trail.exitPrice : ctx.price >= ctx.trail.exitPrice));
+      const closeSignal = ctx.retreat || trailHit;
+      const whyClose = ctx.retreat ? "harga mundur dari puncak" : "trail puncak tersentuh";
       if (closeSignal && (capturedPct >= 50 || emergency)) {
         state = "CLOSE"; cls = "exit";
         action = `JUAL SEMUA SEKARANG${lockWin != null ? ` (WIN ${(lockWin * 100).toFixed(0)}%)` : ""}`

@@ -157,6 +157,9 @@ function computeTradePlan(bias, ctx) {
   const beyondZone = isUp ? (ctx.price < l3px) : (ctx.price > l3px);
   const deepEnough = beyondZone || (cutAdverseStd != null && cutAdverseStd >= 1.5);
   const biasAtRisk = hRisk && deepEnough;
+  // ===== PROGRESS MENUJU TARGET & ATURAN PROFIT MINIMAL (permintaan user) =====
+  // captured = berapa % dari jarak entry->LOCK yang sudah ditempuh (0..1+). User hanya mau
+  // early close bila profit sudah >= 50% dari target, KECUALI kondisi darurat (reversal/arus kuat).
   const pnlPct = entPx != null ? (((isUp ? (ctx.price - entPx) : (entPx - ctx.price)) / entPx) * 100) : null;
   const pnlTxt = pnlPct != null ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(3)}%` : "";
   const hWhy = (h.fired && h.fired.length) ? h.fired.join(", ") : "arus melawan";
@@ -185,6 +188,9 @@ function computeTradePlan(bias, ctx) {
   const extremeReversal = turn.count >= 3 && ofiTowardStrong;
   const timeTooShort = remainSecNow != null && remainSecNow < minRemainSec;
   const blockLateEntry = timeTooShort && !extremeReversal;
+  // Menambah posisi (L2/L3) TIDAK punya pengecualian: menambah di detik-detik akhir sesi tetap
+  // berisiko (kasus nyata: sisa <1 menit & harga stabil di contra -> berakhir loss).
+  const blockLateAdd = remainSecNow != null && remainSecNow < minRemainSec;
   const fade = ctx.fade || { count: 0, parts: {} };
   const dwellTurn = ctx.dwellTurnMs || 0;
   const dwellFade = ctx.dwellFadeMs || 0;
@@ -212,6 +218,20 @@ function computeTradePlan(bias, ctx) {
     ? ` · sisa potensi ~${cont.est.toFixed(2)}% (peluang ${(cont.prob * 100).toFixed(0)}%${cont.peakMin != null ? `, puncak ±mnt ${cont.peakMin}` : ""}) → target ${fmtPrice(cont.target)}`
     : "";
 
+  // Potensi = jarak dari harga ENTRY ke target akhir (target kontinuasi bila ada; jika tidak,
+  // asumsi konservatif lock+0,05%). Inilah "100%" yang dimaksud user saat bilang profit 50%.
+  const contTarget = (cont && cont.target != null) ? cont.target : (isUp ? ctx.lock * 1.0005 : ctx.lock * 0.9995);
+  const targetDist = entPx != null ? Math.abs(contTarget - entPx) : null;
+  const traveled = entPx != null ? (isUp ? (ctx.price - entPx) : (entPx - ctx.price)) : null;
+  const captured = (targetDist != null && targetDist > ctx.price * 0.00001)
+    ? Math.max(0, traveled / targetDist)
+    : (traveled != null && traveled > 0 ? 1 : 0);
+  const capturedPct = Math.round(captured * 100);
+  const fadeCnt = (ctx.fade && ctx.fade.count) || 0;
+  const retreatStdNow = (ctx.retreatStd != null) ? ctx.retreatStd : null;
+  const emergency = (fadeCnt >= 3 && (ctx.dwellFadeMs || 0) >= DWELL_CLOSE_MS)
+    || (retreatStdNow != null && retreatStdNow >= 0.5)
+    || hRisk;
   const entered = !!ctx.entered;
   let state, action, cls, nowEntered = entered;
   const rNowTxt = levels.rNow.toFixed(2) + "%";
@@ -245,13 +265,23 @@ function computeTradePlan(bias, ctx) {
     }
   } else {
     // ---------------- PHASE 2: position open ----------------
-    if (biasAtRisk) {
+    if (biasAtRisk && pnlPct != null && pnlPct > 0) {
+      // Sedang UNTUNG + risiko berbalik -> amankan profit (darurat), bukan "cut".
+      state = "CLOSE"; cls = "exit";
+      action = `JUAL SEMUA SEKARANG — posisi ${pnlTxt} dari target (DARURAT: ${hWhy})`;
+    } else if (biasAtRisk) {
       state = "STAND_DOWN"; cls = "exit";
       // Sebut alasan NYATA (bukan klaim "sinyal berbalik" bila tren historis tidak berbalik).
-      action = `CUT SEKARANG — posisi ${pnlTxt}${cutAdverseStd != null ? ` (${cutAdverseStd.toFixed(1)}σ)` : ""}`
+      action = `CUT SEKARANG — posisi ${pnlTxt}`
+        + (cutAdverseStd != null ? ` (${Math.abs(cutAdverseStd).toFixed(1)}σ di bawah entry)` : "")
         + `; ${histFlippedNow ? "tren historis berbalik" : hWhy}`;
+    } else if (hRisk && pnlPct != null && pnlPct > 0) {
+      // UNTUNG (walau baru sebagian, bahkan masih di bawah lock) + risiko berbalik -> amankan
+      // profit sekarang (aturan DARURAT user: profit <50% tetap dieksekusi bila tren mau balik).
+      state = "CLOSE"; cls = "exit";
+      action = `JUAL SEMUA SEKARANG — amankan profit ${pnlTxt} dari potensi (DARURAT: ${hWhy})`;
     } else if (hRisk) {
-      // Label risiko tinggi TAPI posisi masih di dalam zona entry -> jangan cut, jelaskan.
+      // Risiko tinggi TAPI posisi belum untung & belum cukup dalam -> tahan dulu, jelaskan.
       state = "HOLD_POS"; cls = "wait";
       action = `TAHAN — masih di zona entry (posisi ${pnlTxt}); risiko: ${hWhy}. Tunggu balik ke lock ${fmtPrice(ctx.lock)}`;
     } else if (favor >= 0) {
@@ -275,17 +305,30 @@ function computeTradePlan(bias, ctx) {
       const ladderTxt = (ctx.trail && ctx.trail.armed)
         ? `LADDER (3 level, win ~70%): 40% di lock ${fmtPrice(ctx.lock)} · 30% di ${fmtPrice(l2Price)} (+0.02%) · 30% TRAIL puncak-halus ${fmtPrice(ctx.trail.smaPeak)} → exit ${fmtPrice(ctx.trail.exitPrice)}`
         : `TAHAN — tunggu harga menyentuh lock ${fmtPrice(ctx.lock)} untuk mulai ladder`;
-      if (ctx.retreat || closeReady || fs < 65) {
+      const closeSignal = ctx.retreat || closeReady || fs < 65;
+      const whyClose = ctx.retreat ? "harga mundur dari puncak" : closeReady ? "momentum melemah" : "momentum mulai lemah";
+      if (closeSignal && (capturedPct >= 50 || emergency)) {
         state = "CLOSE"; cls = "exit";
-        const why = ctx.retreat ? "harga mundur dari puncak" : closeReady ? "momentum melemah" : "momentum mulai lemah";
-        action = `JUAL SEMUA SEKARANG${lockWin != null ? ` (WIN ${(lockWin * 100).toFixed(0)}%)` : ""} — ${why}${trailTxt}${exTxt}`;
+        action = `JUAL SEMUA SEKARANG${lockWin != null ? ` (WIN ${(lockWin * 100).toFixed(0)}%)` : ""}`
+          + ` — ${whyClose} · profit ${capturedPct}% dari potensi`
+          + (emergency && capturedPct < 50 ? " (DARURAT: risiko berbalik)" : "")
+          + `${trailTxt}${exTxt}`;
+      } else if (closeSignal) {
+        // Sinyal close muncul tetapi profit masih < 50% dan tidak darurat -> TAHAN (permintaan user).
+        state = "HOLD"; cls = "entry";
+        action = `TAHAN — profit baru ${capturedPct}% dari potensi (minimal 50% untuk early close); `
+          + `${whyClose}. ${(ctx.trail && ctx.trail.armed) ? "ikuti TRAIL" : "tunggu harga mendekati lock " + fmtPrice(ctx.lock)}`;
       } else {
         state = "HOLD"; cls = "entry";
         action = ladderTxt;
       }
-    } else if (inZone2 && avgReady) {
+    } else if (inZone2 && avgReady && !blockLateAdd) {
       state = "AVERAGE"; cls = "entry";
-      action = `TAMBAH ENTRY SEKARANG ${bias.toUpperCase()} — harga ${rNowTxt} (average terkonfirmasi)`;
+      action = `TAMBAH ENTRY SEKARANG ${bias.toUpperCase()} — harga ${rNowTxt} (average terkonfirmasi; sisa sesi ${remainSecNow != null ? Math.round(remainSecNow) + "s" : "-"})`;
+    } else if (inZone2 && avgReady && blockLateAdd) {
+      // Sisa waktu tidak cukup untuk kembali ke LOCK -> JANGAN menambah posisi (permintaan user).
+      state = "HOLD_POS"; cls = "wait";
+      action = `TAHAN — tidak menambah posisi: sisa sesi ${Math.round(remainSecNow)}s (butuh minimal ${Math.round(minRemainSec)}s untuk capai lock ${fmtPrice(ctx.lock)})`;
     } else if (inZone2) {
       state = "HOLD_POS"; cls = "wait";
       action = `SIAP TAMBAH ENTRY — konfirmasi ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_AVG_MS / 1000}s`;
@@ -337,6 +380,8 @@ function buildPlan(input) {
   const peakFavor = Math.max(state.peak[key] == null ? -Infinity : state.peak[key], favor);
   state.peak[key] = peakFavor;
   const retreat = peakFavor > 0 && (peakFavor - favor) >= 0.25 * Math.max(std, 1e-9);
+  // berapa sigma harga sudah mundur dari puncak favor -> dipakai untuk kondisi DARURAT
+  const retreatStd = (peakFavor > 0 && std > 0) ? (peakFavor - favor) / std : 0;
 
   const turn = turnEvidence(taUp, { slope, slopeRecent, ofiShort, win });
   const fade = fadeEvidence(taUp, { slope, slopeRecent, ofiShort, retreat, rsi });
@@ -356,7 +401,7 @@ function buildPlan(input) {
   const trail = trailOfCloses(input.sessionCloses || [], O, taUp);
   const plan = computeTradePlan(bias, {
     tf: input.tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
-    entered, turn, fade, trail,
+    entered, turn, fade, trail, retreatStd,
     durMs: input.durMs, remainMs: input.remainMs,   // gate waktu entry
     entryPrice: state.entered[key] ? state.entered[key].price : null,   // harga entry posisi (untuk kedalaman CUT)
     dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,

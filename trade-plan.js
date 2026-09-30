@@ -278,8 +278,9 @@ function computeTradePlan(bias, ctx) {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU PEAK — kedalaman contra baru ${rNowTxt} (minimal ${RLV[0]}% untuk entry di L1)`
         + `; konfirmasi pembalikan ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
-    } else if ((retraceFromPeakPct != null && retraceFromPeakPct >= ENTRY_RETRACE_PCT && extremeDepthPct != null && extremeDepthPct >= ENTRY_MIN_EXTREME_PCT && turn.count >= 1)
-      || (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS && hasStructPeak)) {
+    } else if (extremeDepthPct != null && extremeDepthPct >= ENTRY_MIN_EXTREME_PCT
+      && ((retraceFromPeakPct != null && retraceFromPeakPct >= ENTRY_RETRACE_PCT && turn.count >= 1)
+        || (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS && hasStructPeak))) {
       state = "ENTRY"; cls = "entry";
       nowEntered = true;
       action = `ENTRY SEKARANG ${bias.toUpperCase()} — peak contra terkonfirmasi (${rNowTxt}, ${partList(turn.parts)})`

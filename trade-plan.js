@@ -63,6 +63,7 @@ function computeSignalHealth(dir, ctx) {
 }
 
 const DWELL_ENTRY_MS = 2000;    // entry: peak/turn hold ~2s (turun dari 4s agar tidak telat ambil posisi)
+const ENTRY_RETRACE_PCT = 0.02; // entry peak: retrace minimal dari harga EKSTREM contra (%) agar masuk dekat puncak
 const DWELL_AVG_MS = 15000;     // averaging: hold ~15s (be more careful adding)
 const DWELL_CLOSE_MS = 10000;   // close: fade must hold ~10s
 function turnEvidence(isUp, ctx) {
@@ -196,6 +197,7 @@ function computeTradePlan(bias, ctx) {
   const dwellFade = ctx.dwellFadeMs || 0;
   const avgReady = turn.count >= 2 && dwellTurn >= DWELL_AVG_MS;
   const closeReady = fade.count >= 2 && dwellFade >= DWELL_CLOSE_MS;
+  const retraceFromPeakPct = (ctx.retraceFromPeakPct != null) ? ctx.retraceFromPeakPct : null;
 
   // momentum in favour (only used in PHASE 2)
   let fs = 0; const why = [];
@@ -273,14 +275,15 @@ function computeTradePlan(bias, ctx) {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU PEAK — kedalaman contra baru ${rNowTxt} (minimal ${RLV[0]}% untuk entry di L1)`
         + `; konfirmasi pembalikan ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
-    } else if (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS && hasStructPeak) {
+    } else if ((retraceFromPeakPct != null && retraceFromPeakPct >= ENTRY_RETRACE_PCT && turn.count >= 1)
+      || (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS && hasStructPeak)) {
       state = "ENTRY"; cls = "entry";
       nowEntered = true;
       action = `ENTRY SEKARANG ${bias.toUpperCase()} — peak contra terkonfirmasi (${rNowTxt}, ${partList(turn.parts)})`
         + (timeTooShort ? ` [reversal ekstrem; sisa sesi ${Math.round(remainSecNow)}s]` : "");
     } else {
       state = "WAIT"; cls = "wait";
-      action = `TUNGGU PEAK — harga contra ${rNowTxt}; konfirmasi pembalikan ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
+      action = `TUNGGU PEAK — harga contra ${rNowTxt}; retrace ${retraceFromPeakPct != null ? retraceFromPeakPct.toFixed(3) : "-"}%/${ENTRY_RETRACE_PCT}% · konfirmasi ${turn.count}/4`;
     }
   } else {
     // ---------------- PHASE 2: position open ----------------
@@ -411,6 +414,13 @@ function buildPlan(input) {
   const retreat = peakFavor > 0 && (peakFavor - favor) >= 0.25 * Math.max(std, 1e-9);
   // berapa sigma harga sudah mundur dari puncak favor -> dipakai untuk kondisi DARURAT
   const retreatStd = (peakFavor > 0 && std > 0) ? (peakFavor - favor) / std : 0;
+  // PEAK KONTRA: lacak harga EKSTREM di sisi contra sejak awal sesi (up -> min, down -> max),
+  // lalu hitung retrace dari ekstrem. Dipakai untuk ENTRY dekat puncak (bukan menunggu struktur 30s).
+  if (!state.adverseExtreme) state.adverseExtreme = {};
+  const ext0 = state.adverseExtreme[key];
+  const ext = (ext0 == null) ? C : (taUp ? Math.min(ext0, C) : Math.max(ext0, C));
+  state.adverseExtreme[key] = ext;
+  const retraceFromPeakPct = (C || 0) ? (taUp ? ((C - ext) / C * 100) : ((ext - C) / C * 100)) : 0;
 
   const turn = turnEvidence(taUp, { slope, slopeRecent, ofiShort, win });
   const fade = fadeEvidence(taUp, { slope, slopeRecent, ofiShort, retreat, rsi });
@@ -430,7 +440,7 @@ function buildPlan(input) {
   const trail = trailOfCloses(input.sessionCloses || [], O, taUp);
   const plan = computeTradePlan(bias, {
     tf: input.tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
-    entered, turn, fade, trail, retreatStd,
+    entered, turn, fade, trail, retreatStd, retraceFromPeakPct,
     durMs: input.durMs, remainMs: input.remainMs,   // gate waktu entry
     entryPrice: state.entered[key] ? state.entered[key].price : null,   // harga entry posisi (untuk kedalaman CUT)
     dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,

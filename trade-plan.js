@@ -207,7 +207,14 @@ function computeTradePlan(bias, ctx) {
   add(favor >= 0, 10, "harga sudah kembali ke lock");
   add(!ctx.retreat, 10, "tidak mundur dari puncak");
   add(ctx.rsi != null && !(isUp ? ctx.rsi >= 75 : ctx.rsi <= 25), 5, "RSI belum ekstrem");
-  fs = Math.min(100, fs);
+  // POLA CANDLE sebagai faktor pendukung (bukan penentu tunggal): pola yang SEARAH bias menambah
+  // skor, pola yang MELAWAN mengurangi. Label polanya ikut masuk daftar alasan (why).
+  const pats = Array.isArray(ctx.patterns) ? ctx.patterns : [];
+  const patAligned = pats.find((p) => p && p.dir === (isUp ? "up" : "down"));
+  const patAgainst = pats.find((p) => p && p.dir === (isUp ? "down" : "up"));
+  if (patAligned) { fs += 8; why.push("pola " + patAligned.label); }
+  else if (patAgainst) { fs -= 6; why.push("pola lawan: " + patAgainst.label); }
+  fs = Math.max(0, Math.min(100, fs));
   // Continuation potential: how much further price typically runs after reaching the lock,
   // so the user can exit at the peak instead of straight away.
   const histAligned = !!ctx.histTrend && ctx.histTrend.predictDir !== "flat" && ctx.histTrend.predictDir === bias && ctx.histTrend.strength >= 35;
@@ -409,7 +416,7 @@ function buildPlan(input) {
   const trail = trailOfCloses(input.sessionCloses || [], O, taUp);
   const plan = computeTradePlan(bias, {
     tf: input.tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
-    entered, turn, fade, trail, retreatStd,
+    entered, turn, fade, trail, retreatStd, patterns: input.patterns || [],
     durMs: input.durMs, remainMs: input.remainMs,   // gate waktu entry
     entryPrice: state.entered[key] ? state.entered[key].price : null,   // harga entry posisi (untuk kedalaman CUT)
     dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,

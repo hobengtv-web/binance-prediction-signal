@@ -26,6 +26,7 @@
     this.type = "candle";
     this.decision = null;
     this.guides = [];
+    this.patterns = [];
     this.projection = [];
     this.markers = [];
     this.visible = 90;
@@ -40,6 +41,7 @@
     this.sessionDuration = 0; // ms; 0 = no session dividers
     this.decision = null;
     this.guides = [];
+    this.patterns = [];
     this.projection = [];
     this.trendFit = [];   // auto trend line (regression) drawn across the recent window
     this.markers = [];    // marker.below => drawn under the point (swing lows)
@@ -77,6 +79,11 @@
   CanvasChart.prototype.setDecision = function (p) { this.decision = p; this.render(); };
   /* GARIS BANTU (guide) gaya analis: level Trade Assistant (ENTRY/TAMBAH/TARGET/POSISI) dan
      support/resistance. Format: [{ p: harga, label: "ENTRY L1", cls: "g-entry"|"g-add"|"g-target"|"g-pos"|"g-sr" }] */
+  /* POLA CANDLE (price action): [{ name, dir, at (waktu candle), price, short }] */
+  CanvasChart.prototype.setPatterns = function (list) {
+    this.patterns = (list || []).filter((p) => p && p.at != null);
+    this.render();
+  };
   CanvasChart.prototype.setGuides = function (list) {
     this.guides = (list || []).filter((g) => g && g.p != null && isFinite(g.p));
     this.render();
@@ -257,6 +264,33 @@
             ctx.fillText(g.label, plotR - 3, gy - 2); ctx.textBaseline = "middle"; }
         }
         ctx.textAlign = "left";
+      }
+
+      // ===== MARKER POLA CANDLE (price action) =====
+      // Segitiga di bawah candle (pola naik), di atas candle (pola turun), atau titik (doji).
+      // Label hanya untuk pola TERBARU supaya chart tidak penuh teks.
+      if (this.patterns && this.patterns.length) {
+        for (let pi = 0; pi < this.patterns.length; pi++) {
+          const pt = this.patterns[pi];
+          const cnd = (this.candles || []).find((x) => x.time === pt.at);
+          if (!cnd) continue;
+          const cx = xOf(cnd.time);
+          if (cx < plotL - 4 || cx > plotR + 4) continue;
+          const col = pt.dir === "up" ? UP : pt.dir === "down" ? DOWN : "#f0b90b";
+          const up = pt.dir === "up";
+          const baseY = up ? yOf(cnd.low) + 7 : pt.dir === "down" ? yOf(cnd.high) - 7 : yOf((cnd.high + cnd.low) / 2);
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          if (up) { ctx.moveTo(cx, baseY - 7); ctx.lineTo(cx - 4, baseY + 1); ctx.lineTo(cx + 4, baseY + 1); }
+          else if (pt.dir === "down") { ctx.moveTo(cx, baseY + 7); ctx.lineTo(cx - 4, baseY - 1); ctx.lineTo(cx + 4, baseY - 1); }
+          else { ctx.arc(cx, baseY, 3, 0, Math.PI * 2); }
+          ctx.closePath(); ctx.fill();
+          if (pi === 0 && pt.short) {
+            ctx.font = "9px system-ui, sans-serif"; ctx.textAlign = "center";
+            ctx.fillText(pt.short, cx, up ? baseY + 15 : baseY - 11);
+            ctx.textAlign = "left";
+          }
+        }
       }
 
       // price zone overlay (Entry Zone / Sell Zone — smooth blink ONLY on active zone)

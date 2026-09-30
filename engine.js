@@ -19,6 +19,7 @@ const GATES_DEF = require("./gates.js");
 const FLOW = require("./flow.js");        // OFI live (order flow per menit)
 const TRADE = require("./trade-plan.js");  // TRADE ASSISTANT: modul bersama (server + browser)
 const CONF = require("./confidence.js");  // MODEL CONFIDENCE: modul bersama (server + browser)
+const PATTERNS = require("./patterns.js"); // DETEKSI POLA CANDLE (price action)
 const MP = require("./mobile-pred.js");   // MOBILE PREDICTION: modul bersama (server + browser)
 const fs = require("fs");
 const path = require("path");
@@ -303,7 +304,16 @@ function createEngine(deps) {
         if (resistance == null && lastTf.high > C) { resistance = lastTf.high; gNow.resistance = resistance; }
       }
     }
+    // ===== POLA CANDLE (price action) =====
+    // Hanya dari candle tf yang SUDAH TUTUP (candle sesi berjalan dikeluarkan). Maks 3 terakhir;
+    // dipakai UI (gambar di chart) dan Trade Assistant (faktor pendukung skor).
+    let patterns = [];
+    try {
+      const closedTf = (m.tf[tf] || []).filter((x) => x.time < t0).slice(-60);
+      patterns = PATTERNS.detect(closedTf, 3);
+    } catch (_) {}
     return {
+      patterns,
       support, resistance, srFrom: "dibekukan awal sesi",
       targetFrozen: gNow.target, guideAt: gNow.at,
       zone, momentum, rsi, mean: stat.mean, std, slope, slopeRecent: stat.slopeRecent, z,
@@ -315,6 +325,20 @@ function createEngine(deps) {
       trendDir: trend, trendPct,
       lockedAt: (sig && sig.lockedAt) || null,
     };
+  }
+
+  // Cache kecil: pola hasil computeDisp pada tick ini, supaya computePlan memakai daftar yang SAMA.
+  const patternCache = {};
+  function patternCacheFor(sym, tf, t0, nowSec, sig, m) {
+    const k = `${sym}_${tf}_${t0}`;
+    if (patternCache[k] && Date.now() - patternCache[k].at < 3000) return patternCache[k].list;
+    let list = [];
+    try {
+      const closedTf = (m.tf[tf] || []).filter((x) => x.time < t0).slice(-60);
+      list = PATTERNS.detect(closedTf, 3);
+    } catch (_) {}
+    patternCache[k] = { at: Date.now(), list };
+    return list;
   }
 
   function computePlan(sym, tf, t0, nowSec, sig, m) {
@@ -337,6 +361,7 @@ function createEngine(deps) {
       bias, tf, lock: sig.lock, price,
       std: stat.std, slope: stat.slope, slopeRecent: stat.slopeRecent, rsi, z: stat.z,
       ofi, ofiShort, histTrend, win, sessionCloses: closes,
+      patterns: patternCacheFor(sym, tf, t0, nowSec, sig, m),
       durMs: (DUR_S[tf] || 300) * 1000, remainMs: Math.max(0, (t0 + (DUR_S[tf] || 300)) * 1000 - Date.now()),
       key, now: Date.now(), tiers: TIERS, state: st,
     });

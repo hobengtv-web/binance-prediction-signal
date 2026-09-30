@@ -1168,6 +1168,8 @@ function applyType() {
     // Garis bantu chart: level Trade Assistant + support/resistance (dari server).
     // Dipanggil SETELAH tradePlan terisi supaya tidak kena TDZ (variabel dideklarasikan di atas).
     chart.setGuides(buildGuides(tradePlan, (typeof LIVE !== "undefined" && LIVE.entryFor) ? (LIVE.entryFor(state.asset, state.interval) || {}).disp : null, O));
+    // pola candle (price action) dari server -> marker di chart
+    chart.setPatterns((typeof LIVE !== "undefined" && LIVE.entryFor) ? ((LIVE.entryFor(state.asset, state.interval) || {}).disp || {}).patterns : null);
 
     updateSignal({
       zone, momentum, rsi, verdict: finalVerdict, mode, trendBias, aligned, conf,
@@ -3176,6 +3178,7 @@ function renderDual(force) {
       const oDual = (m && m.O != null) ? m.O : sessionLock(a, dur, now);
       ch.setDecision(oDual);
       ch.setGuides(buildGuides(m && m.plan ? m.plan : null, m ? m.disp : null, oDual));
+      ch.setPatterns(m && m.disp ? m.disp.patterns : null);
       ch.setPrediction(graded ? dir : null, m ? m.O : null);
       ch.setCurrentPrice(px);
       // OVERLAY LENGKAP seperti chart mobile: garis proyeksi ke settlement + garis tren

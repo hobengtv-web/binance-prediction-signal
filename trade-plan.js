@@ -301,7 +301,8 @@ function computeTradePlan(bias, ctx) {
     // ---------------- PHASE 2: position open ----------------
     if (_simple) {
       const hybEarly = TA.HYBRID && ((capturedPct >= TA.HYB_MIN_CAP_PCT) || (trailRetracePct != null && trailRetracePct >= TA.HYB_MIN_RETRACE_PCT));
-      if (trailArmed && trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT && (trailHeldMs >= TA.TRAIL_MIN_HOLD_MS || hybEarly)) {
+      const beHit = TA.BE_STOP && trailArmed && capturedPct <= 0;   // break-even stop (proteksi)
+      if (trailArmed && trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT && (trailHeldMs >= TA.TRAIL_MIN_HOLD_MS || hybEarly || beHit)) {
         state = "CLOSE"; cls = "exit";
         action = `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${TA.TRAIL_CB_PCT}%) · profit ${capturedPct}% dari potensi`;
       } else {

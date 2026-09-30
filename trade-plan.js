@@ -204,6 +204,8 @@ function computeTradePlan(bias, ctx) {
   const exitLeg = ctx.exitLeg || 0;
   const newPeakHigher = !!ctx.newPeakHigher;
   const retrace2Pct = (ctx.retrace2Pct != null) ? ctx.retrace2Pct : null;
+  const trailArmed = !!ctx.trailArmed;
+  const trailRetracePct = (ctx.trailRetracePct != null) ? ctx.trailRetracePct : null;
 
   // momentum in favour (only used in PHASE 2)
   let fs = 0; const why = [];
@@ -348,7 +350,16 @@ function computeTradePlan(bias, ctx) {
       const whyClose = ctx.retreat ? "harga mundur dari puncak" : "trail puncak tersentuh";
       // Reversal NYATA (bukan sekadar "retreat + risiko") yang boleh memaksa leg-1 lebih awal.
       const realRev = histFlippedNow && ofiStrongAgainst;
-      if (exitLeg === 0) {
+      if (TA.TRAIL_MODE && trailArmed) {
+        // EXIT TRAILING: jual (100%) saat harga mundur >= CB% dari puncak; selama belum -> TAHAN (ikuti puncak).
+        if (trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT) {
+          state = "CLOSE"; cls = "exit";
+          action = `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${TA.TRAIL_CB_PCT}%) · profit ${capturedPct}% dari potensi`;
+        } else {
+          state = "HOLD"; cls = "entry";
+          action = `TAHAN (TRAIL armed) — ikuti puncak; jual bila mundur ${TA.TRAIL_CB_PCT}% dari puncak`;
+        }
+      } else if (exitLeg === 0) {
         // LEG-1: jual SEBAGIAN (50%) hanya bila profit sudah >= ambang ATAU reversal NYATA.
         // (Emergency lama tidak lagi menutup posisi prematur -> hindari kehilangan potensi profit besar.)
         if (closeSignal && (capturedPct >= TA.EARLYCLOSE_MIN_CAPTURED_PCT || realRev)) {
@@ -451,6 +462,18 @@ function buildPlan(input) {
   const retrace2Pct = (C || 0) ? ((peakFavor - favor) / C * 100) : 0;      // mundur dari puncak (favorable)
   const newPeakPct = (C || 0) ? ((peakFavor - peakAtLeg1) / C * 100) : 0;  // puncak baru vs puncak saat leg-1
   const newPeakHigher = exitLeg >= 1 && newPeakPct >= TA.CLOSE2_MIN_NEW_PEAK_PCT;
+  // ===== TRAILING EXIT: arm saat profit>=ARM% ATAU sentuh lock; lalu jual saat mundur >= CB% dari puncak =====
+  if (!state.trailArmed) state.trailArmed = {};
+  const _ent0 = state.entered[key];
+  const entPx = _ent0 ? _ent0.price : null;
+  const contT = taUp ? O * 1.0005 : O * 0.9995;
+  const pot = (entPx != null) ? Math.abs(contT - entPx) : null;
+  const traveled = (entPx != null) ? (taUp ? (C - entPx) : (entPx - C)) : null;
+  const capturedPct2 = (pot && pot > C * 0.00001) ? (traveled / pot) * 100 : (traveled > 0 ? 100 : 0);
+  const lockTouch = taUp ? (C >= O) : (C <= O);
+  const trailArmed = state.trailArmed[key] || (capturedPct2 >= TA.TRAIL_ARM_PCT) || lockTouch;
+  state.trailArmed[key] = trailArmed;
+  const trailRetracePct = (C || 0) ? ((peakFavor - favor) / C * 100) : 0;
 
   const turn = turnEvidence(taUp, { slope, slopeRecent, ofiShort, win });
   const fade = fadeEvidence(taUp, { slope, slopeRecent, ofiShort, retreat, rsi });
@@ -471,7 +494,7 @@ function buildPlan(input) {
   const plan = computeTradePlan(bias, {
     tf: input.tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
     entered, turn, fade, trail, retreatStd, retraceFromPeakPct, extremeDepthPct,
-    exitLeg, newPeakHigher, retrace2Pct,
+    exitLeg, newPeakHigher, retrace2Pct, trailArmed, trailRetracePct,
     durMs: input.durMs, remainMs: input.remainMs,   // gate waktu entry
     entryPrice: state.entered[key] ? state.entered[key].price : null,   // harga entry posisi (untuk kedalaman CUT)
     dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,
@@ -495,6 +518,7 @@ function buildPlan(input) {
     delete state.entered[key]; delete state.closed[key];
     if (state.exitLeg) delete state.exitLeg[key];
     if (state.peakAtLeg1) delete state.peakAtLeg1[key];
+    if (state.trailArmed) delete state.trailArmed[key];
   }
   if ((plan.state === "CLOSE" || plan.state === "CLOSE2" || plan.state === "STAND_DOWN") && !state.closed[key]) {
     state.closed[key] = { at: now, price: C, reason: plan.state === "STAND_DOWN" ? "cut" : (plan.state === "CLOSE2" ? "close2" : "close") };

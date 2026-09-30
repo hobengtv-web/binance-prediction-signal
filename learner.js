@@ -27,6 +27,10 @@ const bHour = (h) => (h == null ? "na" : h < 4 ? "0-3" : h < 8 ? "4-7" : h < 12 
 const bHist = (s) => (s == null ? "na" : s < 10 ? "<10" : s < 20 ? "10-20" : ">20");
 const bGap = (g) => (g == null ? "na" : g < 0.005 ? "<0.005" : g < 0.01 ? "0.005-0.01" : g < 0.02 ? "0.01-0.02" : g < 0.035 ? "0.02-0.035" : ">0.035");
 const isBucket = (v) => typeof v === "string" && /[<>\-]/.test(v);
+/* ---------- bucket khusus TRADE ASSISTANT ---------- */
+const bDepth = (v) => (v == null ? "na" : v < 0.02 ? "<0.02" : v < 0.03 ? "0.02-0.03" : v < 0.05 ? "0.03-0.05" : ">=0.05");
+const bRetr = (v) => (v == null ? "na" : v < 0.02 ? "<0.02" : v < 0.03 ? "0.02-0.03" : v < 0.05 ? "0.03-0.05" : ">=0.05");
+const bRemain = (v) => (v == null ? "na" : v < 60 ? "<60" : v < 120 ? "60-120" : v < 180 ? "120-180" : ">=180");
 
 /* ---------- record ledger -> baris fitur ---------- */
 // CANONICAL_MAX_MS: sinyal yang dipakai belajar = capture paling dekat ke detik ke-2.
@@ -48,6 +52,13 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
     const canonical = off != null ? off <= CANONICAL_MAX_MS : (s.minuteIn == null || s.minuteIn <= 1);
     if (!canonical && !includeLate) { skipped.late++; continue; }
     const gapRaw = (s.learn && isBucket(s.learn.gap)) ? s.learn.gap : bGap(s.rewardPct != null ? Math.abs(s.rewardPct) : null);
+    // ===== METRIK TRADE ASSISTANT (dari res.trade; hanya ada pada sesi setelah fitur ini live) =====
+    const tr = r.res.trade || {};
+    const dirUp = dir === "up";
+    const pot = (tr.entryPrice != null && r.res.lock != null) ? (dirUp ? (r.res.lock - tr.entryPrice) : (tr.entryPrice - r.res.lock)) : null;
+    const gain = (tr.closed && tr.closePrice != null && tr.entryPrice != null) ? (dirUp ? (tr.closePrice - tr.entryPrice) : (tr.entryPrice - tr.closePrice)) : null;
+    const capturePct = (gain != null && pot && pot > 0) ? (gain / pot * 100) : null;
+    const pnlPct = (gain != null && tr.entryPrice) ? (gain / tr.entryPrice * 100) : null;
     out.push({
       t0: r.t0, asset: r.asset, interval: r.interval,
       symbol: r.asset, mode: s.mode || "na",
@@ -71,6 +82,18 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       won: r.res.won === 1 ? 1 : 0,
       touch: r.res.touch === 1 ? 1 : 0,
       mfeFav: r.res.mfeFav, maeFav: r.res.maeFav,
+      // ===== TA =====
+      taEntered: !!tr.entered, taClosed: !!tr.closed,
+      entryRNow: typeof tr.entryRNow === "number" ? tr.entryRNow : null,
+      entryRetrace: typeof tr.entryRetrace === "number" ? tr.entryRetrace : null,
+      entryExtremeDepth: typeof tr.entryExtremeDepth === "number" ? tr.entryExtremeDepth : null,
+      entryRemainSec: typeof tr.entryRemainSec === "number" ? tr.entryRemainSec : null,
+      closeReason: tr.closeReason || null,
+      taVer: tr.taVer || null,
+      capturePct: capturePct != null ? +capturePct.toFixed(3) : null,
+      pnlPct: pnlPct != null ? +pnlPct.toFixed(4) : null,
+      taWin: (pnlPct != null) ? (pnlPct > 0 ? 1 : 0) : null,
+      taCapWin: (capturePct != null) ? (capturePct >= 50 ? 1 : 0) : null,
     });
   }
   out.sort((a, b) => a.t0 - b.t0);
@@ -82,6 +105,24 @@ const GATE_FEATS = { interval: (r) => r.interval, symbol: (r) => r.symbol, mode:
 const TOUCH_FEATS = { interval: (r) => r.interval, symbol: (r) => r.symbol, gap: (r) => r.gap, hour: (r) => r.hour, dir: (r) => r.dir };
 const GATE_PAIRS = [["interval", "minute"], ["interval", "vol"], ["rsi", "trend"], ["symbol", "hour"], ["interval", "rsi"], ["hist", "trend"], ["minute", "vol"]];
 const TOUCH_PAIRS = [["interval", "gap"], ["symbol", "gap"], ["hour", "gap"], ["dir", "gap"], ["interval", "hour"]];
+
+/* ---------- fitur & OBJEKTIF TRADE ASSISTANT ---------- */
+// Objektif TA = keberhasilan TRADE (pnlPct>0), BUKAN arah sesi (`won`).
+const TA_FEATS = {
+  interval: (r) => r.interval, symbol: (r) => r.symbol, dir: (r) => r.dir, mode: (r) => r.mode,
+  minute: (r) => r.minute, rsi: (r) => r.rsi, vol: (r) => r.vol, hour: (r) => r.hour,
+  depth: (r) => bDepth(r.entryRNow), retrace: (r) => bRetr(r.entryRetrace),
+  remain: (r) => bRemain(r.entryRemainSec), exit: (r) => r.closeReason || "na",
+};
+const TA_PAIRS = [["interval", "depth"], ["dir", "retrace"], ["interval", "remain"], ["mode", "depth"], ["dir", "exit"], ["interval", "exit"], ["symbol", "depth"], ["minute", "depth"]];
+function mineTA(train, test, opts = {}) {
+  const o = Object.assign({ minTrain: 20, minTest: 10 }, opts);
+  const only = (rows) => rows.filter((r) => r.taEntered && r.taWin != null);
+  const bt = only(train), be = only(test);
+  const base = bt.length ? bt.reduce((a, r) => a + r.taWin, 0) / bt.length : 0;
+  const rules = mineRules(bt, be, TA_FEATS, TA_PAIRS, base, "taWin", o);
+  return { base, nTrain: bt.length, nTest: be.length, rules };
+}
 
 const groupBy = (rr, kf) => { const m = new Map(); for (const r of rr) { const k = kf(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); } return m; };
 const mkKey = (feats, FEATS) => (r) => feats.map((f) => `${f}=${FEATS[f](r)}`).join("&");
@@ -272,4 +313,4 @@ function shouldPromote(candidate, incumbent, minTake = 40) {
   return { promote: false, why: `skor kandidat ${c.score} tidak mengalahkan insiden ${i.score}` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, shouldPromote, blockersOf, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, shouldPromote, blockersOf, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

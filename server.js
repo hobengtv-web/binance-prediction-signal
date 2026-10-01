@@ -274,15 +274,20 @@ function mergeRecord(r) {
   if (!r.sig && !prev.sig) return false;                 // tanpa fitur -> tidak berguna
   const merged = Object.assign({}, prev, r);
   const off = (s) => (s && typeof s.capOffsetMs === "number" ? s.capOffsetMs : Infinity);
+  // PENTING: `sig` dan `gate` HARUS berasal dari SUMBER YANG SAMA. Sebelumnya `Object.assign`
+  // selalu memakai `gate` dari record masuk, padahal `sig` bisa menang dari record lama ->
+  // 87/1684 record punya sig.accepted != gate.accepted (label learner jadi tidak konsisten).
   if (prev.sig && r.sig) {
     if (off(r.sig) < off(prev.sig)) {
       merged.sig = r.sig;
-      merged.alts = (prev.alts || []).concat([{ capOffsetMs: off(prev.sig), sig: prev.sig }]).slice(-6);
+      if (r.gate) merged.gate = r.gate;                     // pasangkan gate dgn sig yang menang
+      merged.alts = (prev.alts || []).concat([{ capOffsetMs: off(prev.sig), sig: prev.sig, gate: prev.gate }]).slice(-6);
     } else {
       merged.sig = prev.sig;
-      merged.alts = (prev.alts || []).concat([{ capOffsetMs: off(r.sig), sig: r.sig }]).slice(-6);
+      if (prev.gate) merged.gate = prev.gate;               // pasangkan gate dgn sig yang menang
+      merged.alts = (prev.alts || []).concat([{ capOffsetMs: off(r.sig), sig: r.sig, gate: r.gate }]).slice(-6);
     }
-  } else if (prev.sig) merged.sig = prev.sig;
+  } else if (prev.sig) { merged.sig = prev.sig; if (prev.gate) merged.gate = prev.gate; }
   if (prev.res && !r.res) merged.res = prev.res;
   // JANGAN BUANG status Trade Assistant. Klien juga mengirim `res` (hasil dari jalur 1s yang
   // lebih presisi) TANPA field `trade`, sehingga saat res klien menimpa res server, catatan

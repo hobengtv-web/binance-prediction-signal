@@ -3518,14 +3518,21 @@ function renderConfidenceReport() {
       // E (entry): undefined = tidak ada entry (abu); 1 = entry & target LOCK tercapai (hijau);
       //            0 = entry tapi LOCK tidak pernah tersentuh sampai sesi tutup (merah).
       const e = (tr && tr.entered) ? (tr.entryTouch ? 1 : 0) : undefined;
-      // C (early close): undefined = tidak ada posisi (abu); 1 = early close ter-signal (hijau);
-      //                  0 = posisi terbuka tapi early close tidak pernah ter-signal (merah).
-      const c = (tr && tr.entered) ? (tr.closed ? 1 : 0) : undefined;
+      // C (early close): undefined = tidak ada posisi (abu); 1 = SUKSES (hijau);
+      //                  0 = posisi terbuka & gagal (merah).
+      // SUKSES mencakup DUA hal:
+      //   (a) early close ter-signal TA (tr.closed), ATAU
+      //   (b) posisi TIDAK ter-close dini tetapi sesi berakhir MENANG karena arah harga sesuai
+      //       signal/predict (settle otomatis saat durasi habis) -> dihitung sukses (hijau),
+      //       bukan "Close Failed".
+      const settledWinC = !!(res && res.won === 1);
+      const c = (tr && tr.entered) ? ((tr.closed || settledWinC) ? 1 : 0) : undefined;
+      const cSettle = !!(tr && tr.entered && !tr.closed && settledWinC);   // menang via settle, bukan early close
       return {
         asset: r.asset, interval: r.interval, dir,
         won: (res && res.won != null) ? res.won : undefined,
         lock: res ? res.lock : sig.lock, close: res ? res.close : null,
-        actual: res ? res.actual : null, e, c, tradeState, t0Sec: r.t0,
+        actual: res ? res.actual : null, e, c, cSettle, tradeState, t0Sec: r.t0,
         eAt: (tr && tr.entryTouchAt) ? tr.entryTouchAt * 1000 : null,
         cAt: (tr && tr.closeAt) ? tr.closeAt : null,
       };
@@ -3565,8 +3572,9 @@ function renderConfidenceReport() {
       : (r.e ? `target LOCK tercapai${r.eAt ? " (" + jamAt(r.eAt) + ")" : ""}`
              : "LOCK tidak tersentuh setelah entry");
     const cTxt = r.c === undefined ? naTxt
-      : (r.c ? `ter-signal${r.cAt ? " (" + jamAt(r.cAt) + ")" : ""}`
-             : "tidak ter-signal (posisi terbuka)");
+      : (r.c ? (r.cSettle ? "close otomatis di akhir durasi (settle MENANG sesuai arah signal)"
+                          : `early close ter-signal${r.cAt ? " (" + jamAt(r.cAt) + ")" : ""}`)
+             : "tidak ter-signal & sesi berakhir kalah");
     const eCls = r.e === undefined ? "dot-pending" : (r.e ? "dot-win" : "dot-lose");
     const cCls = r.c === undefined ? "dot-pending" : (r.c ? "dot-win" : "dot-lose");
     // jam sesi ditampilkan di tooltip supaya dua sesi berdampingan yang tampak kembar

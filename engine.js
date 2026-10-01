@@ -44,6 +44,7 @@ const TFS = ["5m", "15m", "1h"];
 
 function createEngine(deps) {
   const { getKlines, getModel, getGates, log = console.log } = deps;
+  const tfsOf = (sym) => (sym === "BNB" ? ["5m"] : TFS);   // BNB hanya 5m
   const market = { BTC: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 },
                    ETH: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 },
                    BNB: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 } };
@@ -175,7 +176,7 @@ function createEngine(deps) {
     m.ones = await getKlines(sym, "1s", nowSec, 130);      // cukup utk t0..t0+1 + 60s sigma
     FLOW.addKlines(sym, m.ones);                            // OFI dari REST (WS diblok di Railway)
     pushSeries(sym, m.ones);                                // window 5s + deret close (trail)
-    for (const tf of TFS) m.tf[tf] = await getKlines(sym, tf, nowSec, 60);   // termasuk candle sesi berjalan
+    for (const tf of tfsOf(sym)) m.tf[tf] = await getKlines(sym, tf, nowSec, 60);   // termasuk candle sesi berjalan
     m.five5m = m.tf["5m"] || [];                            // RSI 5m (tanpa fetch tambahan)
   }
 
@@ -361,7 +362,7 @@ function createEngine(deps) {
       const profile = (typeof getGates === "function" ? getGates() : null) || GATES_DEF.BOOTSTRAP;
       for (const sym of ["BTC", "ETH", "BNB"]) {
         try { await refresh(sym); } catch (e) { stats.errors++; stats.lastErr = e && e.message; continue; }
-        for (const tf of TFS) {
+        for (const tf of tfsOf(sym)) {
           const t0 = Math.floor(nowSec / DUR_S[tf]) * DUR_S[tf];
           if (nowSec - t0 < 3) continue;                    // tunggu detik ke-2 selesai
           const cur = session[sym][tf];
@@ -397,7 +398,7 @@ function createEngine(deps) {
         // dan feasibilitas berubah tiap detik. Jadi keduanya dihitung ULANG di sini setiap tick
         // (bukan memakai hasil saat lock) supaya angka yang dikirim = keadaan sekarang.
         // simpan state (entry/close/dwell) ke volume — throttle 3 detik di dalam saveState()
-        for (const tf of TFS) {
+        for (const tf of tfsOf(sym)) {
           const durS = DUR_S[tf] || 300;
           const t0Live = Math.floor(nowSec / durS) * durS;
           const cur = session[sym][tf];

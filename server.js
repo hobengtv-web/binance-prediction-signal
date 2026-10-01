@@ -471,7 +471,7 @@ setInterval(() => {
 const BN_HOSTS = ["wss://data-stream.binance.vision", "wss://stream.binance.com:9443"];
 
 const INTERVAL_MS = { "5m": 300000, "15m": 900000, "1h": 3600000 };
-const lockPrices = { BTC: {}, ETH: {} };
+const lockPrices = { BTC: {}, ETH: {}, BNB: {} };
 
 function getRoundStart(tf, now) {
   const dur = INTERVAL_MS[tf] || 300000;

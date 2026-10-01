@@ -180,8 +180,9 @@ function createCapture(deps) {
     busy = true;
     try {
       const now = Date.now();
-      for (const sym of ["BTC", "ETH"]) {
+      for (const sym of ["BTC", "ETH", "BNB"]) {
         for (const tf of Object.keys(DUR_S)) {
+          if (sym === "BNB" && tf !== "5m") continue;         // BNB hanya 5m (selaras engine/bot)
           const durMs = DUR_S[tf] * 1000;
           const t0 = Math.floor(now / durMs) * durMs;
           const off = now - t0;

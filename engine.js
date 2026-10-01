@@ -479,7 +479,7 @@ function createEngine(deps) {
       const sig = sameSession ? sess.signal : null;
       // Semua tf dilayani server (lihat TFS) -> klien tidak perlu menghitung sinyal sendiri.
       const all = {};
-      for (const t of TFS) all[t] = tfEntry(sym, t, px);
+      for (const t of tfsOf(sym)) all[t] = tfEntry(sym, t, px);
       out.assets[sym] = {
         all,
         price: px,

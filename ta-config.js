@@ -13,8 +13,8 @@ const CFG = {
   DWELL_ENTRY_MS: num(process.env.TA_DWELL_ENTRY_MS, 2000),          // peak/turn harus bertahan (ms)
   DWELL_AVG_MS: num(process.env.TA_DWELL_AVG_MS, 15000),             // averaging: hold (ms)
   DWELL_CLOSE_MS: num(process.env.TA_DWELL_CLOSE_MS, 10000),         // fade close: hold (ms)
-  ENTRY_RETRACE_PCT: num(process.env.TA_ENTRY_RETRACE_PCT, 0.02),    // retrace dari ekstrem contra (%)
-  ENTRY_MIN_EXTREME_PCT: num(process.env.TA_ENTRY_MIN_EXTREME_PCT, 0.03), // kedalaman ekstrem minimal (%)
+  ENTRY_RETRACE_PCT: num(process.env.TA_ENTRY_RETRACE_PCT, 0.025),   // retrace dari ekstrem contra (%) — 0.025 = ambang terpilih (DD 49%->27%)
+  ENTRY_MIN_EXTREME_PCT: num(process.env.TA_ENTRY_MIN_EXTREME_PCT, 0.04), // kedalaman ekstrem minimal (%) — 0.04 = ambang terpilih
   CUT_MIN_REMAIN_SEC: num(process.env.TA_CUT_MIN_REMAIN_SEC, 120),   // CUT hanya bila sisa sesi < ini (detik)
   EARLYCLOSE_MIN_CAPTURED_PCT: num(process.env.TA_EARLYCLOSE_MIN_CAPTURED_PCT, 70), // early close min % potensi
   ENTRY_MIN_REMAIN_SEC: num(process.env.TA_ENTRY_MIN_REMAIN_SEC, 120), // entry butuh sisa sesi >= ini

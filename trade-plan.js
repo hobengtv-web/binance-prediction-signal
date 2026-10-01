@@ -195,7 +195,20 @@ function computeTradePlan(bias, ctx) {
   const ofiTowardStrong = ctx.ofiShort != null && (isUp ? ctx.ofiShort > 0.25 : ctx.ofiShort < -0.25);
   const extremeReversal = turn.count >= 3 && ofiTowardStrong;
   const timeTooShort = remainSecNow != null && remainSecNow < minRemainSec;
-  const blockLateEntry = timeTooShort && !extremeReversal;
+
+  // ===== KELAYAKAN JARAK KE TARGET (LOCK) vs SISA WAKTU =====
+  // Sebelumnya "reversal ekstrem" boleh menembus gate waktu TANPA memeriksa jarak: TA bisa
+  // memancarkan ENTRY walau harga masih sangat jauh dari LOCK dan sisa waktu tak cukup untuk
+  // mencapainya (target berbasis lock = sumber profit). Sekarang jarak diperhitungkan:
+  //   needSigma = |jarak LOCK| / sigma        (sigma = dispersi candle 5m, satuan harga)
+  //   batas     = LATE_FEASIBLE_SIGMA * sqrt(sisa/300s)   (makin sedikit waktu -> makin ketat)
+  const sigmaSafe = Math.max(sigma, 1e-9);
+  const needSigmaLate = Math.abs(adverse) / sigmaSafe;
+  const timeFactorLate = Math.sqrt(Math.max(1, remainSecNow != null ? remainSecNow : 300) / 300);
+  const lateSigmaLimit = TA.LATE_FEASIBLE_SIGMA * timeFactorLate;
+  const feasibleLate = needSigmaLate <= lateSigmaLimit;
+  const feasOn = !!TA.LATE_FEASIBILITY;
+  const blockLateEntry = timeTooShort && !(extremeReversal && (!feasOn || feasibleLate));
   // Menambah posisi (L2/L3) TIDAK punya pengecualian: menambah di detik-detik akhir sesi tetap
   // berisiko (kasus nyata: sisa <1 menit & harga stabil di contra -> berakhir loss).
   const blockLateAdd = remainSecNow != null && remainSecNow < minRemainSec;
@@ -281,6 +294,7 @@ function computeTradePlan(bias, ctx) {
       // Sisa waktu sesi tidak cukup untuk mencapai LOCK -> jangan entry sekarang.
       state = "WAIT"; cls = "wait";
       action = `TUNGGU — sisa sesi ${Math.round(remainSecNow)}s (minimal ${Math.round(minRemainSec)}s untuk capai lock ${fmtPrice(ctx.lock)}), jarak ${distToLockPct.toFixed(2)}%`
+        + (extremeReversal && !feasibleLate ? ` · TIDAK FEASIBLE: butuh ${needSigmaLate.toFixed(1)}σ, sisa waktu hanya cukup ${lateSigmaLimit.toFixed(1)}σ` : "")
         + `; entry hanya bila reversal EKSTREM terdeteksi`;
     } else if (!_simple && levels.rNow < Math.max(RLV[0], TA.ENTRY_MIN_NOW_PCT)) {
       // Kedalaman contra belum mencapai L1 (0,01%) -> entry terlalu dini: harga baru bergerak
@@ -296,7 +310,7 @@ function computeTradePlan(bias, ctx) {
       state = "ENTRY"; cls = "entry";
       nowEntered = true;
       action = `ENTRY SEKARANG ${bias.toUpperCase()} — peak contra terkonfirmasi (${rNowTxt}, ${partList(turn.parts)})`
-        + (timeTooShort ? ` [reversal ekstrem; sisa sesi ${Math.round(remainSecNow)}s]` : "");
+        + (timeTooShort ? ` [reversal ekstrem; sisa sesi ${Math.round(remainSecNow)}s · butuh ${needSigmaLate.toFixed(1)}σ ≤ ${lateSigmaLimit.toFixed(1)}σ]` : "");
     } else {
       state = "WAIT"; cls = "wait";
       action = `TUNGGU PEAK — harga contra ${rNowTxt}; ekstrem ${extremeDepthPct != null ? extremeDepthPct.toFixed(3) : "-"}%/${ENTRY_MIN_EXTREME_PCT}% · retrace ${retraceFromPeakPct != null ? retraceFromPeakPct.toFixed(3) : "-"}%/${ENTRY_RETRACE_PCT}%`;
@@ -436,7 +450,9 @@ function computeTradePlan(bias, ctx) {
     }
   }
   const CMD = { ENTRY: "ENTRY SEKARANG", AVERAGE: "TAMBAH ENTRY SEKARANG", HOLD: "HOLD", CAUTION: "SIAP CLOSE", CLOSE: "CLOSE SEKARANG", CLOSE2: "JUAL SISA SEKARANG", STAND_DOWN: "CUT SEKARANG", WAIT: "TUNGGU", HOLD_POS: "TUNGGU", NO_SIGNAL: "—" };
-  return { state, action, cls, tradeDir: bias, cmd: CMD[state] || state, levels, fs, cp, cont, adverseStd, favor, why, entered: nowEntered, turn, fade, dwellTurnMs: dwellTurn, dwellFadeMs: dwellFade };
+  return { state, action, cls, tradeDir: bias, cmd: CMD[state] || state, levels, fs, cp, cont, adverseStd, favor, why, entered: nowEntered, turn, fade, dwellTurnMs: dwellTurn, dwellFadeMs: dwellFade,
+           feas: { needSigma: +needSigmaLate.toFixed(2), timeFactor: +timeFactorLate.toFixed(3), limit: +lateSigmaLimit.toFixed(2),
+                   feasible: feasibleLate, on: feasOn, minRemain: Math.round(minRemainSec), remain: remainSecNow != null ? Math.round(remainSecNow) : null } };
 }
 
 

@@ -34,6 +34,9 @@ const CFG = {
   TRAIL_MIN_HOLD_MS: num(process.env.TA_TRAIL_MIN_HOLD_MS, 10000),   // min tahan sejak arm sebelum boleh exit (hindari prematur)
   TRAIL_STD_K: num(process.env.TA_TRAIL_STD_K, 0),                    // >0 = trailing ADAPTIF: ambang = max(CB, k x std) dalam % harga (0 = off)
   TRAIL_GIVEBACK_PCT: num(process.env.TA_TRAIL_GIVEBACK_PCT, 0),      // >0 = keluar bila harga memberi balik >= X% dari PUNCAK PROFIT (0 = off)
+  // ===== KELAYAKAN ENTRY DI AKHIR SESI (jarak ke LOCK vs sisa waktu) =====
+  LATE_FEASIBILITY: num(process.env.TA_LATE_FEASIBILITY, 1),          // 1 = tolak entry telat bila jarak ke LOCK tidak feasible
+  LATE_FEASIBLE_SIGMA: num(process.env.TA_LATE_FEASIBLE_SIGMA, 2.5),  // batas "sigma yang dibutuhkan" (skala dgn sqrt(sisa/300s))
   ENTRY_MIN_NOW_PCT: num(process.env.TA_ENTRY_MIN_NOW_PCT, 0.03),    // kedalaman contra SAAT INI minimal utk entry (jangan entry dekat lock)
 };
 

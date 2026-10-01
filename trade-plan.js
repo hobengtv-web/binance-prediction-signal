@@ -307,9 +307,24 @@ function computeTradePlan(bias, ctx) {
       const hybEarly = TA.HYBRID && ((capturedPct >= TA.HYB_MIN_CAP_PCT) || (trailRetracePct != null && trailRetracePct >= TA.HYB_MIN_RETRACE_PCT));
       const beHit = TA.BE_STOP && trailArmed && capturedPct <= 0;   // break-even stop (proteksi)
       const tpHit = TA.TP_CAP_PCT > 0 && trailArmed && capturedPct >= TA.TP_CAP_PCT;  // hard take-profit
-      if (trailArmed && (tpHit || (trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT)) && (trailHeldMs >= MIN_HOLD_TF || hybEarly || beHit || tpHit)) {
+      // ===== AMBANG TRAILING =====
+      // CB dasar boleh di-override per-TF (mis. 15m lebih lebar dari 5m) dan/atau dibuat ADAPTIF
+      // terhadap volatilitas: ambang = max(CB, k x std) dalam % harga. std berasal dari window 5m
+      // (satuan harga) -> dikonversi ke % harga dengan /C*100.
+      const _tf = input.tf;
+      const cbBase = (TA.PER_TF && _tf && TA.PER_TF[_tf] && TA.PER_TF[_tf].TRAIL_CB_PCT != null) ? TA.PER_TF[_tf].TRAIL_CB_PCT : TA.TRAIL_CB_PCT;
+      const cbStd = (TA.TRAIL_STD_K > 0 && std > 0 && C > 0) ? (TA.TRAIL_STD_K * std / C * 100) : 0;
+      const cbEff = Math.max(cbBase, cbStd);
+      // GIVE-BACK BUDGET: keluar bila harga memberi balik >= X% dari PUNCAK PROFIT (bukan % harga).
+      // Lebih langsung menyasar "exit terlalu dini": sekali profit besar, beri ruang sesuai besar profitnya.
+      const gbHit = !!(TA.TRAIL_GIVEBACK_PCT > 0 && peakFavor > 0 && favor < peakFavor
+        && ((peakFavor - favor) / peakFavor) * 100 >= TA.TRAIL_GIVEBACK_PCT);
+      const trailHitCond = (tpHit || gbHit || (trailRetracePct != null && trailRetracePct >= cbEff));
+      if (trailArmed && trailHitCond && (trailHeldMs >= MIN_HOLD_TF || hybEarly || beHit || tpHit || gbHit)) {
         state = "CLOSE"; cls = "exit";
-        action = tpHit ? `TRAIL EXIT (TP ${TA.TP_CAP_PCT}%) — profit ${capturedPct}% dari potensi` : `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${TA.TRAIL_CB_PCT}%) · profit ${capturedPct}% dari potensi`;
+        action = tpHit ? `TRAIL EXIT (TP ${TA.TP_CAP_PCT}%) — profit ${capturedPct}% dari potensi`
+          : gbHit ? `TRAIL EXIT (give-back ${TA.TRAIL_GIVEBACK_PCT}% dari puncak profit) — profit ${capturedPct}% dari potensi`
+          : `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${cbEff.toFixed(3)}%${cbStd > cbBase ? ` · adaptif k=${TA.TRAIL_STD_K}` : ""}) · profit ${capturedPct}% dari potensi`;
       } else {
         state = "HOLD"; cls = "entry";
         action = `TAHAN (TRAIL ${trailArmed ? "armed" : "-"}) — profit ${capturedPct}% dari potensi`;

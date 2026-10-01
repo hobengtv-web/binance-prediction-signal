@@ -32,14 +32,19 @@ const CFG = {
   TRAIL_ARM_PCT: num(process.env.TA_TRAIL_ARM_PCT, 40),              // arm saat profit >= X% potensi (atau sentuh lock)
   TRAIL_CB_PCT: num(process.env.TA_TRAIL_CB_PCT, 0.02),              // callback: jual saat mundur >= X% dari puncak
   TRAIL_MIN_HOLD_MS: num(process.env.TA_TRAIL_MIN_HOLD_MS, 10000),   // min tahan sejak arm sebelum boleh exit (hindari prematur)
+  TRAIL_STD_K: num(process.env.TA_TRAIL_STD_K, 0),                    // >0 = trailing ADAPTIF: ambang = max(CB, k x std) dalam % harga (0 = off)
+  TRAIL_GIVEBACK_PCT: num(process.env.TA_TRAIL_GIVEBACK_PCT, 0),      // >0 = keluar bila harga memberi balik >= X% dari PUNCAK PROFIT (0 = off)
   ENTRY_MIN_NOW_PCT: num(process.env.TA_ENTRY_MIN_NOW_PCT, 0.03),    // kedalaman contra SAAT INI minimal utk entry (jangan entry dekat lock)
 };
 
 // ===== OVERRIDE PER TIMEFRAME =====
 CFG.PER_TF = {
-  "5m":  { ENTRY_MIN_REMAIN_SEC: CFG.ENTRY_MIN_REMAIN_SEC, TRAIL_MIN_HOLD_MS: CFG.TRAIL_MIN_HOLD_MS },
-  "15m": { ENTRY_MIN_REMAIN_SEC: num(process.env.TA_15M_ENTRY_MIN_REMAIN_SEC, 180), TRAIL_MIN_HOLD_MS: num(process.env.TA_15M_TRAIL_MIN_HOLD_MS, 20000) },
-  "1h":  { ENTRY_MIN_REMAIN_SEC: num(process.env.TA_1H_ENTRY_MIN_REMAIN_SEC, 300), TRAIL_MIN_HOLD_MS: num(process.env.TA_1H_TRAIL_MIN_HOLD_MS, CFG.TRAIL_MIN_HOLD_MS) },
+  "5m":  { ENTRY_MIN_REMAIN_SEC: CFG.ENTRY_MIN_REMAIN_SEC, TRAIL_MIN_HOLD_MS: CFG.TRAIL_MIN_HOLD_MS,
+           TRAIL_CB_PCT: num(process.env.TA_5M_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT) },
+  "15m": { ENTRY_MIN_REMAIN_SEC: num(process.env.TA_15M_ENTRY_MIN_REMAIN_SEC, 180), TRAIL_MIN_HOLD_MS: num(process.env.TA_15M_TRAIL_MIN_HOLD_MS, 20000),
+           TRAIL_CB_PCT: num(process.env.TA_15M_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT) },
+  "1h":  { ENTRY_MIN_REMAIN_SEC: num(process.env.TA_1H_ENTRY_MIN_REMAIN_SEC, 300), TRAIL_MIN_HOLD_MS: num(process.env.TA_1H_TRAIL_MIN_HOLD_MS, CFG.TRAIL_MIN_HOLD_MS),
+           TRAIL_CB_PCT: num(process.env.TA_1H_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT) },
 };
 
 // Versi ringkas (hash) — berubah otomatis bila salah satu nilai berubah.

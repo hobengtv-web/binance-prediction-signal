@@ -305,7 +305,7 @@ body {
   #asset-seg { display: none; }
   .monitors { display: none; }                     /* superseded by the full dual view */
   .dual {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;
     padding: 8px 12px 14px; align-items: start;
   }
   /* the single-coin detail is replaced by the dual columns on wide screens */
@@ -328,6 +328,7 @@ body {
 /* --- 1. HEAD --- */
 .dc-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .dc-coin { font-weight: 800; font-size: 16px; letter-spacing: .04em; }
+.only-tag { font-size: 9px; font-weight: 800; letter-spacing: .06em; color: #0b0e11; background: #f0b90b; border-radius: 4px; padding: 1px 5px; vertical-align: middle; }
 .dc-price { font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
 .dc-chg { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .dc-chg.up { color: var(--up); } .dc-chg.down { color: var(--down); }

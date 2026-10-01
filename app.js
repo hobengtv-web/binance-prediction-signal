@@ -7,8 +7,9 @@
 const SYMBOLS = {
   BTC: "btcusdt",
   ETH: "ethusdt",
+  BNB: "bnbusdt",
 };
-const OB_SYMBOLS = { BTC: "BTCUSDT", ETH: "ETHUSDT" };  // Binance spot REST symbol format
+const OB_SYMBOLS = { BTC: "BTCUSDT", ETH: "ETHUSDT", BNB: "BNBUSDT" };  // Binance spot REST symbol format
 // Prediction round durations (lock period). Candle size is fixed 5s (aggregated from 1s).
 const INTERVALS = ["5m", "15m", "1h"];
 const INTERVAL_MS = { "5m": 300_000, "15m": 900_000, "1h": 3_600_000 };
@@ -35,10 +36,10 @@ const WARMUP_MS = 3 * 60 * 1000;
 // VOL_TYPICAL — volume "normal" per candle 5s tiap aset (kalibrasi: rata-rata 240 mnt / 12).
 // Dipakai sebagai referensi ABSOLUT agar pasar sepi/flat (vol rendah di mana pun) tetap terdeteksi
 // sebagai likuiditas rendah, bukan cuma dibandingkan ke candle sebelumnya (yang ikut sepi → relatif ~1).
-const VOL_TYPICAL = { BTC: 0.515, ETH: 8.22 };
+const VOL_TYPICAL = { BTC: 0.515, ETH: 8.22, BNB: 3.0 };
 // EXTEND — fraksi dari OPEN yg dianggap "fully extended" (harga sudah lari jauh dr open).
 // Dipakai sbg skala penalti jarak: BTC cenderung bergerak % lebih kecil dr ETH, hence beda nilai.
-const EXTEND = { BTC: 0.02, ETH: 0.025 };
+const EXTEND = { BTC: 0.02, ETH: 0.025, BNB: 0.025 };
 const TREND_SESSIONS = 3;  // akumulasi trend dari N sesi terakhir interval yg aktif (3 sesi 5m = 15m, dst)
 let confMode = "SIGNAL";  // mode CONFIDENCE: SIGNAL = otomatis counter-trend, UP/DOWN = paksa arah
 
@@ -62,12 +63,12 @@ const state = {
   type: "candle",
   // cache[symbol][interval] = { candles: [...], meta: {...} }
   cache: {},
-  ticker: { BTC: null, ETH: null },
-  orderbook: { BTC: null, ETH: null },
+  ticker: { BTC: null, ETH: null, BNB: null },
+  orderbook: { BTC: null, ETH: null, BNB: null },
   // executed order flow per minute: flow[sym][minuteStartSec] = { buy, sell, n }
-  flow: { BTC: {}, ETH: {} },
+  flow: { BTC: {}, ETH: {}, BNB: {} },
   // previous live price for gap sync
-  prevPrice: { BTC: null, ETH: null },
+  prevPrice: { BTC: null, ETH: null, BNB: null },
   connected: false,
   viaProxy: false,
 };
@@ -91,9 +92,11 @@ const CANDLE_SERIES = ["1s", "5s", "30s", "1m", "5m", "15m", "1h"];
 INTERVALS.forEach((tf) => {
   state.cache.BTC = state.cache.BTC || {};
   state.cache.ETH = state.cache.ETH || {};
+  state.cache.BNB = state.cache.BNB || {};
   CANDLE_SERIES.forEach((s) => {
     state.cache.BTC[s] = { candles: [], meta: null };
     state.cache.ETH[s] = { candles: [], meta: null };
+    state.cache.BNB[s] = { candles: [], meta: null };
   });
 });
 
@@ -343,7 +346,7 @@ function updateOfiFast() {
   const fA = fastOfiFor(a, state.interval);
   const dA = ofiDOM("s-ofi");
   paintOfi(fA, dA.fill, dA.sat, dA.val);
-  for (const sym of ["BTC", "ETH"]) {
+  for (const sym of ["BTC", "ETH", "BNB"]) {
     const f = fastOfiFor(sym, state.interval);
     const d = ofiDOM("dc-" + sym + "-ofi");
     paintOfi(f, d.fill, d.sat, d.val);
@@ -1369,7 +1372,7 @@ function applyType() {
         // AKTIF yang dipoll (500ms) sedangkan koin lain hanya mendapat data dari snapshot awal
         // -> bar orderbook koin non-aktif MACET. Sekarang keduanya dipoll saat tampilan dual.
         const wide = typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1100px)").matches;
-        const syms = wide ? ["BTC", "ETH"] : [state.asset];
+        const syms = wide ? ["BTC", "ETH", "BNB"] : [state.asset];
         await Promise.all(syms.map(async (sym) => {
           const binanceSym = OB_SYMBOLS[sym];
           if (!binanceSym) return;
@@ -1408,7 +1411,7 @@ function trendOfCandles(candles) {
 
 /* ----------------------- Header + Gap ----------------------- */
 function updateHeader() {
-  for (const sym of ["BTC", "ETH"]) {
+  for (const sym of ["BTC", "ETH", "BNB"]) {
     const t = state.ticker[sym];
     if (!t) continue;
     const p = document.getElementById(sym.toLowerCase() + "-price");
@@ -1619,7 +1622,7 @@ async function refreshTrends() {
     const r = await fetch("/api/snapshot", { cache: "no-store" });
     if (!r.ok) return;
     const j = await r.json();
-    for (const k of ["BTC", "ETH"]) for (const tf of ["5m", "15m", "1h"]) {
+    for (const k of ["BTC", "ETH", "BNB"]) for (const tf of ["5m", "15m", "1h"]) {
       const bars = j.candles[k][tf]; const store = state.cache[k][tf];
       bars.forEach((b) => {
         const arr = store.candles; const last = arr[arr.length - 1];
@@ -2594,7 +2597,7 @@ function renderMonitors(force) {
   _monLastAt = Date.now();
   const now = serverNow();
   const tf = state.interval;
-  const html = ["BTC", "ETH"].map((a) => {
+  const html = ["BTC", "ETH", "BNB"].map((a) => {
     const m = analyzeCoin(a, tf, now);
     const tick = state.ticker[a] || {};
     const px = m ? m.C : (tick.last || 0);
@@ -2699,10 +2702,10 @@ function buildDual() {
        5. PASAR     likuiditas & volume (ditonjolkan) + orderbook bar
        6. METRIK    sesi, indikator & order flow sebagai pasangan label:nilai
      Setiap blok dipisah garis + jarak konsisten supaya mata bisa memindai per blok. */
-  el.innerHTML = ["BTC", "ETH"].map((a) => `
+  el.innerHTML = ["BTC", "ETH", "BNB"].map((a) => `
     <div class="dual-col" id="dc-${a}-col">
       <div class="dc-head">
-        <span class="dc-coin">${a}</span>
+        <span class="dc-coin">${a}</span>${a === "BNB" ? ' <span class="only-tag">5M ONLY</span>' : ""}
         <span class="dc-price" id="dc-${a}-price">—</span>
         <span class="dc-chg" id="dc-${a}-chg"></span>
         <span class="dc-dusd" id="dc-${a}-dusd"></span>
@@ -2779,7 +2782,7 @@ function buildDual() {
       </div>
     </div>`).join("");
   dualCharts = {};
-  for (const a of ["BTC", "ETH"]) {
+  for (const a of ["BTC", "ETH", "BNB"]) {
     dualCharts[a] = new CanvasChart(document.getElementById(`dc-${a}-chart`));
     dualCharts[a].setType(state.type);
     dualCharts[a].fit();
@@ -2926,7 +2929,7 @@ function renderDual(force) {
   const sbNow = sessionBounds(dur, now);
   const remSec = Math.max(0, Math.round((sbNow.end - now) / 1000));
   const cdTxt = `${String(Math.floor(remSec / 60)).padStart(2, "0")}:${String(remSec % 60).padStart(2, "0")}`;
-  for (const a of ["BTC", "ETH"]) {
+  for (const a of ["BTC", "ETH", "BNB"]) {
     const m = analyzeCoin(a, tf, now);
     const tick = state.ticker[a] || {};
     const px = m ? m.C : (tick.last || 0);
@@ -3503,7 +3506,7 @@ function renderConfidenceReport() {
   }
 
   const tf = state.interval;
-  const COINS = ["BTC", "ETH"];
+  const COINS = ["BTC", "ETH", "BNB"];
   // Isi sisa lebar kartu (di layar lebar ~31 kolom @21px per blok koin). Kelebihannya bisa
   // di-scroll; di mobile default tampil dari KIRI = sesi TERBARU karena urutannya terbaru->lama.
   const PER_COIN = 40;
@@ -3727,6 +3730,16 @@ function bindControls() {
     const b = e.target.closest("[data-asset]"); if (!b) return;
     state.asset = b.dataset.asset;
     segActive("asset-seg", b);
+    // BNB hanya tersedia untuk durasi 5m -> paksa 5m & nonaktifkan 15m/1h
+    const tfSeg = document.getElementById("tf-seg");
+    if (state.asset === "BNB") {
+      state.interval = "5m";
+      if (tfSeg) for (const btn of tfSeg.querySelectorAll("[data-tf]")) { const on = btn.dataset.tf === "5m"; btn.classList.toggle("active", on); btn.disabled = !on; }
+      LIVE.connect("5m");
+    } else if (tfSeg) {
+      for (const btn of tfSeg.querySelectorAll("[data-tf]")) btn.disabled = false;
+      const act = tfSeg.querySelector(`[data-tf="${state.interval}"]`); if (act) act.classList.add("active");
+    }
     renderActive(); updateProjection(); updateMobilePrediction(); updateGap();
     renderConfidenceReport();
     historyExhausted[state.asset] = false;
@@ -4030,7 +4043,7 @@ window.addEventListener("focus", clearTitleFlash);
 window.__comboStatus = function () {
   const now = serverNow();
   const rows = [];
-  for (const sym of ["BTC", "ETH"]) {
+  for (const sym of ["BTC", "ETH", "BNB"]) {
     for (const tf of INTERVALS) {
       const dur = INTERVAL_MS[tf];
       const t0 = Math.floor(now / dur) * dur;

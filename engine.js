@@ -492,7 +492,7 @@ function createEngine(deps) {
       ts: now, tf, sessionT0: t0 / 1000,
       remainSec: Math.max(0, Math.round((t0 + durMs - now) / 1000)),
       source: "engine", assets: {},
-      tradeHours: (typeof TA !== "undefined" && TA.TRADE_HOURS) ? TA.TRADE_HOURS : null,
+      tradeHours: (require("./ta-config.js").TRADE_HOURS) || null,   // jam ON/OFF utk panel UI
     };
     for (const sym of ["BTC", "ETH", "BNB"]) {
       const ones = (market[sym] && market[sym].ones) || [];

@@ -175,6 +175,8 @@ function computeTradePlan(bias, ctx) {
   const ofiStrongAgainst = ctx.ofi != null && (isUp ? ctx.ofi < -0.25 : ctx.ofi > 0.25);
   const realReversal = histFlipped && ofiStrongAgainst;
   const _simple = !!TA.SIMPLE;   // mode test: entry depth+retrace, exit trailing saja
+  const MIN_REMAIN_TF = (TA.PER_TF && TA.PER_TF[ctx.tf] && TA.PER_TF[ctx.tf].ENTRY_MIN_REMAIN_SEC != null)
+    ? TA.PER_TF[ctx.tf].ENTRY_MIN_REMAIN_SEC : TA.ENTRY_MIN_REMAIN_SEC;
   // Evidence the move against the bias is about to turn back toward it.
   // Confirmation: >=2 independent evidence parts AND a minimum dwell time, so a single
   // noisy tick cannot trigger (too fast) and waiting never drags on (too late).
@@ -186,7 +188,7 @@ function computeTradePlan(bias, ctx) {
   const durMsNow = (ctx.durMs != null) ? ctx.durMs : ((DUR_SEC[ctx.tf] || 300) * 1000);
   const remainSecNow = (ctx.remainMs != null) ? ctx.remainMs / 1000 : null;
   const durSecNow = durMsNow / 1000;
-  const minRemainSec = Math.min(300, Math.max(TA.ENTRY_MIN_REMAIN_SEC, 0.35 * durSecNow));   // 5m->120s · 15m/1h->300s
+  const minRemainSec = Math.min(300, Math.max(MIN_REMAIN_TF, 0.35 * durSecNow));   // 5m->120s · 15m/1h->300s
   const distToLockPct = Math.abs(ctx.lock - ctx.price) / (ctx.price || 1) * 100;
   const ofiTowardStrong = ctx.ofiShort != null && (isUp ? ctx.ofiShort > 0.25 : ctx.ofiShort < -0.25);
   const extremeReversal = turn.count >= 3 && ofiTowardStrong;

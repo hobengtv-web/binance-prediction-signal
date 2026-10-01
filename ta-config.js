@@ -35,6 +35,13 @@ const CFG = {
   ENTRY_MIN_NOW_PCT: num(process.env.TA_ENTRY_MIN_NOW_PCT, 0.03),    // kedalaman contra SAAT INI minimal utk entry (jangan entry dekat lock)
 };
 
+// ===== OVERRIDE PER TIMEFRAME =====
+CFG.PER_TF = {
+  "5m":  { ENTRY_MIN_REMAIN_SEC: CFG.ENTRY_MIN_REMAIN_SEC },
+  "15m": { ENTRY_MIN_REMAIN_SEC: num(process.env.TA_15M_ENTRY_MIN_REMAIN_SEC, 180) },
+  "1h":  { ENTRY_MIN_REMAIN_SEC: num(process.env.TA_1H_ENTRY_MIN_REMAIN_SEC, 300) },
+};
+
 // Versi ringkas (hash) — berubah otomatis bila salah satu nilai berubah.
 CFG.VER = "ta" + crypto.createHash("md5").update(JSON.stringify(CFG)).digest("hex").slice(0, 8);
 

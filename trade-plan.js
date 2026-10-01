@@ -177,6 +177,8 @@ function computeTradePlan(bias, ctx) {
   const _simple = !!TA.SIMPLE;   // mode test: entry depth+retrace, exit trailing saja
   const MIN_REMAIN_TF = (TA.PER_TF && TA.PER_TF[ctx.tf] && TA.PER_TF[ctx.tf].ENTRY_MIN_REMAIN_SEC != null)
     ? TA.PER_TF[ctx.tf].ENTRY_MIN_REMAIN_SEC : TA.ENTRY_MIN_REMAIN_SEC;
+  const MIN_HOLD_TF = (TA.PER_TF && TA.PER_TF[ctx.tf] && TA.PER_TF[ctx.tf].TRAIL_MIN_HOLD_MS != null)
+    ? TA.PER_TF[ctx.tf].TRAIL_MIN_HOLD_MS : TA.TRAIL_MIN_HOLD_MS;
   // Evidence the move against the bias is about to turn back toward it.
   // Confirmation: >=2 independent evidence parts AND a minimum dwell time, so a single
   // noisy tick cannot trigger (too fast) and waiting never drags on (too late).
@@ -305,7 +307,7 @@ function computeTradePlan(bias, ctx) {
       const hybEarly = TA.HYBRID && ((capturedPct >= TA.HYB_MIN_CAP_PCT) || (trailRetracePct != null && trailRetracePct >= TA.HYB_MIN_RETRACE_PCT));
       const beHit = TA.BE_STOP && trailArmed && capturedPct <= 0;   // break-even stop (proteksi)
       const tpHit = TA.TP_CAP_PCT > 0 && trailArmed && capturedPct >= TA.TP_CAP_PCT;  // hard take-profit
-      if (trailArmed && (tpHit || (trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT)) && (trailHeldMs >= TA.TRAIL_MIN_HOLD_MS || hybEarly || beHit || tpHit)) {
+      if (trailArmed && (tpHit || (trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT)) && (trailHeldMs >= MIN_HOLD_TF || hybEarly || beHit || tpHit)) {
         state = "CLOSE"; cls = "exit";
         action = tpHit ? `TRAIL EXIT (TP ${TA.TP_CAP_PCT}%) — profit ${capturedPct}% dari potensi` : `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${TA.TRAIL_CB_PCT}%) · profit ${capturedPct}% dari potensi`;
       } else {

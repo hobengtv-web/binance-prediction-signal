@@ -422,6 +422,7 @@ const engine = createEngine({
   getModel: (part) => readModelPart(part),
   getGates: () => readGates(),
   log: console.log,
+  onEvent: (ev) => broadcastTA(ev),
 });
 engine.start();
 // Jadwal: setiap jam, tapi hanya menjalankan re-fit sekali per hari pada REFIT_HOUR (default 03:00 WIB/server).
@@ -481,6 +482,12 @@ function getRoundStart(tf, now) {
 function broadcast(type, data) {
   const payload = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
   clients.forEach((res) => { try { res.write(payload); } catch (_) {} });
+}
+// Klien stream khusus EVENT Trade Assistant (dipakai bot untuk eksekusi latensi rendah).
+const taClients = new Set();
+function broadcastTA(ev) {
+  const payload = `event: ta\ndata: ${JSON.stringify(ev)}\n\n`;
+  taClients.forEach((res) => { try { res.write(payload); } catch (_) {} });
 }
 
 function startBinance() {
@@ -654,6 +661,26 @@ http.createServer(async (req, res) => {
     req.on("close", stop); req.on("error", stop); res.on("close", stop);
     return;
   }
+  // ===== STREAM EVENT TA (untuk bot: ENTRY/EXIT tepat saat transisi) =====
+  // Sengaja TANPA snapshot: koneksi ringan & persisten, hanya menerima event transisi.
+  if (u.pathname === "/api/ta-stream") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+      "X-Accel-Buffering": "no",
+    });
+    res.write("retry: 1000\n\n");
+    const release = engine.addSubscriber();                       // paksa engine polling penuh
+    try { res.write(`event: hello\ndata: ${JSON.stringify({ at: Date.now() })}\n\n`); } catch (_) {}
+    taClients.add(res);
+    const ka = setInterval(() => { try { res.write(": ka\n\n"); } catch (_) {} }, 15000);
+    const stop = () => { clearInterval(ka); taClients.delete(res); release(); };
+    req.on("close", stop); req.on("error", stop); res.on("close", stop);
+    return;
+  }
+
   // Snapshot sinyal sebagai JSON (fallback non-SSE + untuk debugging/monitoring)
   if (u.pathname === "/api/signal") {
     const tfArg = u.searchParams.get("tf");

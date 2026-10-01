@@ -43,7 +43,7 @@ const SignalCore = require("./signal-core.js");
 const TFS = ["5m", "15m", "1h"];
 
 function createEngine(deps) {
-  const { getKlines, getModel, getGates, log = console.log } = deps;
+  const { getKlines, getModel, getGates, log = console.log, onEvent = null } = deps;
   const tfsOf = (sym) => (sym === "BNB" ? ["5m"] : TFS);   // BNB hanya 5m
   const market = { BTC: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 },
                    ETH: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 },
@@ -412,6 +412,28 @@ function createEngine(deps) {
             cur.mobilePred = computeMobilePred(sym, tf, t0Live, market[sym]);
             cur.disp = computeDisp(sym, tf, t0Live, nowSec, cur.signal, market[sym], cur.plan);
           } catch (e) { stats.errors++; stats.lastErr = e && e.message; }
+          // ===== EVENT PUSH (latensi rendah untuk konsumen otomatis, mis. bot) =====
+          // Emisi HANYA pada TRANSISI (false->true) supaya tidak spam. Konsumen tidak perlu polling
+          // lagi -> gap ke marker chart = waktu jaringan + waktu order saja.
+          if (onEvent && cur.signal) {
+            const eOK = !!(cur.plan && cur.plan.statusEntry && cur.plan.statusEntry.ok);
+            const cOK = !!(cur.plan && cur.plan.statusClose && cur.plan.statusClose.ok);
+            const ev = cur.ev || (cur.ev = { e: false, c: false });
+            if (eOK && !ev.e) {
+              ev.e = true;
+              try { onEvent({ type: "entry", sym, tf, t0: t0Live, dir: cur.signal.dir, accepted: !!cur.signal.accepted,
+                lock: (cur.plan && cur.plan.lock != null) ? cur.plan.lock : cur.signal.lock,
+                entryPrice: (cur.plan && cur.plan.statusEntry) ? cur.plan.statusEntry.price : null,
+                favor: cur.plan ? cur.plan.favor : null, levels: cur.plan ? cur.plan.levels : null,
+                taVer: cur.plan ? cur.plan.taVer : null, at: Date.now() }); } catch (_) {}
+            }
+            if (cOK && !ev.c) {
+              ev.c = true;
+              try { onEvent({ type: "exit", sym, tf, t0: t0Live, dir: cur.signal.dir,
+                closePrice: (cur.plan && cur.plan.statusClose) ? cur.plan.statusClose.price : null,
+                reason: (cur.plan && cur.plan.statusClose) ? cur.plan.statusClose.reason : null, at: Date.now() }); } catch (_) {}
+            }
+          }
         }
         saveState();      // persist state trade (posisi/early close) ke volume
       }

@@ -3563,8 +3563,9 @@ function renderConfidenceReport() {
       ? `<span class="sa-sf"><span class="sa-s">S:${sOk}</span> <span class="sa-f">F:${fBad}</span>`
         + ` <span class="sa-sfpct ${sfCls}">(${sfPct}%)</span></span>`
       : `<span class="sa-sf sa-na">S:— F:—</span>`;
+    const onlyTag = (sym === "BNB") ? `<span class="sa-only">5M ONLY</span>` : "";
     html += `<div class="sa-coin">
-      <div class="sa-coin-head"><b>${sym}</b> · ${tf}
+      <div class="sa-coin-head"><b>${sym}</b> · ${tf}${onlyTag}
         <span class="sa-head-right">
           <span class="sa-stat ${statCls}" title="signal: benar/salah">${evald.length ? `${wins}W/${evald.length - wins}L${wr != null ? ` (${wr}%)` : ""}` : "—"}</span>
           <span class="sa-stat-sf" title="Trade Assistant: S = entry &amp; early close sukses · F = ada entry tapi tidak keduanya sukses (${withPos.length} sesi berposisi)">${sfTxt}</span>
@@ -3573,7 +3574,7 @@ function renderConfidenceReport() {
       ${tail.length
         ? `<div class="sa-axis"><span>◀ Terbaru</span><span>Lama ▶</span></div>`
           + `<div class="sa-sessions">${tail.map(stack).join("")}</div>`
-        : `<div class="cd-empty">belum ada sesi</div>`}
+        : `<div class="cd-empty">${sym === "BNB" && tf !== "5m" ? "BNB hanya 5m" : "belum ada sesi"}</div>`}
     </div>`;
   }
   html += `</div><div class="sa-legend">tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal (dengan % sukses) · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> = entry &amp; apakah target LOCK tercapai · baris 3 <b>C</b> = early close ter-signal (hijau = ya · merah = tidak · abu = tidak ada entry/posisi)</div>`;

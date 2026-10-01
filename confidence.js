@@ -25,7 +25,7 @@
     : (root.SignalCore || null);
 
   const TREND_SESSIONS = 3;
-  const VOL_TYPICAL = { BTC: 0.515, ETH: 8.22 };
+  const VOL_TYPICAL = { BTC: 0.515, ETH: 8.22, BNB: 3.0 };
 
 function avg(a) { return a.reduce((x, y) => x + y, 0) / a.length; }
 

@@ -1,7 +1,7 @@
 /* Shared Binance snapshot fetcher — runs server-side (Vercel function or local Node).
    Fetches from Binance on the SERVER, so the browser only talks to our own origin.
    This bypasses regional/browser blocking of Binance & TradingView. */
-const SYMS = { BTC: "BTCUSDT", ETH: "ETHUSDT" };
+const SYMS = { BTC: "BTCUSDT", ETH: "ETHUSDT", BNB: "BNBUSDT" };
 // 1s = base for 5-second candles (aggregated client-side); 5m/15m/1h = trend contexts.
 const KLINES = {
   "1s": { hist: 1000, live: 6 },

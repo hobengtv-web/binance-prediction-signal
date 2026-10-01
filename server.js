@@ -225,8 +225,8 @@ const OFI_POLL_MS = Math.max(200, parseInt(process.env.OFI_POLL_MS || "300", 10)
 async function ofiFastTick() {
   try {
     // kedua aset diambil PARALEL supaya durasi tick singkat (~50ms) dan cadence mendekati 300 ms
-    const ks = await Promise.all(["BTC", "ETH"].map((sym) => getKlines(sym, "1s", undefined, 6)));
-    ["BTC", "ETH"].forEach((sym, i) => FLOW.addKlines(sym, ks[i]));
+    const ks = await Promise.all(["BTC", "ETH", "BNB"].map((sym) => getKlines(sym, "1s", undefined, 6)));
+    ["BTC", "ETH", "BNB"].forEach((sym, i) => FLOW.addKlines(sym, ks[i]));
     const nowS = Math.floor(Date.now() / 1000);
     // OFI = AKUMULASI SESI (buy-sell)/(buy+sell) dari awal sesi sampai sekarang, dengan definisi
     // sesi SESUAI TIMEFRAME. Sebelumnya jalur cepat ini selalu memakai sesi 5 menit, sehingga
@@ -234,7 +234,7 @@ async function ofiFastTick() {
     // dikirim sekaligus (murah: hanya menjumlah bucket menit) dan klien memilih sesuai tf aktif.
     const TFSEC = { "5m": 300, "15m": 900, "1h": 3600 };
     const assets = {};
-    for (const sym of ["BTC", "ETH"]) {
+    for (const sym of ["BTC", "ETH", "BNB"]) {
       const byTf = {};
       for (const tf of Object.keys(TFSEC)) {
         const t0tf = Math.floor(nowS / TFSEC[tf]) * TFSEC[tf];
@@ -493,7 +493,7 @@ function startBinance() {
     try {
       const m = JSON.parse(ev.data); const d = m.data; if (!d) return;
       if (d.e === "aggTrade") {
-        const sym = d.s === "BTCUSDT" ? "BTC" : "ETH";
+        const sym = d.s === "BTCUSDT" ? "BTC" : d.s === "ETHUSDT" ? "ETH" : "BNB";
         const now = Date.now();
         
         // Capture lock price at session boundaries for all timeframes
@@ -513,7 +513,7 @@ function startBinance() {
         // angka yang sama di semua environment (kalau dua-duanya diisi, volume jadi dobel).
         broadcast("trade", { sym, price: +d.p, qty: +d.q, ts: d.T, m: d.m });
       } else if (d.e === "24hrTicker") {
-        const sym = d.s === "BTCUSDT" ? "BTC" : "ETH";
+        const sym = d.s === "BTCUSDT" ? "BTC" : d.s === "ETHUSDT" ? "ETH" : "BNB";
         broadcast("ticker", { sym, chg: +d.P, last: +d.c });
       }
     } catch (_) {}
@@ -528,7 +528,7 @@ function fallbackPoll() {
   bnPollTimer = setInterval(async () => {
     try {
       const s = await getSnapshot(false);
-      for (const k of ["BTC", "ETH"]) {
+      for (const k of ["BTC", "ETH", "BNB"]) {
         const ones = s.candles[k]["1s"]; const last = ones[ones.length - 1];
         if (last) broadcast("trade", { sym: k, price: last.close, qty: last.vol || 0, ts: last.time * 1000 });
         const t = s.ticker[k]; broadcast("ticker", { sym: k, chg: t.chg, last: t.last });

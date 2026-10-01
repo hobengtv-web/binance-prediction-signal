@@ -45,9 +45,10 @@ const TFS = ["5m", "15m", "1h"];
 function createEngine(deps) {
   const { getKlines, getModel, getGates, log = console.log } = deps;
   const market = { BTC: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 },
-                   ETH: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 } };
+                   ETH: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 },
+                   BNB: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 } };
   // State Trade Assistant per (aset, tf): peak/dwell/entered/closed. Direset tiap sesi baru.
-  const planState = { BTC: {}, ETH: {} };
+  const planState = { BTC: {}, ETH: {}, BNB: {} };
   // ===== PERSISTENSI STATE TRADE ASSISTANT =====
   // State (posisi terbuka + early close + snapshot sesi) sebelumnya hanya di MEMORI, sehingga
   // setiap restart container (mis. saat deploy) menghapusnya -> chip ENTRY/EARLY CLOSE yang tadinya
@@ -91,7 +92,7 @@ function createEngine(deps) {
   // chart TIDAK berpindah-pindah tiap tick (permintaan user: garis yang sudah dibuat di awal sesi
   // harus lock hingga sesi selesai). Ladder ENTRY/TAMBAH memang sudah tetap karena hanya
   // bergantung pada harga LOCK.
-  const guideLock = { BTC: {}, ETH: {} };
+  const guideLock = { BTC: {}, ETH: {}, BNB: {} };
   function guidesFor(sym, tf, key, C, win, tierTarget) {
     const g = guideLock[sym][tf];
     if (g && g.key === key) {
@@ -164,7 +165,7 @@ function createEngine(deps) {
     }
     m.lastOne = last;
   }
-  const session = { BTC: {}, ETH: {} };          // sym -> tf -> { t0, signal|null, skipped, at }
+  const session = { BTC: {}, ETH: {}, BNB: {} };          // sym -> tf -> { t0, signal|null, skipped, at }
   const stats = { refreshes: 0, errors: 0, locked: 0, lastAt: null, lastErr: null, subscribers: 0, demand: 0 };
   let busy = false;
 
@@ -358,7 +359,7 @@ function createEngine(deps) {
     try {
       const nowSec = Math.floor(Date.now() / 1000);
       const profile = (typeof getGates === "function" ? getGates() : null) || GATES_DEF.BOOTSTRAP;
-      for (const sym of ["BTC", "ETH"]) {
+      for (const sym of ["BTC", "ETH", "BNB"]) {
         try { await refresh(sym); } catch (e) { stats.errors++; stats.lastErr = e && e.message; continue; }
         for (const tf of TFS) {
           const t0 = Math.floor(nowSec / DUR_S[tf]) * DUR_S[tf];
@@ -469,7 +470,7 @@ function createEngine(deps) {
       remainSec: Math.max(0, Math.round((t0 + durMs - now) / 1000)),
       source: "engine", assets: {},
     };
-    for (const sym of ["BTC", "ETH"]) {
+    for (const sym of ["BTC", "ETH", "BNB"]) {
       const ones = (market[sym] && market[sym].ones) || [];
       const px = ones.length ? ones[ones.length - 1].close : null;
       const sess = session[sym] && session[sym][tf];

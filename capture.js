@@ -16,7 +16,7 @@
 const LEARNER_BUCKETS = require("./learner.js").BUCKETS;
 const GATES_DEF = require("./gates.js");
 
-const VOL_TYPICAL = { BTC: 0.515, ETH: 8.22 };
+const VOL_TYPICAL = { BTC: 0.515, ETH: 8.22, BNB: 3.0 };
 const DUR_S = { "5m": 300, "15m": 900, "1h": 3600 };   // 1h ikut diproses server
 const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 function pctile(arr, p) {

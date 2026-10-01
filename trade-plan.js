@@ -311,14 +311,15 @@ function computeTradePlan(bias, ctx) {
       // CB dasar boleh di-override per-TF (mis. 15m lebih lebar dari 5m) dan/atau dibuat ADAPTIF
       // terhadap volatilitas: ambang = max(CB, k x std) dalam % harga. std berasal dari window 5m
       // (satuan harga) -> dikonversi ke % harga dengan /C*100.
-      const _tf = input.tf;
-      const cbBase = (TA.PER_TF && _tf && TA.PER_TF[_tf] && TA.PER_TF[_tf].TRAIL_CB_PCT != null) ? TA.PER_TF[_tf].TRAIL_CB_PCT : TA.TRAIL_CB_PCT;
-      const cbStd = (TA.TRAIL_STD_K > 0 && std > 0 && C > 0) ? (TA.TRAIL_STD_K * std / C * 100) : 0;
+      const cbBase = (TA.PER_TF && ctx.tf && TA.PER_TF[ctx.tf] && TA.PER_TF[ctx.tf].TRAIL_CB_PCT != null) ? TA.PER_TF[ctx.tf].TRAIL_CB_PCT : TA.TRAIL_CB_PCT;
+      const _std = ctx.std || 0, _px = ctx.price || 0;
+      const cbStd = (TA.TRAIL_STD_K > 0 && _std > 0 && _px > 0) ? (TA.TRAIL_STD_K * _std / _px * 100) : 0;
       const cbEff = Math.max(cbBase, cbStd);
       // GIVE-BACK BUDGET: keluar bila harga memberi balik >= X% dari PUNCAK PROFIT (bukan % harga).
-      // Lebih langsung menyasar "exit terlalu dini": sekali profit besar, beri ruang sesuai besar profitnya.
-      const gbHit = !!(TA.TRAIL_GIVEBACK_PCT > 0 && peakFavor > 0 && favor < peakFavor
-        && ((peakFavor - favor) / peakFavor) * 100 >= TA.TRAIL_GIVEBACK_PCT);
+      // Puncak profit (satuan harga) diturunkan dari definisi trailRetracePct: (peak-favor)/C*100.
+      const peakFavNow = (trailRetracePct != null && _px) ? (favor + trailRetracePct * _px / 100) : null;
+      const gbHit = !!(TA.TRAIL_GIVEBACK_PCT > 0 && peakFavNow != null && peakFavNow > 0 && favor < peakFavNow
+        && ((peakFavNow - favor) / peakFavNow) * 100 >= TA.TRAIL_GIVEBACK_PCT);
       const trailHitCond = (tpHit || gbHit || (trailRetracePct != null && trailRetracePct >= cbEff));
       if (trailArmed && trailHitCond && (trailHeldMs >= MIN_HOLD_TF || hybEarly || beHit || tpHit || gbHit)) {
         state = "CLOSE"; cls = "exit";

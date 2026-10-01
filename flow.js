@@ -18,7 +18,7 @@
    ============================================================================ */
 
 const KEEP_MIN = 180;                                   // simpan ~3 jam bucket menit
-const flow = { BTC: {}, ETH: {} };
+const flow = { BTC: {}, ETH: {}, BNB: {} };   // BNB WAJIB ada: tanpa bucket, addTrade/addKlines BNB di-skip -> OFI BNB selalu null
 
 function prune(s, minSec) {
   const cut = minSec - KEEP_MIN * 60;

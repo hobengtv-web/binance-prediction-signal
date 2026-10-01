@@ -10,6 +10,9 @@ const SYMBOLS = {
   BNB: "bnbusdt",
 };
 const OB_SYMBOLS = { BTC: "BTCUSDT", ETH: "ETHUSDT", BNB: "BNBUSDT" };  // Binance spot REST symbol format
+// TF yang BENAR-BENAR tersedia per aset (sumber: engine server). Dipakai untuk mematikan kartu
+// yang tidak punya data pada tab tf aktif -- BNB hanya 5m, jadi di 15m/1h kartunya harus redup.
+const ASSET_TFS = { BTC: ["5m", "15m", "1h"], ETH: ["5m", "15m", "1h"], BNB: ["5m"] };
 // Prediction round durations (lock period). Candle size is fixed 5s (aggregated from 1s).
 const INTERVALS = ["5m", "15m", "1h"];
 const INTERVAL_MS = { "5m": 300_000, "15m": 900_000, "1h": 3_600_000 };
@@ -2947,6 +2950,23 @@ function renderDual(force) {
   const remSec = Math.max(0, Math.round((sbNow.end - now) / 1000));
   const cdTxt = `${String(Math.floor(remSec / 60)).padStart(2, "0")}:${String(remSec % 60).padStart(2, "0")}`;
   for (const a of ["BTC", "ETH", "BNB"]) {
+    try {
+    // ===== KARTU MATI bila tf tidak tersedia utk aset ini (BNB hanya 5m) =====
+    // Sebelumnya kartu BNB tetap "hidup" di 15m/1h dengan angka basi, dan setelah kembali ke 5m
+    // isinya bisa beku. Sekarang: redup + update dihentikan + penanda jelas.
+    const supported = !ASSET_TFS[a] || ASSET_TFS[a].indexOf(tf) !== -1;
+    const colEl = document.getElementById(`dc-${a}-col`);
+    if (colEl) colEl.classList.toggle("dc-off", !supported);
+    if (!supported) {
+      const _gz = (id) => document.getElementById(`dc-${a}-${id}`);
+      const zPr = _gz("price"); if (zPr) zPr.textContent = "—";
+      const zRc = _gz("rec"); if (zRc) { zRc.textContent = `${a} tidak tersedia untuk ${tf}`; zRc.className = "dc-rec flat"; }
+      const zAc = _gz("act"); if (zAc) { zAc.textContent = "—"; zAc.className = "dc-act wait"; zAc.title = `${a} hanya tersedia untuk sesi 5 menit`; }
+      const zKy = _gz("key"); if (zKy) { zKy.textContent = ""; zKy.className = "tp-key"; }
+      const zCd = _gz("cd"); if (zCd) zCd.textContent = cdTxt;
+      const zCh = dualCharts[a]; if (zCh) zCh.setPins([]);
+      continue;
+    }
     const m = analyzeCoin(a, tf, now);
     const tick = state.ticker[a] || {};
     const px = m ? m.C : (tick.last || 0);
@@ -3263,6 +3283,7 @@ function renderDual(force) {
       });
       rsEl.title = (sig && sig.reason) ? sig.reason : "—";
     }
+    } catch (e) { console.warn("[DUAL] gagal render " + a + ":", e && e.message); }
   }
 }
 
@@ -3605,7 +3626,7 @@ function renderConfidenceReport() {
 
 /* ----------------------- Mobile Prediction ----------------------- */
 let _mobilePredSession = null;   // { roundStart, lockPrice, prediction, confidence, mode }
-const predCache = { BTC: {}, ETH: {} };  // per-session cache: predCache[sym][interval + roundStart] = pred
+const predCache = { BTC: {}, ETH: {}, BNB: {} };  // per-session cache: predCache[sym][interval + roundStart] = pred
 
 function restoreMobilePredSession() {
   try {
@@ -3772,6 +3793,7 @@ function bindControls() {
       LIVE.connect(state.interval);      // stream sinyal server mengikuti interval aktif
     segActive("tf-seg", b);
     renderActive(); updateProjection(); updateMobilePrediction(); renderConfidenceReport();
+    try { renderDual(true); } catch (_) {}      // kartu dual langsung menyesuaikan (BNB redup di 15m/1h)
   });
   document.getElementById("type-seg").addEventListener("click", (e) => {
     const b = e.target.closest("[data-type]"); if (!b) return;

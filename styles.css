@@ -675,3 +675,9 @@ body {
 /* (Baris VOLUME & LIQUIDITY kartu dual didefinisikan di blok "Kolom dual" di atas.) */
 
 .tp-st i { font-style:normal; font-weight:700; opacity:.85; font-variant-numeric: tabular-nums; }
+
+/* Kartu dual yang TIDAK tersedia pada tf aktif (mis. BNB di 15m/1h): redup + chart disembunyikan
+   supaya jelas mati dan tidak menampilkan angka basi. */
+.dual-col.dc-off { opacity: .35; filter: grayscale(.65); }
+.dual-col.dc-off .dc-chart { visibility: hidden; }
+.dual-col.dc-off .dc-head { filter: grayscale(1); }

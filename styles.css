@@ -62,7 +62,7 @@ body {
      sampai ~0 px (itu sebabnya panel LEARNER tampil hanya 2px / tak terlihat).
      Semua section konten harus ikut dilindungi. */
   .topbar, .controls, .round, .signal, .help,
-  .learn-status, .lessons, .conf-debug, .mobile-pred, .dual, .monitors, main.chart-wrap { flex-shrink: 0; }
+  .learn-status, .lessons, .trade-hours, .conf-debug, .mobile-pred, .dual, .monitors, main.chart-wrap { flex-shrink: 0; }
 .controls {
   display: flex; gap: 8px; row-gap: 6px; flex-wrap: wrap;   /* melipat, bukan meluber ke luar layar */
   padding: 8px 12px; max-width: 100%; overflow: hidden;

@@ -24,6 +24,7 @@ const CFG = {
   HYB_MIN_CAP_PCT: num(process.env.TA_HYB_MIN_CAP_PCT, 80),         // exit lebih awal bila capture >= ini
   HYB_MIN_RETRACE_PCT: num(process.env.TA_HYB_MIN_RETRACE_PCT, 0.1), // exit lebih awal bila retrace dari puncak >= ini
   BE_STOP: num(process.env.TA_BE_STOP, 0),                           // 1 = break-even stop: bila sudah armed & profit kembali <=0 -> EXIT (abaikan min-hold)
+  TP_CAP_PCT: num(process.env.TA_TP_CAP_PCT, 0),                     // >0 = hard take-profit: bila capture >= X% -> EXIT segera (abaikan min-hold)
   CLOSE2_MIN_NEW_PEAK_PCT: num(process.env.TA_CLOSE2_MIN_NEW_PEAK_PCT, 0.008), // CLOSE-2: puncak baru harus lebih tinggi >= ini (%)
   CLOSE2_RETRACE_PCT: num(process.env.TA_CLOSE2_RETRACE_PCT, 0.01),  // CLOSE-2: micro-retrace dari puncak baru (%)
   // ===== MODE TRAILING (exit) =====

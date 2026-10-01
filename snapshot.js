@@ -13,6 +13,9 @@ const REST = [
   "https://data-api.binance.vision",
   "https://api.binance.com",
   "https://api1.binance.com",
+  "https://api2.binance.com",
+  "https://api3.binance.com",
+  "https://api4.binance.com",
 ];
 const FUTURES_REST = [
   "https://fapi.binance.com",
@@ -22,7 +25,8 @@ async function getJSON(path) {
   let lastErr;
   for (const h of REST) {
     try {
-      const r = await fetch(h + path);
+      // timeout per host supaya satu host yang menggantung tidak memblokir seluruh refresh
+      const r = await fetch(h + path, { signal: AbortSignal.timeout(8000) });
       if (!r.ok) throw new Error("HTTP " + r.status);
       return await r.json();
     } catch (e) { lastErr = e; }

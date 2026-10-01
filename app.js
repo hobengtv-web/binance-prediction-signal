@@ -301,6 +301,22 @@ function ofiDOM(prefix) {
   };
 }
 
+/* ===== PIN ENTRY/CLOSE DI CHART =====
+   Menandai LOKASI PERSIS entry & early close (bubble berisi huruf E/C + ekor ke titik harga),
+   karena garis horizontal saja tidak menunjukkan candle/waktu kejadiannya. */
+function buildPins(plan) {
+  const out = [];
+  if (!plan) return out;
+  const se = plan.statusEntry, sc = plan.statusClose;
+  if (se && se.ok && se.at != null && se.price != null) {
+    out.push({ t: se.at / 1000, p: Number(se.price), label: "E", cls: "pin-entry" });
+  }
+  if (sc && sc.ok && sc.at != null && sc.price != null) {
+    out.push({ t: sc.at / 1000, p: Number(sc.price), label: "C", cls: "pin-close" });
+  }
+  return out;
+}
+
 /* ===== GARIS BANTU CHART (gaya analis) =====
    Level Trade Assistant (ENTRY/TAMBAH/TARGET/POSISI) + Support/Resistance terdekat dari server
    (disp.support / disp.resistance). Dikirim ke chart lewat chart.setGuides(). */
@@ -1171,6 +1187,7 @@ function applyType() {
     // Garis bantu chart: level Trade Assistant + support/resistance (dari server).
     // Dipanggil SETELAH tradePlan terisi supaya tidak kena TDZ (variabel dideklarasikan di atas).
     chart.setGuides(buildGuides(tradePlan, (typeof LIVE !== "undefined" && LIVE.entryFor) ? (LIVE.entryFor(state.asset, state.interval) || {}).disp : null, O));
+    chart.setPins(buildPins(tradePlan));
 
     updateSignal({
       zone, momentum, rsi, verdict: finalVerdict, mode, trendBias, aligned, conf,
@@ -3179,6 +3196,7 @@ function renderDual(force) {
       const oDual = (m && m.O != null) ? m.O : sessionLock(a, dur, now);
       ch.setDecision(oDual);
       ch.setGuides(buildGuides(m && m.plan ? m.plan : null, m ? m.disp : null, oDual));
+      ch.setPins(buildPins(m && m.plan ? m.plan : null));
       ch.setPrediction(graded ? dir : null, m ? m.O : null);
       ch.setCurrentPrice(px);
       // OVERLAY LENGKAP seperti chart mobile: garis proyeksi ke settlement + garis tren

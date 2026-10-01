@@ -43,6 +43,7 @@
     this.projection = [];
     this.trendFit = [];   // auto trend line (regression) drawn across the recent window
     this.markers = [];    // marker.below => drawn under the point (swing lows)
+    this.pins = [];       // {t (detik), p (harga), label: "E"|"C"} => bubble + ekor di titik harga persis
     this.prediction = null;  // "up" | "down" | null
     this.currentPrice = null;  // live price for blink detection
 
@@ -84,6 +85,12 @@
   CanvasChart.prototype.setProjection = function (pts) { this.projection = pts || []; this.render(); };
   CanvasChart.prototype.setTrendFit = function (pts) { this.trendFit = pts || []; this.render(); };
   CanvasChart.prototype.setMarkers = function (m) { this.markers = m || []; this.render(); };
+  /* PIN ENTRY/CLOSE: bulatan berisi huruf + ekor (tail) yang menunjuk ke candle/harga PERSIS.
+     Format: [{ t: detik, p: harga, label: "E"|"C", cls: "pin-entry"|"pin-close" }] */
+  CanvasChart.prototype.setPins = function (list) {
+    this.pins = (list || []).filter((x) => x && isFinite(x.p) && isFinite(x.t));
+    this.render();
+  };
   CanvasChart.prototype.setSessionDuration = function (ms) { this.sessionDuration = ms || 0; this.render(); };
   CanvasChart.prototype.setPrediction = function (dir, price) { this.prediction = dir; this.decision = price; this.render(); };
   CanvasChart.prototype.setCurrentPrice = function (p) { this.currentPrice = p; this.render(); };
@@ -159,6 +166,7 @@
     }
     if (this.decision != null) { pMin = Math.min(pMin, this.decision); pMax = Math.max(pMax, this.decision); }
     if (this.guides && this.guides.length) for (const g of this.guides) { pMin = Math.min(pMin, g.p); pMax = Math.max(pMax, g.p); }
+    if (this.pins && this.pins.length) for (const q of this.pins) { pMin = Math.min(pMin, q.p); pMax = Math.max(pMax, q.p); }
     this.projection.forEach((p) => { pMin = Math.min(pMin, p.value); pMax = Math.max(pMax, p.value); });
     if (!isFinite(pMin)) { pMin = 0; pMax = 1; }
     const pad = (pMax - pMin) * 0.08 || pMax * 0.01;
@@ -297,6 +305,38 @@
           ctx.fillText("Sell Zone (Take Profit)", (plotL + plotR) / 2, (plotT + y) / 2);
         }
       }
+    }
+
+    // ===== PIN ENTRY (E) / CLOSE (C): bubble + ekor menunjuk titik harga persis =====
+    if (this.pins && this.pins.length) {
+      ctx.save();
+      for (const pin of this.pins) {
+        const x = xOf(pin.t), y = yOf(pin.p);
+        if (x < plotL - 24 || x > plotR + 24) continue;               // di luar jendela tampilan
+        const isClose = pin.cls === "pin-close";
+        const col = isClose ? "#10b981" : "#3b82f6";
+        const R = 9;
+        const above = y > plotT + 40;                                  // bubble di atas titik bila ada ruang
+        const by = above ? y - (12 + R) : y + (12 + R);
+        ctx.strokeStyle = col; ctx.lineWidth = 1.5;                    // ekor
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, above ? by + R : by - R); ctx.stroke();
+        ctx.fillStyle = col;                                           // titik tepat di lokasi
+        ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x, by, R, 0, Math.PI * 2);            // bubble
+        ctx.fillStyle = col; ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 1; ctx.stroke();
+        ctx.fillStyle = "#fff"; ctx.font = "bold 10px -apple-system,Segoe UI,Roboto,sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(pin.label, x, by + 0.5);
+        const txt = fmtAxis(pin.p) + " · " + fmtTime(pin.t);           // label harga + jam
+        ctx.font = "10px -apple-system,Segoe UI,Roboto,sans-serif";
+        const tw = ctx.measureText(txt).width;
+        const tx = (x + R + 4 + tw <= plotR) ? x + R + 4 : x - R - 4 - tw;
+        ctx.fillStyle = "rgba(0,0,0,.45)"; ctx.fillRect(tx - 2, by - 7, tw + 4, 14);
+        ctx.fillStyle = col; ctx.textAlign = "left"; ctx.fillText(txt, tx, by);
+      }
+      ctx.restore();
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
     }
 
     // auto trend line (regression across recent window) — shows momentum direction

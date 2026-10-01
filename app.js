@@ -3484,6 +3484,28 @@ function rescoreAll() {
   }
 }
 
+/* ===== JAM TRADE ON/OFF (panel di bawah PELAJARAN) =====
+   Sumber: snapshot server (j.tradeHours) -> halaman ini tidak menghitung sendiri jam off milik BOT,
+   hanya menampilkan rentangnya + menandai ON/OFF untuk jam WIB saat ini. */
+function renderTradeHours() {
+  const el = document.getElementById("th-body");
+  if (!el) return;
+  let th = (typeof LIVE !== "undefined" && LIVE.snap && LIVE.snap.tradeHours) ? LIVE.snap.tradeHours : null;
+  if (!th) th = { tz: "WIB", off: [4, 22], on: [[0, 4], [5, 22], [23, 24]] };
+  const pad = (h) => String(h).padStart(2, "0") + ":00";
+  const offTxt = (th.off || []).map((h) => pad(h) + "\u2013" + pad(h + 1)).join(" \u00b7 ") || "\u2014";
+  const onTxt = (th.on || []).map((r) => pad(r[0]) + "\u2013" + pad(r[1])).join(" \u00b7 ") || "\u2014";
+  const wibH = Math.floor(((Date.now() / 1000 + 7 * 3600) % 86400) / 3600);
+  const isOff = (th.off || []).indexOf(wibH) !== -1;
+  el.innerHTML =
+    '<div class="th-row"><span class="th-chip on">ON</span><b>' + onTxt + '</b> ' + (th.tz || "WIB")
+      + ' \u2014 entry aktif (sesi 5m &amp; 15m; BNB hanya 5m)</div>'
+    + '<div class="th-row"><span class="th-chip off">OFF</span><b>' + offTxt + '</b> ' + (th.tz || "WIB")
+      + ' \u2014 tidak ada entry baru; posisi yang sudah terbuka <b>tetap dieksekusi exit</b></div>'
+    + '<div class="th-now">Sekarang <b>' + pad(wibH) + '</b> ' + (th.tz || "WIB") + ' \u2192 '
+      + (isOff ? '<b class="th-off">OFF \u2014 tidak ada entry</b>' : '<b class="th-on">ON \u2014 entry aktif</b>') + '</div>';
+}
+
 function renderConfidenceReport() {
   const body = document.getElementById("conf-debug-body");
   const head = document.getElementById("conf-debug-head");
@@ -3801,7 +3823,8 @@ function bindControls() {
       LIVE.connect(state.interval);      // stream sinyal server mengikuti interval aktif
     segActive("tf-seg", b);
     renderActive(); updateProjection(); updateMobilePrediction(); renderConfidenceReport();
-    try { renderDual(true); } catch (_) {}      // kartu dual langsung menyesuaikan (BNB redup di 15m/1h)
+    try { renderDual(true); } catch (_) {}
+    try { renderTradeHours(); } catch (_) {}      // kartu dual langsung menyesuaikan (BNB redup di 15m/1h)
   });
   document.getElementById("type-seg").addEventListener("click", (e) => {
     const b = e.target.closest("[data-type]"); if (!b) return;
@@ -4203,6 +4226,8 @@ function start() {
   rebuildLoggedIndex();                     // build O(1) index after migrations
   evaluateUniversalSessions(serverNow());   // finalize rounds that already ended (e.g. after reload)
   renderConfidenceReport();
+  try { renderTradeHours(); } catch (_) {}                       // panel JAM TRADE (ON/OFF)
+  setInterval(() => { try { renderTradeHours(); } catch (_) {} }, 20000);
   LIVE.connect(state.interval);      // sinyal dari server (SSE)
   setTimeout(() => { try { repairLogOutcomes(); } catch (_) {} }, 4000);
   setInterval(() => { try { repairLogOutcomes(); } catch (_) {} }, 120000);

@@ -53,4 +53,25 @@ CFG.PER_TF = {
 // Versi ringkas (hash) — berubah otomatis bila salah satu nilai berubah.
 CFG.VER = "ta" + crypto.createHash("md5").update(JSON.stringify(CFG)).digest("hex").slice(0, 8);
 
+
+/* ===== JAM TRADE (WIB) =====
+   Cerminan OFF_HOURS_WIB milik BOT (entry diblokir pada jam-jam ini; EXIT tetap berjalan).
+   Dipakai UI untuk menampilkan rentang ON/OFF. Ubah via env TRADE_OFF_HOURS_WIB="4,22". */
+CFG.TRADE_OFF_HOURS_WIB = String(process.env.TRADE_OFF_HOURS_WIB || "4,22")
+  .split(",").map((x) => parseInt(x, 10)).filter((n) => Number.isFinite(n) && n >= 0 && n < 24);
+CFG.TRADE_HOURS = (() => {
+  const off = CFG.TRADE_OFF_HOURS_WIB.slice().sort((a, b) => a - b);
+  const set = new Set(off); const on = []; let start = null;
+  for (let h = 0; h <= 24; h++) {
+    const isOff = h < 24 && set.has(h);
+    if (!isOff && start === null) start = h;
+    if (isOff && start !== null) { on.push([start, h]); start = null; }
+  }
+  if (start !== null) on.push([start, 24]);
+  const pad = (h) => String(h).padStart(2, "0") + ":00";
+  return { tz: "WIB", off, on,
+    offRanges: off.map((h) => pad(h) + "–" + pad(h + 1)),
+    onRanges: on.map(([a, b]) => pad(a) + "–" + pad(b)) };
+})();
+
 module.exports = CFG;

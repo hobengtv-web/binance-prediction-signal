@@ -116,8 +116,8 @@ function computeSignal(o) {
     else if (TA_VETO.hours.indexOf(wibH) >= 0) veto = "veto-hour";
     else if (liqRatio < TA_VETO.liqMin) veto = "veto-liq";
   }
-  const accepted = accepted0 && !veto;
-  const reject = accepted ? null : (veto || (!thOK ? "threshold" : !grade ? "tier" : "liq-low"));
+  let accepted = accepted0 && !veto;
+  let reject = accepted ? null : (veto || (!thOK ? "threshold" : !grade ? "tier" : "liq-low"));
 
   const d2 = ((C2 - lock) / lock) * 100;
   const rewardPct = Math.abs(d2);
@@ -150,6 +150,10 @@ function computeSignal(o) {
       });
     }
   } catch (_) {}
+  // ===== TERAPKAN MODEL YANG DIPROMOSIKAN LEARNER =====
+  // Sebelumnya `learn.blocking` hanya label (tak memblokir). Sekarang bila model terpromosi
+  // menandai konteks ini (mis. gap<0.005) -> tolak sinyal, supaya pembelajaran benar-benar menajamkan.
+  if (learn && learn.blocking && accepted) { accepted = false; reject = reject || "learn-block"; }
 
   return {
     ok: true,

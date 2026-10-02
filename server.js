@@ -399,12 +399,12 @@ async function refit(trigger = "manual") {
         res.gatesPromoted = true;
       } else res.gatesPromoted = false;
 
+      // Tulis konteks PnL-trade SETIAP refit (informasional: konteks TA_FEATS paling untung/rugi)
+      try { write("learn_pnl.json", Object.assign({ generated: new Date().toISOString(), version: ver, rows: cand.rows, test: cand.pnlTest }, cand.pnl)); } catch (_) {}
       if (dec.promote) {
         write("learn_gate.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.gate));
         write("learn_touch90.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.touch));
         write("lessons.json", Object.assign({ generated: new Date().toISOString(), version: ver }, cand.lessons));
-        // PnL-trade: konteks TA_FEATS yang paling untung/rugi + metrik uji
-        write("learn_pnl.json", Object.assign({ generated: new Date().toISOString(), version: ver, rows: cand.rows, test: cand.pnlTest }, cand.pnl));
         const meta = { version: ver, promotedAt: new Date().toISOString(), trigger, rows: cand.rows, metrics: candEval, metricsSingle: cand.metrics, baseline: cand.baseline, why: dec.why, pnl: { test: cand.pnlTest, allMeanPnl: cand.pnl && cand.pnl.all, n: cand.pnl && cand.pnl.n }, gatesMode: gatesMeta.mode, gatesThresholds: gatesMeta.thresholds || null, gatesMetrics: gatesMeta.metrics || null };
         write("meta.json", meta);
         modelMeta = meta;

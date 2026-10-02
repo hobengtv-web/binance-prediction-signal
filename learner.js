@@ -325,13 +325,23 @@ function learnThresholds(rows, opts = {}) {
 }
 
 /* ---------- keputusan promosi: hanya bila MENANG pada jendela uji ---------- */
-function shouldPromote(candidate, incumbent, minTake = 40) {
+/* ---------- keputusan promosi: WR-FIRST (bukan coverage-first) ----------
+   Untuk sinyal ke BOT, yang penting = WINRATE dari sinyal yang DIAMBIL (makin sedikit rugi),
+   dengan syarat cakupan masih memadai & stabil di tiap lipatan. Metrik lama (WR x akar(coverage))
+   menghukum selektivitas sehingga filter penajam tak pernah bisa promote. */
+function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.25) {
   const c = candidate && candidate.metrics, i = incumbent && incumbent.metrics;
   if (!c) return { promote: false, why: "kandidat tidak valid" };
   if (c.taken < minTake) return { promote: false, why: `sinyal diambil hanya ${c.taken} (< ${minTake}) — bukti belum cukup` };
+  if ((c.coverage || 0) < minCov) return { promote: false, why: `cakupan ${((c.coverage || 0) * 100).toFixed(0)}% < ${(minCov * 100).toFixed(0)}% — terlalu selektif` };
   if (!i) return { promote: true, why: "belum ada model berjalan → pakai kandidat" };
-  if (c.score > i.score) return { promote: true, why: `skor kandidat ${c.score} > insiden ${i.score} (winrate ${(c.takenWinrate * 100).toFixed(1)}% vs ${(i.takenWinrate * 100).toFixed(1)}%, cakupan ${(c.coverage * 100).toFixed(0)}% vs ${(i.coverage * 100).toFixed(0)}%)` };
-  return { promote: false, why: `skor kandidat ${c.score} tidak mengalahkan insiden ${i.score}` };
+  const cMin = (c.parts && c.parts.length) ? Math.min(...c.parts.map((p) => p.takenWinrate)) : c.takenWinrate;
+  const iMin = (i.parts && i.parts.length) ? Math.min(...i.parts.map((p) => p.takenWinrate)) : i.takenWinrate;
+  const dWr = c.takenWinrate - i.takenWinrate;
+  if (dWr >= 0.02 && cMin >= iMin) {
+    return { promote: true, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (+${(dWr * 100).toFixed(1)}pp) cakupan ${((c.coverage || 0) * 100).toFixed(0)}% · min-fold ${(cMin * 100).toFixed(1)}% vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)` };
+  }
+  return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (min-fold ${(cMin * 100).toFixed(1)}%) tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)` };
 }
 
 module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, shouldPromote, blockersOf, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

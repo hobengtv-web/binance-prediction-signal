@@ -73,6 +73,8 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
     const gain = (tr.closed && tr.closePrice != null && tr.entryPrice != null) ? (dirUp ? (tr.closePrice - tr.entryPrice) : (tr.entryPrice - tr.closePrice)) : null;
     const capturePct = (gain != null && pot && pot > 0) ? (gain / pot * 100) : null;
     const pnlPct = (gain != null && tr.entryPrice) ? (gain / tr.entryPrice * 100) : null;
+    // PnL $ NYATA BOT (dikirim BOT ke record.bot) -> lebih diutamakan daripada proksi spot pnlPct
+    const botRoi = (r.bot && typeof r.bot.roiPct === "number") ? +r.bot.roiPct.toFixed(4) : null;
     out.push({
       t0: r.t0, asset: r.asset, interval: r.interval,
       symbol: r.asset, mode: s.mode || "na",
@@ -106,6 +108,9 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       taVer: tr.taVer || null,
       capturePct: capturePct != null ? +capturePct.toFixed(3) : null,
       pnlPct: pnlPct != null ? +pnlPct.toFixed(4) : null,
+      botRoi: botRoi,
+      botPnl: (r.bot && typeof r.bot.pnl === "number") ? +r.bot.pnl.toFixed(4) : null,
+      pnlUse: (botRoi != null ? botRoi : (pnlPct != null ? +pnlPct.toFixed(4) : null)),   // ROI $ BOT bila ada, else proksi spot
       taWin: (pnlPct != null) ? (pnlPct > 0 ? 1 : 0) : null,
       taCapWin: (capturePct != null) ? (capturePct >= 50 ? 1 : 0) : null,
       // ===== MIKRO-STRUKTUR (fitur baru untuk mempertajam arah U/D) =====
@@ -238,25 +243,25 @@ function evalModelRolling(rows, gateRules, touchRules, k = 3) {
 function evalModelPnl(rows, gateRules, touchRules) {
   const gb = blockersOf(gateRules.map((r) => ({ ...r, metric: "won" })), "won");
   const tb = blockersOf(touchRules.map((r) => ({ ...r, metric: "touch" })), "touch");
-  const taken = rows.filter((r) => r.pnlPct != null && decide(r, gb) && decide(r, tb));
+  const taken = rows.filter((r) => r.pnlUse != null && decide(r, gb) && decide(r, tb));
   const n = taken.length;
   return {
     n,
-    meanPnl: n ? +mean(taken.map((r) => r.pnlPct)).toFixed(4) : 0,
-    winRate: n ? +mean(taken.map((r) => (r.pnlPct > 0 ? 1 : 0))).toFixed(4) : 0,
+    meanPnl: n ? +mean(taken.map((r) => r.pnlUse)).toFixed(4) : 0,
+    winRate: n ? +mean(taken.map((r) => (r.pnlUse > 0 ? 1 : 0))).toFixed(4) : 0,
   };
 }
 // Konteks TA_FEATS dengan PnL terburuk/terbaik (lessons + kandidat aturan PnL).
 function pnlContexts(rows, FEATS) {
-  const base = rows.filter((r) => r.pnlPct != null);
+  const base = rows.filter((r) => r.pnlUse != null);
   if (!base.length) return { all: 0, n: 0, contexts: [] };
-  const all = mean(base.map((r) => r.pnlPct));
+  const all = mean(base.map((r) => r.pnlUse));
   const out = [];
   for (const name of Object.keys(FEATS)) {
     const g = groupBy(base, FEATS[name]);
     for (const [k, arr] of g) {
       if (arr.length < 15) continue;
-      const m = mean(arr.map((r) => r.pnlPct));
+      const m = mean(arr.map((r) => r.pnlUse));
       out.push({ f: name, k, n: arr.length, meanPnl: +m.toFixed(4), delta: +(m - all).toFixed(4),
         verdict: m < all - 0.02 ? "suppress" : m > all + 0.02 ? "boost" : "neutral" });
     }

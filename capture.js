@@ -199,7 +199,17 @@ function createCapture(deps) {
     let five5m = [];
     try { five5m = await getKlines(sym, "5m", nowSec - 1, 60); } catch (_) {}
     const profile = (typeof getGates === "function" ? getGates() : null) || GATES_DEF.BOOTSTRAP;   // profil gate yang BERLAKU (bootstrap/learned)
-    const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m, profile, getModel, SignalCore, nowSec });
+    // Alignment multi-TF (arah tren tf lain SEBELUM t0) — fitur model arah U/D (jalur capture juga)
+    let align = null;
+    try {
+      align = {};
+      for (const t of Object.keys(DUR_S)) {
+        if (sym === "BNB" && t !== "5m") continue;
+        const arr = (t === tf ? tfc : await getKlines(sym, t, t0 - 1, 60)).filter((c) => c.time < t0);
+        if (arr.length >= 20) align[t] = SignalCore.analyzeHistoricalTrend(arr, 50).predictDir;
+      }
+    } catch (_) {}
+    const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m, profile, getModel, SignalCore, nowSec, align });
     if (r.skipped) return { skipped: r.skipped };
     const sig = r.signal;
     const rec = {

@@ -37,6 +37,20 @@ const bRemain = (v) => (v == null ? "na" : v < 60 ? "<60" : v < 120 ? "60-120" :
 // Browser yang dibuka di tengah sesi menghasilkan capOffsetMs besar -> DIKECUALIKAN dari
 // pelatihan (bukan dihapus; tetap ada di record sebagai `alts` untuk studi entry telat).
 const CANONICAL_MAX_MS = 6000;
+// Normalisasi mikro-struktur: body 1s/2s dalam satuan sigma 1s (searah sinyal: + = mendukung arah)
+function microNum(micro, key, sigma) {
+  if (!micro || typeof micro[key] !== "number" || !(sigma > 0)) return null;
+  return +(micro[key] / sigma).toFixed(3);
+}
+// Skor alignment: berapa TF (5m/15m/1h) yang trennya SEARAH sinyal (0..3, null bila tak ada data)
+function alignScore(micro, dir) {
+  const al = micro && micro.align;
+  if (!al) return null;
+  let n = 0, tot = 0;
+  for (const k of ["5m", "15m", "1h"]) { if (al[k]) { tot++; if (al[k] === dir) n++; } }
+  return tot ? n : null;
+}
+
 function rowsFrom(records, minT0 = 1700000000, opts = {}) {
   const includeLate = !!opts.includeLate;
   const out = [];
@@ -94,6 +108,12 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       pnlPct: pnlPct != null ? +pnlPct.toFixed(4) : null,
       taWin: (pnlPct != null) ? (pnlPct > 0 ? 1 : 0) : null,
       taCapWin: (capturePct != null) ? (capturePct >= 50 ? 1 : 0) : null,
+      // ===== MIKRO-STRUKTUR (fitur baru untuk mempertajam arah U/D) =====
+      mO1: microNum(s.micro, "o1BodyS", s.micro && s.micro.sigma1s),
+      mO2: microNum(s.micro, "o2BodyS", s.micro && s.micro.sigma1s),
+      mAgree: (s.micro && s.micro.bodyAgree != null) ? (s.micro.bodyAgree ? 1 : 0) : null,
+      mRanPos: (s.micro && typeof s.micro.ranPos === "number") ? +s.micro.ranPos.toFixed(3) : null,
+      mAlign: alignScore(s.micro, dir),
     });
   }
   out.sort((a, b) => a.t0 - b.t0);
@@ -101,7 +121,13 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
   return out;
 }
 
-const GATE_FEATS = { interval: (r) => r.interval, symbol: (r) => r.symbol, mode: (r) => r.mode, minute: (r) => r.minute, rsi: (r) => r.rsi, vol: (r) => r.vol, hour: (r) => r.hour, hist: (r) => r.hist, trend: (r) => r.trend };
+const GATE_FEATS = { interval: (r) => r.interval, symbol: (r) => r.symbol, mode: (r) => r.mode, minute: (r) => r.minute, rsi: (r) => r.rsi, vol: (r) => r.vol, hour: (r) => r.hour, hist: (r) => r.hist, trend: (r) => r.trend,
+  // mikro-struktur (bucket) — aktif otomatis saat cukup record punya data ini
+  mAgree: (r) => r.mAgree == null ? "na" : (r.mAgree ? "agree" : "disagree"),
+  mAlign: (r) => r.mAlign == null ? "na" : String(r.mAlign),
+  mRanZone: (r) => r.mRanPos == null ? "na" : (r.mRanPos < 0.2 ? "low" : r.mRanPos > 0.8 ? "high" : "mid"),
+  mBody: (r) => r.mO2 == null ? "na" : (r.mO2 > 0.5 ? "strong+" : r.mO2 < -0.5 ? "strong-" : "weak"),
+};
 const TOUCH_FEATS = { interval: (r) => r.interval, symbol: (r) => r.symbol, gap: (r) => r.gap, hour: (r) => r.hour, dir: (r) => r.dir };
 const GATE_PAIRS = [["interval", "minute"], ["interval", "vol"], ["rsi", "trend"], ["symbol", "hour"], ["interval", "rsi"], ["hist", "trend"], ["minute", "vol"]];
 const TOUCH_PAIRS = [["interval", "gap"], ["symbol", "gap"], ["hour", "gap"], ["dir", "gap"], ["interval", "hour"]];
@@ -258,7 +284,8 @@ function lessonsFrom(gateRules, touchRules, test, dirBase, touchBase) {
      - setiap langkah hanya diterima bila menaikkan objektif latih > 1%
    Hasilnya = daftar threshold konkret yang bisa langsung dipakai app, bukan sekadar
    daftar konteks bucket. Aturan bucket (gate/touch) tetap ada sebagai lapisan kedua. */
-const TH_FEATS = { volRel2: 1, surprise: 1, liqRatio: 1, gapPct: -1, histStrength: 1, rsi: 1 };
+const TH_FEATS = { volRel2: 1, surprise: 1, liqRatio: 1, gapPct: -1, histStrength: 1, rsi: 1,
+  mO2: 1, mO1: 1, mAgree: 1, mRanPos: 1, mAlign: 1 };   // mikro-struktur (aktif saat cukup data)
 function evalTaken(rows, thresholds) {
   const taken = rows.filter((r) => applyThresholds2(r, thresholds));
   const cov = rows.length ? taken.length / rows.length : 0;
@@ -319,7 +346,8 @@ function learnThresholds(rows, opts = {}) {
     ok: sel.length > 0, thresholds: sel, train: trainM, test: testM, baselineTest: baseTest,
     trainLb: cur.lb, testLb: +candLbTest.toFixed(4), baselineLbTest: +baseLbTest.toFixed(4),
     // menang out-of-sample: LB uji lebih tinggi DAN cakupan masih memadai DAN winrate naik
-    beatsBaseline: candLbTest > baseLbTest && testM.taken >= (o.minTakenTest || 40) && (testM.coverage || 0) >= o.minCov && testM.takenWinrate > baseTest.takenWinrate,
+    // WR-first (konsisten dgn shouldPromote): menang bila WR uji naik >=2pp, cakupan memadai, LB tak merosot.
+    beatsBaseline: testM.taken >= (o.minTakenTest || 40) && (testM.coverage || 0) >= o.minCov && (testM.takenWinrate - baseTest.takenWinrate) >= 0.02 && candLbTest >= baseLbTest - 0.01,
     note: sel.map((x) => `${x.f} ${x.op} ${x.t}`).join(" & ") || "tidak ada threshold yang menambah nilai",
   };
 }

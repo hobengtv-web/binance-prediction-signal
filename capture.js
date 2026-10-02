@@ -27,6 +27,19 @@ function pctile(arr, p) {
 const rsiBucket = (r) => (r == null ? "na" : r < 30 ? "<30" : r < 40 ? "30-40" : r < 60 ? "40-60" : r < 70 ? "60-70" : ">70");
 const strBucket = (s) => (s == null ? "na" : s < 35 ? "<35" : s <= 50 ? "35-50" : ">50");
 
+/* ===== VETO "NO-EDGE" (default ON; matikan dengan env TA_VETO=0) =====
+   Analisa 2.542 sesi live: sesi tanpa edge ber-WR ~48-50% (≈ koin). Veto membuangnya
+   (accepted=false) agar BOT tidak entry. Ambang bisa diubah via env tanpa ubah kode. */
+const _n = (v, d) => { const x = Number(v); return isFinite(x) ? x : d; };
+const TA_VETO = {
+  on: process.env.TA_VETO !== "0",
+  rewardMin: _n(process.env.TA_VETO_REWARD_MIN, 0.002),
+  rsiLo: _n(process.env.TA_VETO_RSI_LO, 30), rsiHi: _n(process.env.TA_VETO_RSI_HI, 40),
+  volLo: _n(process.env.TA_VETO_VOL_LO, 1.3), volHi: _n(process.env.TA_VETO_VOL_HI, 1.8),
+  hours: String(process.env.TA_VETO_HOURS || "2,3,5,12,21").split(",").map((x) => parseInt(x, 10)).filter((x) => !isNaN(x)), // WIB
+  liqMin: _n(process.env.TA_VETO_LIQ_MIN, 2),
+};
+
 /* ============================================================================
    computeSignal(o) — INTI PERHITUNGAN (murni, tanpa fetch).
    Input: { sym, tf, t0, tfc, idx, ones, five5m, profile, getModel, SignalCore, nowSec }
@@ -83,8 +96,19 @@ function computeSignal(o) {
   const liqLow = typ5m > 0 && proj < floor;
   const liqRatio = typ5m > 0 ? proj / typ5m : 1;
   const thOK = GATES_DEF.applyThresholds({ volRel2, surprise, liqRatio, gapPct: gateNow, histStrength: histTrend.strength, rsi }, profile.thresholds);
-  const accepted = !!grade && !liqLow && thOK;
-  const reject = accepted ? null : (!thOK ? "threshold" : !grade ? "tier" : "liq-low");
+  const accepted0 = !!grade && !liqLow && thOK;
+  // ===== VETO no-edge: buang cohort WR~50% (reward kecil, RSI 30-40, vol choppy, jam buruk, liqud tipis)
+  let veto = null;
+  if (TA_VETO.on) {
+    const wibH = new Date((t0 + 7 * 3600) * 1000).getUTCHours();
+    if (gateNow < TA_VETO.rewardMin) veto = "veto-reward";
+    else if (rsi != null && rsi >= TA_VETO.rsiLo && rsi < TA_VETO.rsiHi) veto = "veto-rsi";
+    else if (volRel2 >= TA_VETO.volLo && volRel2 < TA_VETO.volHi) veto = "veto-vol";
+    else if (TA_VETO.hours.indexOf(wibH) >= 0) veto = "veto-hour";
+    else if (liqRatio < TA_VETO.liqMin) veto = "veto-liq";
+  }
+  const accepted = accepted0 && !veto;
+  const reject = accepted ? null : (veto || (!thOK ? "threshold" : !grade ? "tier" : "liq-low"));
 
   const d2 = ((C2 - lock) / lock) * 100;
   const rewardPct = Math.abs(d2);

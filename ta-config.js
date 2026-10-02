@@ -16,7 +16,7 @@ const CFG = {
   ENTRY_RETRACE_PCT: num(process.env.TA_ENTRY_RETRACE_PCT, 0.025),   // retrace dari ekstrem contra (%) — 0.025 = ambang terpilih (DD 49%->27%)
   ENTRY_MIN_EXTREME_PCT: num(process.env.TA_ENTRY_MIN_EXTREME_PCT, 0.04), // kedalaman ekstrem minimal (%) — 0.04 = ambang terpilih
   CUT_MIN_REMAIN_SEC: num(process.env.TA_CUT_MIN_REMAIN_SEC, 120),   // CUT hanya bila sisa sesi < ini (detik)
-  STOP_LOSS_ENTRY_PCT: num(process.env.TA_STOP_LOSS_ENTRY_PCT, 0.3), // STOP LOSS TA: harga melawan >= X% dari entry -> plan close (0=off)
+  STOP_LOSS_ENTRY_PCT: num(process.env.TA_STOP_LOSS_ENTRY_PCT, 0),   // STOP LOSS TA: 0=OFF (uji share real: stop merugikan)
   EARLYCLOSE_MIN_CAPTURED_PCT: num(process.env.TA_EARLYCLOSE_MIN_CAPTURED_PCT, 70), // early close min % potensi
   ENTRY_MIN_REMAIN_SEC: num(process.env.TA_ENTRY_MIN_REMAIN_SEC, 120), // entry butuh sisa sesi >= ini
   SIMPLE: num(process.env.TA_SIMPLE, 0),                             // 1 = pakai logika TEST (entry depth+retrace, exit trailing saja)

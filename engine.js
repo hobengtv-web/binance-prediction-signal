@@ -45,6 +45,77 @@ const TFS = ["5m", "15m", "1h"];
 function createEngine(deps) {
   const { getKlines, getModel, getGates, log = console.log, onEvent = null } = deps;
   const tfsOf = (sym) => (sym === "BNB" ? ["5m"] : TFS);   // BNB hanya 5m
+  /* ===== LOCK SESI (diekstrak) =====
+     Dipanggil dari (a) loop utama (2s) dan (b) TICK CEPAT 500ms. Tick cepat ini yang membuat sinyal
+     keluar ~t0+2,2-2,8s (bukan ~5s) karena cadence loop 2s tidak sejajar dengan batas sesi.
+     Idempoten: kalau sesi sudah terkunci -> return false. Ada guard in-flight anti dobel-emit. */
+  const _locking = {}, _lastRef = {};
+  async function lockSession(sym, tf) {
+    const nowS = Math.floor(Date.now() / 1000);
+    const t0 = Math.floor(nowS / DUR_S[tf]) * DUR_S[tf];
+    if (nowS - t0 < 2) return false;                       // sinyal = 2 detik pertama
+    const cur = session[sym] && session[sym][tf];
+    if (cur && cur.t0 === t0) return false;                // sudah terkunci
+    const lk = sym + "_" + tf;
+    if (_locking[lk]) return false;
+    const tfc0 = (market[sym] && market[sym].tf && market[sym].tf[tf]) || [];
+    if (!tfc0.some((c) => c.time === t0)) return false;    // candle sesi belum tersedia
+    _locking[lk] = true;
+    try {
+      const profile = (typeof getGates === "function" ? getGates() : null) || GATES_DEF.BOOTSTRAP;
+      const tfc = market[sym].tf[tf] || [];
+      const idx = tfc.findIndex((c) => c.time === t0);
+      let ones = market[sym].ones;
+      // CEPAT: kalau cache 1s sudah memuat candle t0 & t0+1, JANGAN fetch lagi (hemat 0,5-2s).
+      const cachedOK = ones && ones.some((c) => c.time === t0) && ones.some((c) => c.time === t0 + 1);
+      if (!cachedOK) {
+        try {
+          const targeted = await getKlines(sym, "1s", t0 + 2, 70);
+          if (targeted && targeted.some((c) => c.time === t0) && targeted.some((c) => c.time === t0 + 1)) ones = targeted;
+        } catch (_) {}
+      }
+      const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m: market[sym].five5m, profile, getModel, SignalCore, nowSec: nowS });
+      const sigForPlan = r.skipped ? null : r.signal;
+      const plan = computePlan(sym, tf, t0, nowS, sigForPlan, market[sym]);
+      const conf = computeConf(sym, tf, t0, nowS, sigForPlan, market[sym]);
+      session[sym][tf] = { t0, signal: sigForPlan, skipped: r.skipped || null, at: Date.now(), plan, conf };
+      if (!r.skipped) {
+        stats.locked++;
+        // ===== EVENT "start" (KONTRAK S2): entry SEKARANG searah sinyal di harga pasar =====
+        if (onEvent) {
+          try { onEvent({ type: "start", sym, tf, t0: t0, dir: r.signal.dir, accepted: !!r.signal.accepted,
+            grade: r.signal.grade || null, surprise: r.signal.surprise != null ? +r.signal.surprise.toFixed(2) : null,
+            lock: r.signal.lock != null ? r.signal.lock : null, at: Date.now(),
+            latMs: Date.now() - t0 * 1000 }); } catch (_) {}
+        }
+        log(`[ENGINE] ${sym} ${tf} terkunci: dir=${r.signal.dir} grade=${r.signal.grade || "-"} accepted=${r.signal.accepted} volRel2=${r.signal.volRel2} surprise=${String(r.signal.surprise).slice(0, 6)} lat=${Date.now() - t0 * 1000}ms`);
+      } else {
+        log(`[ENGINE] ${sym} ${tf} tanpa sinyal: ${r.skipped}`);
+      }
+      return true;
+    } finally { _locking[lk] = false; }
+  }
+  /* Tick cepat: hanya bekerja saat ada sesi baru yang belum terkunci; refresh data bila candle
+     sesi belum ada (dibatasi >=2s sekali per simbol) supaya tidak membanjiri API. */
+  async function fastLockTick() {
+    const nowS = Math.floor(Date.now() / 1000);
+    for (const sym of ["BTC", "ETH", "BNB"]) {
+      for (const tf of tfsOf(sym)) {
+        const t0 = Math.floor(nowS / DUR_S[tf]) * DUR_S[tf];
+        if (nowS - t0 < 2) continue;
+        const cur = session[sym] && session[sym][tf];
+        if (cur && cur.t0 === t0) continue;
+        const tfc = (market[sym] && market[sym].tf && market[sym].tf[tf]) || [];
+        if (!tfc.some((c) => c.time === t0)) {
+          if (nowS - (_lastRef[sym] || 0) >= 2) { _lastRef[sym] = nowS; try { await refresh(sym); } catch (_) {} }
+          const t2 = (market[sym] && market[sym].tf && market[sym].tf[tf]) || [];
+          if (!t2.some((c) => c.time === t0)) continue;
+        }
+        await lockSession(sym, tf);
+      }
+    }
+  }
+  setInterval(() => { fastLockTick().catch(() => {}); }, 500);   // <- percepat sinyal ke ~t0+2,2-2,8s
   const market = { BTC: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 },
                    ETH: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 },
                    BNB: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 } };
@@ -359,55 +430,10 @@ function createEngine(deps) {
     busy = true;
     try {
       const nowSec = Math.floor(Date.now() / 1000);
-      const profile = (typeof getGates === "function" ? getGates() : null) || GATES_DEF.BOOTSTRAP;
       for (const sym of ["BTC", "ETH", "BNB"]) {
         try { await refresh(sym); } catch (e) { stats.errors++; stats.lastErr = e && e.message; continue; }
         for (const tf of tfsOf(sym)) {
-          const t0 = Math.floor(nowSec / DUR_S[tf]) * DUR_S[tf];
-          if (nowSec - t0 < 2) continue;                    // sinyal = 2 detik pertama; hitung begitu detik ke-2 tutup
-          const cur = session[sym][tf];
-          if (cur && cur.t0 === t0) continue;                // sudah terkunci untuk sesi ini
-          const tfc = market[sym].tf[tf] || [];
-          const idx = tfc.findIndex((c) => c.time === t0);
-          // PENTING: candle 1s di detik t0 & t0+1 di-fetch TERTARGET ke t0 (bukan window bergulir),
-          // supaya sinyal kanonik tetap bisa dihitung walau engine baru mulai di tengah sesi
-          // (mis. device pertama baru membuka app setelah sesi berjalan) -> hasilnya tetap sama.
-          let ones = market[sym].ones;
-          // CEPAT: kalau cache 1s sudah memuat candle t0 & t0+1, JANGAN fetch lagi (hemat 0,5-2s).
-          const cachedOK = ones && ones.some((c) => c.time === t0) && ones.some((c) => c.time === t0 + 1);
-          if (!cachedOK) {
-            try {
-              const targeted = await getKlines(sym, "1s", t0 + 2, 70);
-              if (targeted && targeted.some((c) => c.time === t0) && targeted.some((c) => c.time === t0 + 1)) ones = targeted;
-            } catch (_) {}
-          }
-          const r = computeSignal({
-            sym, tf, t0, tfc, idx, ones, five5m: market[sym].five5m,
-            profile, getModel, SignalCore, nowSec,
-          });
-          const sigForPlan = r.skipped ? null : r.signal;
-          const plan = computePlan(sym, tf, t0, nowSec, sigForPlan, market[sym]);
-          const conf = computeConf(sym, tf, t0, nowSec, sigForPlan, market[sym]);
-          session[sym][tf] = { t0, signal: sigForPlan, skipped: r.skipped || null, at: Date.now(), plan, conf };
-          if (!r.skipped) {
-            stats.locked++;
-            // ===== EVENT "start" (KONTRAK S2) =====
-            // Dikirim SATU KALI per sesi, tepat saat sinyal terkunci (t0+~3s). Artinya bagi BOT:
-            // "boleh entry SEKARANG searah sinyal di harga pasar" (strategi S2: start-entry).
-            // Event dipisah dari "entry" (dip) supaya semantik tidak ambigu:
-            //   start = entry di awal (searah sinyal, harga pasar)
-            //   entry = TA mendeteksi dip -> BOT ROTATE (tutup posisi awal, entry ulang di harga dip)
-            //   exit  = TA minta close -> BOT jual semua
-            if (onEvent) {
-              try { onEvent({ type: "start", sym, tf, t0: t0, dir: r.signal.dir, accepted: !!r.signal.accepted,
-                grade: r.signal.grade || null, surprise: r.signal.surprise != null ? +r.signal.surprise.toFixed(2) : null,
-                lock: r.signal.lock != null ? r.signal.lock : null, at: Date.now(),
-                latMs: Date.now() - t0 * 1000 }); } catch (_) {}
-            }
-            log(`[ENGINE] ${sym} ${tf} terkunci: dir=${r.signal.dir} grade=${r.signal.grade || "-"} accepted=${r.signal.accepted} volRel2=${r.signal.volRel2} surprise=${String(r.signal.surprise).slice(0, 6)}`);
-          } else {
-            log(`[ENGINE] ${sym} ${tf} tanpa sinyal: ${r.skipped}`);
-          }
+          await lockSession(sym, tf);                       // fungsi yg sama dipakai tick cepat 500ms
         }
         // ===== UPDATE LIVE setiap tick =====
         // Sinyal memang DIKUNCI sekali per sesi, TAPI Trade Assistant dan model confidence

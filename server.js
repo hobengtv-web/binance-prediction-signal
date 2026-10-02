@@ -309,7 +309,7 @@ const MODEL_CUR = path.join(MODEL_DIR, "current");
 const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
 const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
 const GATES_DEF = require("./gates.js");
-const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json" };
+const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json" };
 let gatesMeta = { mode: GATES_DEF.BOOTSTRAP.mode, promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
 
@@ -401,6 +401,12 @@ async function refit(trigger = "manual") {
 
       // Tulis konteks PnL-trade SETIAP refit (informasional: konteks TA_FEATS paling untung/rugi)
       try { write("learn_pnl.json", Object.assign({ generated: new Date().toISOString(), version: ver, rows: cand.rows, test: cand.pnlTest }, cand.pnl)); } catch (_) {}
+      // ===== LANGKAH CAKUPAN: jangan terapkan blocker bila model memblok terlalu banyak (mis. seluruh BTC/down) =====
+      const liveEval = dec.promote ? candEval : (incEval || candEval);
+      const minApplyCov = Number(process.env.MIN_APPLY_COV != null ? process.env.MIN_APPLY_COV : 0.35);
+      const applyBlockers = !!liveEval && (liveEval.coverage || 1) >= minApplyCov;
+      try { write("learn_apply.json", { apply: applyBlockers, coverage: liveEval ? liveEval.coverage : null, minApplyCov, at: new Date().toISOString(), note: applyBlockers ? "blocker diterapkan" : `cakupan ${(100 * (liveEval ? liveEval.coverage : 0)).toFixed(0)}% < ${(minApplyCov * 100).toFixed(0)}% -> blocker TIDAK diterapkan (cegah agresif)` }); } catch (_) {}
+      res.applyBlockers = applyBlockers;
       if (dec.promote) {
         write("learn_gate.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.gate));
         write("learn_touch90.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.touch));
@@ -447,7 +453,7 @@ const engine = createEngine({
 });
 engine.start();
 // Jadwal: re-fit otomatis tiap REFIT_INTERVAL_HOURS (default 6 jam) — lebih responsif dari 1x/hari.
-const REFIT_INTERVAL_H = Math.max(1, parseFloat(process.env.REFIT_INTERVAL_HOURS || "6"));
+const REFIT_INTERVAL_H = Math.max(1, parseFloat(process.env.REFIT_INTERVAL_HOURS || "3"));   // refit tiap 3 jam (default)
 const REFIT_CHECK_MIN = Math.max(1, parseInt(process.env.REFIT_CHECK_MIN || "10", 10));
 // Kapan re-fit terakhir berjalan? Dibaca dari promote.jsonl supaya tahan restart container.
 function lastRefitTime() {

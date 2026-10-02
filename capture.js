@@ -142,7 +142,10 @@ function computeSignal(o) {
       if (miWR != null && miWR >= 0.70) strong.push("dir");
       // Terapkan aturan penahan learner yang DIKENAL saat lock (tunggal; kunci: interval/symbol/dir/hour/gap/mode).
       // Dulu hanya `interval=`/`gap=` yang diakui -> aturan `hour=`/`symbol=` hasil mining TAK PERNAH diterapkan.
-      const blocking = (() => {
+      // LANGKAH CAKUPAN: bila model memblok terlalu banyak, flag apply=false -> jangan terapkan.
+      const applyM = (() => { try { return (typeof getModel === "function" ? getModel("apply") : null); } catch (_) { return null; } })();
+      const applyBlockers = !applyM || applyM.apply !== false;
+      const blocking = (!applyBlockers) ? false : (() => {
         const rules = [].concat((g && g.suppress) || [], (t && t.suppress) || []);
         const featVal = { interval: tf, symbol: sym, dir: currentDir, hour: hourB, gap: gapB, mode };
         return rules.some((k) => {

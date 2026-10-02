@@ -364,7 +364,7 @@ function createEngine(deps) {
         try { await refresh(sym); } catch (e) { stats.errors++; stats.lastErr = e && e.message; continue; }
         for (const tf of tfsOf(sym)) {
           const t0 = Math.floor(nowSec / DUR_S[tf]) * DUR_S[tf];
-          if (nowSec - t0 < 3) continue;                    // tunggu detik ke-2 selesai
+          if (nowSec - t0 < 2) continue;                    // sinyal = 2 detik pertama; hitung begitu detik ke-2 tutup
           const cur = session[sym][tf];
           if (cur && cur.t0 === t0) continue;                // sudah terkunci untuk sesi ini
           const tfc = market[sym].tf[tf] || [];
@@ -373,10 +373,14 @@ function createEngine(deps) {
           // supaya sinyal kanonik tetap bisa dihitung walau engine baru mulai di tengah sesi
           // (mis. device pertama baru membuka app setelah sesi berjalan) -> hasilnya tetap sama.
           let ones = market[sym].ones;
-          try {
-            const targeted = await getKlines(sym, "1s", t0 + 2, 70);
-            if (targeted && targeted.some((c) => c.time === t0) && targeted.some((c) => c.time === t0 + 1)) ones = targeted;
-          } catch (_) {}
+          // CEPAT: kalau cache 1s sudah memuat candle t0 & t0+1, JANGAN fetch lagi (hemat 0,5-2s).
+          const cachedOK = ones && ones.some((c) => c.time === t0) && ones.some((c) => c.time === t0 + 1);
+          if (!cachedOK) {
+            try {
+              const targeted = await getKlines(sym, "1s", t0 + 2, 70);
+              if (targeted && targeted.some((c) => c.time === t0) && targeted.some((c) => c.time === t0 + 1)) ones = targeted;
+            } catch (_) {}
+          }
           const r = computeSignal({
             sym, tf, t0, tfc, idx, ones, five5m: market[sym].five5m,
             profile, getModel, SignalCore, nowSec,
@@ -397,7 +401,8 @@ function createEngine(deps) {
             if (onEvent) {
               try { onEvent({ type: "start", sym, tf, t0: t0, dir: r.signal.dir, accepted: !!r.signal.accepted,
                 grade: r.signal.grade || null, surprise: r.signal.surprise != null ? +r.signal.surprise.toFixed(2) : null,
-                lock: r.signal.lock != null ? r.signal.lock : null, at: Date.now() }); } catch (_) {}
+                lock: r.signal.lock != null ? r.signal.lock : null, at: Date.now(),
+                latMs: Date.now() - t0 * 1000 }); } catch (_) {}
             }
             log(`[ENGINE] ${sym} ${tf} terkunci: dir=${r.signal.dir} grade=${r.signal.grade || "-"} accepted=${r.signal.accepted} volRel2=${r.signal.volRel2} surprise=${String(r.signal.surprise).slice(0, 6)}`);
           } else {

@@ -341,9 +341,13 @@ function computeTradePlan(bias, ctx) {
         ? TA.PER_TF[ctx.tf].TRAIL_GAP_PP : TA.TRAIL_GAP_PP;
       const gapHit = gapPp > 0 && trailArmed && (capPeakV - capturedPct) >= gapPp;
       const trailHitCond = (tpHit || gbHit || gapHit || (gapPp <= 0 && trailRetracePct != null && trailRetracePct >= cbEff));
-      if (trailArmed && trailHitCond && (trailHeldMs >= MIN_HOLD_TF || hybEarly || beHit || tpHit || gbHit)) {
+      // STOP LOSS TA: harga bergerak MELAWAN entry >= ambang (cegah plan "tahan ke 0")
+      const advFromEntryPct = (entPx != null && ctx.price != null) ? ((isUp ? (entPx - ctx.price) : (ctx.price - entPx)) / entPx) * 100 : 0;
+      const stopHit = TA.STOP_LOSS_ENTRY_PCT > 0 && entered && advFromEntryPct >= TA.STOP_LOSS_ENTRY_PCT;
+      if (stopHit || (trailArmed && trailHitCond && (trailHeldMs >= MIN_HOLD_TF || hybEarly || beHit || tpHit || gbHit))) {
         state = "CLOSE"; cls = "exit";
-        action = gapHit ? `TRAIL EXIT (GAP) — puncak ${capPeakV.toFixed(0)}% -> sekarang ${capturedPct}% (gap -${(capPeakV - capturedPct).toFixed(0)}pp, ambang ${gapPp}pp)`
+        action = stopHit ? `STOP LOSS — harga ${advFromEntryPct.toFixed(3)}% melawan entry (ambang ${TA.STOP_LOSS_ENTRY_PCT}%)`
+          : gapHit ? `TRAIL EXIT (GAP) — puncak ${capPeakV.toFixed(0)}% -> sekarang ${capturedPct}% (gap -${(capPeakV - capturedPct).toFixed(0)}pp, ambang ${gapPp}pp)`
           : tpHit ? `TRAIL EXIT (TP ${TA.TP_CAP_PCT}%) — profit ${capturedPct}% dari potensi`
           : gbHit ? `TRAIL EXIT (give-back ${TA.TRAIL_GIVEBACK_PCT}% dari puncak profit) — profit ${capturedPct}% dari potensi`
           : `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${cbEff.toFixed(3)}%${cbStd > cbBase ? ` · adaptif k=${TA.TRAIL_STD_K}` : ""}) · profit ${capturedPct}% dari potensi`;

@@ -185,6 +185,27 @@ function evalModel(rows, gateRules, touchRules) {
   const wr = taken.length ? mean(taken.map((r) => r.won)) : 0;
   return { n: rows.length, taken: taken.length, coverage: +cov.toFixed(4), takenWinrate: +wr.toFixed(4), score: +(wr * Math.sqrt(cov)).toFixed(4), gateBlockers: gb.map((b) => b.k), touchBlockers: tb.map((b) => b.k) };
 }
+/* ---------- VALIDASI BERGULIR (rolling / k-fold kronologis) ----------
+   Model dinilai pada k jendela uji berurutan, bukan satu split. Dipakai untuk membandingkan
+   kandidat vs incumbent pada jendela yang SAMA, sehingga tidak terjebak "insiden lama" yang
+   metriknya berasal dari sampel kecil/beda waktu. */
+function evalModelRolling(rows, gateRules, touchRules, k = 3) {
+  const n = rows.length;
+  if (n < k * 25) return evalModel(rows, gateRules, touchRules);
+  const size = Math.floor(n / k);
+  const parts = [];
+  for (let i = 0; i < k; i++) {
+    const a = i * size, b = (i === k - 1) ? n : (i + 1) * size;
+    parts.push(evalModel(rows.slice(a, b), gateRules, touchRules));
+  }
+  const m = (f) => parts.reduce((s, p) => s + (p[f] || 0), 0) / parts.length;
+  return {
+    n, parts, taken: Math.round(m("taken")), coverage: +m("coverage").toFixed(4),
+    takenWinrate: +m("takenWinrate").toFixed(4), score: +m("score").toFixed(4),
+    scoreMin: +Math.min(...parts.map((p) => p.score)).toFixed(4),
+    gateBlockers: parts[0].gateBlockers, touchBlockers: parts[0].touchBlockers,
+  };
+}
 
 /* ---------- bangun model dari baris fitur ---------- */
 function buildModel(rows, opts = {}) {
@@ -313,4 +334,4 @@ function shouldPromote(candidate, incumbent, minTake = 40) {
   return { promote: false, why: `skor kandidat ${c.score} tidak mengalahkan insiden ${i.score}` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, shouldPromote, blockersOf, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, shouldPromote, blockersOf, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

@@ -354,12 +354,20 @@ async function refit(trigger = "manual") {
     if (!cand.ok) { res.why = cand.reason; res.promote = false; }
     else {
       const inc = incumbentModel();
-      // bandingkan pada data uji yang SAMA jika model berjalan punya metrik;
-      // kalau tidak ada, kandidat dipakai (kondisi awal).
-      const dec = LEARNER.shouldPromote({ metrics: cand.metrics }, inc);
+      // FIX: bandingkan kandidat vs incumbent pada JENDELA UJI SEKARANG yang SAMA, dengan
+      // validasi BERGULIR (3 lipatan). Sebelumnya incumbent dinilai dari metrik lama (jendela
+      // kecil 3 hari lalu) sehingga kandidat bagus tak pernah bisa promote.
+      const splitIdxNow = Math.floor(rows.length * 0.7);
+      const testNow = rows.slice(splitIdxNow);
+      const candEval = LEARNER.evalModelRolling(testNow, cand.gate.rules, cand.touch.rules, 3);
+      const incEval = inc ? LEARNER.evalModelRolling(testNow, inc.gate.rules, inc.touch.rules, 3) : null;
+      const dec = LEARNER.shouldPromote({ metrics: candEval }, incEval ? { metrics: incEval } : null);
       res.promote = dec.promote; res.why = dec.why;
-      res.candidate = cand.metrics;
-      res.incumbent = inc ? inc.metrics : null;
+      res.candidate = candEval;
+      res.candidateSingle = cand.metrics;
+      res.incumbent = incEval;
+      res.incumbentStored = inc ? inc.metrics : null;
+      res.rollFold = { k: 3, candScoreMin: candEval.scoreMin, incScoreMin: incEval ? incEval.scoreMin : null };
       ensureModelDirs();
       const ver = new Date().toISOString().replace(/[:.]/g, "-");
       const hist = path.join(MODEL_DIR, "v-" + ver);
@@ -389,7 +397,7 @@ async function refit(trigger = "manual") {
         write("learn_gate.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.gate));
         write("learn_touch90.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, baseline: cand.baseline }, cand.touch));
         write("lessons.json", Object.assign({ generated: new Date().toISOString(), version: ver }, cand.lessons));
-        const meta = { version: ver, promotedAt: new Date().toISOString(), trigger, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline, why: dec.why, gatesMode: gatesMeta.mode, gatesThresholds: gatesMeta.thresholds || null, gatesMetrics: gatesMeta.metrics || null };
+        const meta = { version: ver, promotedAt: new Date().toISOString(), trigger, rows: cand.rows, metrics: candEval, metricsSingle: cand.metrics, baseline: cand.baseline, why: dec.why, gatesMode: gatesMeta.mode, gatesThresholds: gatesMeta.thresholds || null, gatesMetrics: gatesMeta.metrics || null };
         write("meta.json", meta);
         modelMeta = meta;
         res.version = ver;
@@ -430,9 +438,8 @@ const engine = createEngine({
   onEvent: (ev) => broadcastTA(ev),
 });
 engine.start();
-// Jadwal: setiap jam, tapi hanya menjalankan re-fit sekali per hari pada REFIT_HOUR (default 03:00 WIB/server).
-const REFIT_HOUR = parseInt(process.env.REFIT_HOUR || "3", 10);
-let lastRefitDay = null;
+// Jadwal: re-fit otomatis tiap REFIT_INTERVAL_HOURS (default 6 jam) — lebih responsif dari 1x/hari.
+const REFIT_INTERVAL_H = Math.max(1, parseFloat(process.env.REFIT_INTERVAL_HOURS || "6"));
 const REFIT_CHECK_MIN = Math.max(1, parseInt(process.env.REFIT_CHECK_MIN || "10", 10));
 // Kapan re-fit terakhir berjalan? Dibaca dari promote.jsonl supaya tahan restart container.
 function lastRefitTime() {
@@ -446,18 +453,14 @@ function lastRefitTime() {
   return 0;
 }
 setInterval(() => {
-  const d = new Date();
-  const day = d.toISOString().slice(0, 10);
   const last = lastRefitTime();
-  const stale = last > 0 && (Date.now() - last) > 26 * 3600000;   // jadwal harian terlewat
-  const onTime = d.getHours() === REFIT_HOUR && lastRefitDay !== day;
-  if (onTime || stale) {
-    lastRefitDay = day;
-    console.log(`[REFIT] memulai re-fit otomatis (${onTime ? "jadwal harian" : "menyusul: re-fit terakhir > 26 jam lalu"})`);
-    refit(stale && !onTime ? "jadwal-susulan" : "jadwal").catch(() => {});
+  const due = last === 0 || (Date.now() - last) > REFIT_INTERVAL_H * 3600000;
+  if (due) {
+    console.log(`[REFIT] memulai re-fit otomatis (interval ${REFIT_INTERVAL_H} jam)`);
+    refit("jadwal").catch(() => {});
   }
 }, REFIT_CHECK_MIN * 60 * 1000);
-console.log(`[REFIT] otomatis: cek tiap ${REFIT_CHECK_MIN} menit · jadwal harian ${REFIT_HOUR}:00 (server) · menyusul sendiri bila terlewat (>26 jam)`);
+console.log(`[REFIT] otomatis: cek tiap ${REFIT_CHECK_MIN} menit · re-fit tiap ${REFIT_INTERVAL_H} jam`);
 setTimeout(() => { try { const l = lastRefitTime(); if (l) console.log(`[REFIT] re-fit terakhir: ${new Date(l).toISOString()}`); } catch (_) {} }, 3000);
 
 const clients = new Set();

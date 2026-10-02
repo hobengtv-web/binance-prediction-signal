@@ -46,9 +46,11 @@ const CFG = {
 // ===== OVERRIDE PER TIMEFRAME =====
 CFG.PER_TF = {
   "5m":  { ENTRY_MIN_REMAIN_SEC: CFG.ENTRY_MIN_REMAIN_SEC, TRAIL_MIN_HOLD_MS: CFG.TRAIL_MIN_HOLD_MS,
-           TRAIL_CB_PCT: num(process.env.TA_5M_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT) },
+           TRAIL_CB_PCT: num(process.env.TA_5M_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT),
+           TRAIL_GAP_PP: num(process.env.TA_5M_TRAIL_GAP_PP, 0) },    // 5m: mode gap OFF (harness: gap merugikan di 5m)
   "15m": { ENTRY_MIN_REMAIN_SEC: num(process.env.TA_15M_ENTRY_MIN_REMAIN_SEC, 180), TRAIL_MIN_HOLD_MS: num(process.env.TA_15M_TRAIL_MIN_HOLD_MS, 20000),
-           TRAIL_CB_PCT: num(process.env.TA_15M_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT) },
+           TRAIL_CB_PCT: num(process.env.TA_15M_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT),
+           TRAIL_GAP_PP: num(process.env.TA_15M_TRAIL_GAP_PP, 15) }, // 15m: gap 15pp ON (harness: $166->$211, DD 25->21%)
   "1h":  { ENTRY_MIN_REMAIN_SEC: num(process.env.TA_1H_ENTRY_MIN_REMAIN_SEC, 300), TRAIL_MIN_HOLD_MS: num(process.env.TA_1H_TRAIL_MIN_HOLD_MS, CFG.TRAIL_MIN_HOLD_MS),
            TRAIL_CB_PCT: num(process.env.TA_1H_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT) },
 };

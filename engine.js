@@ -387,6 +387,18 @@ function createEngine(deps) {
           session[sym][tf] = { t0, signal: sigForPlan, skipped: r.skipped || null, at: Date.now(), plan, conf };
           if (!r.skipped) {
             stats.locked++;
+            // ===== EVENT "start" (KONTRAK S2) =====
+            // Dikirim SATU KALI per sesi, tepat saat sinyal terkunci (t0+~3s). Artinya bagi BOT:
+            // "boleh entry SEKARANG searah sinyal di harga pasar" (strategi S2: start-entry).
+            // Event dipisah dari "entry" (dip) supaya semantik tidak ambigu:
+            //   start = entry di awal (searah sinyal, harga pasar)
+            //   entry = TA mendeteksi dip -> BOT ROTATE (tutup posisi awal, entry ulang di harga dip)
+            //   exit  = TA minta close -> BOT jual semua
+            if (onEvent) {
+              try { onEvent({ type: "start", sym, tf, t0: t0Live, dir: r.signal.dir, accepted: !!r.signal.accepted,
+                grade: r.signal.grade || null, surprise: r.signal.surprise != null ? +r.signal.surprise.toFixed(2) : null,
+                lock: r.signal.lock != null ? r.signal.lock : null, at: Date.now() }); } catch (_) {}
+            }
             log(`[ENGINE] ${sym} ${tf} terkunci: dir=${r.signal.dir} grade=${r.signal.grade || "-"} accepted=${r.signal.accepted} volRel2=${r.signal.volRel2} surprise=${String(r.signal.surprise).slice(0, 6)}`);
           } else {
             log(`[ENGINE] ${sym} ${tf} tanpa sinyal: ${r.skipped}`);

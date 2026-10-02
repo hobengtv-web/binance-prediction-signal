@@ -822,7 +822,7 @@ http.createServer(async (req, res) => {
         };
       })(),
       // jadwal re-fit berikutnya (jam server) supaya user tahu kapan model bisa berubah
-      nextRefitAt: (() => { const d = new Date(); const n = new Date(d); n.setHours(REFIT_HOUR, 0, 0, 0); if (n <= d) n.setDate(n.getDate() + 1); return n.toISOString(); })(),
+      nextRefitAt: (() => { const l = lastRefitTime(); const base = l > 0 ? l : Date.now(); return new Date(base + REFIT_INTERVAL_H * 3600000).toISOString(); })(),
       model: {
         source: learned ? "learned" : "default",
         version: modelMeta.version || "default", promotedAt: modelMeta.promotedAt || null, trigger: modelMeta.trigger || null,

@@ -74,7 +74,16 @@ function createEngine(deps) {
           if (targeted && targeted.some((c) => c.time === t0) && targeted.some((c) => c.time === t0 + 1)) ones = targeted;
         } catch (_) {}
       }
-      const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m: market[sym].five5m, profile, getModel, SignalCore, nowSec: nowS });
+      // Alignment multi-TF (arah tren tf lain SEBELUM t0) — fitur model arah U/D
+      let align = null;
+      try {
+        align = {};
+        for (const t of TFS) {
+          const arr = (market[sym].tf[t] || []).filter((c) => c.time < t0);
+          if (arr.length >= 20) align[t] = SignalCore.analyzeHistoricalTrend(arr, 50).predictDir;
+        }
+      } catch (_) {}
+      const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m: market[sym].five5m, profile, getModel, SignalCore, nowSec: nowS, align });
       const sigForPlan = r.skipped ? null : r.signal;
       const plan = computePlan(sym, tf, t0, nowS, sigForPlan, market[sym]);
       const conf = computeConf(sym, tf, t0, nowS, sigForPlan, market[sym]);

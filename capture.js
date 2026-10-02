@@ -68,6 +68,15 @@ function computeSignal(o) {
   const vol2sum = (o1.vol || 0) + (o2.vol || 0);
   const pre = ones.filter((c) => c.time >= t0 - 60 && c.time < t0);
   const sigma1s = pre.length ? mean(pre.map((c) => c.high - c.low)) : 0;
+  // ===== MIKRO-STRUKTUR (untuk model arah U/D; direkam ke ledger) =====
+  const preHigh = pre.length ? Math.max(...pre.map((c) => c.high)) : null;
+  const preLow = pre.length ? Math.min(...pre.map((c) => c.low)) : null;
+  const ranPos = (preHigh != null && preLow != null && preHigh > preLow) ? (C2 - preLow) / (preHigh - preLow) : null;
+  const o1Body = (o1.close || 0) - (o1.open || 0), o2Body = (o2.close || 0) - (o2.open || 0);
+  const bodyAgree = (o1Body !== 0 && Math.sign(o1Body) === Math.sign(o2Body)) ? 1 : 0;
+  const sgn = C2 > lock ? 1 : -1;   // searah arah sinyal?
+  const o1BodyS = sgn * o1Body, o2BodyS = sgn * o2Body;
+  const align = o.align || null;
   const volRel2 = baseVol > 0 ? (vol2sum * (tfSec / 2)) / baseVol : 1;
   const moveAbs = Math.abs(C2 - lock);
   const mv2 = lock > 0 ? (moveAbs / lock) * 100 : 0;
@@ -152,6 +161,11 @@ function computeSignal(o) {
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
       rewardPct: +rewardPct.toFixed(4), liqRatio: +liqRatio.toFixed(3), liqLow: !!liqLow,
       touchRate, gateKey: `${tf}|${mode}|${currentDir}|rsi:${rsiBucket(rsi)}|str:${strBucket(histTrend.strength)}`,
+      micro: {
+        o1BodyS: +o1BodyS.toFixed(5), o2BodyS: +o2BodyS.toFixed(5), bodyAgree, sigma1s: +sigma1s.toFixed(5),
+        preHigh, preLow, ranPos: ranPos != null ? +ranPos.toFixed(3) : null,
+        baseVol: +baseVol.toFixed(2), vol2sum: +vol2sum.toFixed(3), proj: +proj.toFixed(2), align: align || null,
+      },
       // OFI sesi dari flow server (null = belum ada data). Ikut payload -> semua device
       // menampilkan angka yang SAMA, dan ikut terekam ke ledger/learner.
       ofi: FLOW.sessionOFI(sym, t0, nowSec),

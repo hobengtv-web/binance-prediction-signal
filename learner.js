@@ -401,6 +401,11 @@ function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.25) {
   const cMin = (c.parts && c.parts.length) ? Math.min(...c.parts.map((p) => p.takenWinrate)) : c.takenWinrate;
   const iMin = (i.parts && i.parts.length) ? Math.min(...i.parts.map((p) => p.takenWinrate)) : i.takenWinrate;
   const dWr = c.takenWinrate - i.takenWinrate;
+  // ===== JALUR PROMOSI PnL-TRADE: profit naik jelas (>=0.02pp/trade) walau WR tak naik 2pp =====
+  const cp0 = c.pnl, ip0 = i.pnl;
+  if (cp0 && ip0 && cp0.n >= 30 && ip0.n >= 30 && (cp0.meanPnl - ip0.meanPnl) >= 0.02) {
+    return { promote: true, why: `PnL ${cp0.meanPnl}% (+${(cp0.meanPnl - ip0.meanPnl).toFixed(3)}pp) n ${cp0.n} vs insiden ${ip0.meanPnl}% (n ${ip0.n}) · WR ${(c.takenWinrate * 100).toFixed(1)}% cakupan ${((c.coverage || 0) * 100).toFixed(0)}%` };
+  }
   if (dWr >= 0.02 && cMin >= iMin) {
     // GUARD PnL-TRADE: bila data PnL memadai, kandidat TIDAK boleh menurunkan profit.
     const cp = c.pnl, ip = i.pnl;

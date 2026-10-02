@@ -140,9 +140,17 @@ function computeSignal(o) {
       if (touchRate != null && touchRate < 0.62) weak.push("touch");
       if (touchRate != null && touchRate >= 0.72) strong.push("touch");
       if (miWR != null && miWR >= 0.70) strong.push("dir");
+      // Terapkan aturan penahan learner yang DIKENAL saat lock (tunggal; kunci: interval/symbol/dir/hour/gap/mode).
+      // Dulu hanya `interval=`/`gap=` yang diakui -> aturan `hour=`/`symbol=` hasil mining TAK PERNAH diterapkan.
       const blocking = (() => {
-        const gb = (g && g.suppress) || [], tbs = (t && t.suppress) || [];
-        return gb.indexOf(`interval=${tf}`) >= 0 || tbs.indexOf(`gap=${gapB}`) >= 0;
+        const rules = [].concat((g && g.suppress) || [], (t && t.suppress) || []);
+        const featVal = { interval: tf, symbol: sym, dir: currentDir, hour: hourB, gap: gapB, mode };
+        return rules.some((k) => {
+          if (typeof k !== "string" || k.indexOf("&") !== -1) return false;
+          const i = k.indexOf("="); if (i < 0) return false;
+          const f = k.slice(0, i);
+          return featVal[f] != null && String(featVal[f]) === k.slice(i + 1);
+        });
       })();
       learn = Object.assign(learn, {
         touch: touchRate, dirWR: miWR, intervalWR: ivWR, blocking,

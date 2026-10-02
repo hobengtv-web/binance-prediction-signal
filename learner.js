@@ -195,9 +195,12 @@ function mineRules(train, test, FEATS, PAIRS, base, metric, opts) {
 
 /* ---------- evaluasi model sebagai FILTER (dipakai untuk keputusan promosi) ---------- */
 // Aturan penahan yang dipakai app: gate -> HANYA aturan interval tunggal; touch -> HANYA gap tunggal.
+// Kunci fitur yang DIKENAL saat lock (bisa diterapkan live oleh capture.js). Harus sama dgn
+// yang dievaluasi di sini, supaya metrik model = apa yang benar-benar diterapkan.
+const APPLY_KEYS = new Set(["interval", "symbol", "dir", "hour", "gap", "mode"]);
 function blockersOf(rules, metric) {
   return rules.filter((r) => r.verdict === "suppress" && r.k.indexOf("&") === -1 &&
-    (r.metric === "won" ? r.k.indexOf("interval=") === 0 : r.k.indexOf("gap=") === 0));
+    APPLY_KEYS.has(r.k.slice(0, r.k.indexOf("="))));
 }
 function decide(row, blockers) {
   return !blockers.some((b) => {
@@ -423,4 +426,4 @@ function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.25) {
   return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (min-fold ${(cMin * 100).toFixed(1)}%) tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, APPLY_KEYS, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

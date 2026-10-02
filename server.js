@@ -309,7 +309,7 @@ const MODEL_CUR = path.join(MODEL_DIR, "current");
 const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
 const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
 const GATES_DEF = require("./gates.js");
-const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json" };
+const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json" };
 let gatesMeta = { mode: GATES_DEF.BOOTSTRAP.mode, promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
 
@@ -361,13 +361,19 @@ async function refit(trigger = "manual") {
       const testNow = rows.slice(splitIdxNow);
       const candEval = LEARNER.evalModelRolling(testNow, cand.gate.rules, cand.touch.rules, 3);
       const incEval = inc ? LEARNER.evalModelRolling(testNow, inc.gate.rules, inc.touch.rules, 3) : null;
-      const dec = LEARNER.shouldPromote({ metrics: candEval }, incEval ? { metrics: incEval } : null);
+      // OBJEKTIF PnL-TRADE (res.trade): agar promosi mengejar PROFIT, bukan hanya winrate.
+      const candPnl = LEARNER.evalModelPnl(testNow, cand.gate.rules, cand.touch.rules);
+      const incPnl = inc ? LEARNER.evalModelPnl(testNow, inc.gate.rules, inc.touch.rules) : null;
+      const dec = LEARNER.shouldPromote(
+        { metrics: Object.assign({}, candEval, { pnl: candPnl }) },
+        incEval ? { metrics: Object.assign({}, incEval, { pnl: incPnl }) } : null);
       res.promote = dec.promote; res.why = dec.why;
       res.candidate = candEval;
       res.candidateSingle = cand.metrics;
       res.incumbent = incEval;
       res.incumbentStored = inc ? inc.metrics : null;
       res.rollFold = { k: 3, candScoreMin: candEval.scoreMin, incScoreMin: incEval ? incEval.scoreMin : null };
+      res.pnl = { candidate: candPnl, incumbent: incPnl, allMeanPnl: cand.pnl && cand.pnl.all, n: cand.pnl && cand.pnl.n };
       ensureModelDirs();
       const ver = new Date().toISOString().replace(/[:.]/g, "-");
       const hist = path.join(MODEL_DIR, "v-" + ver);
@@ -395,9 +401,11 @@ async function refit(trigger = "manual") {
 
       if (dec.promote) {
         write("learn_gate.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.gate));
-        write("learn_touch90.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, baseline: cand.baseline }, cand.touch));
+        write("learn_touch90.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.touch));
         write("lessons.json", Object.assign({ generated: new Date().toISOString(), version: ver }, cand.lessons));
-        const meta = { version: ver, promotedAt: new Date().toISOString(), trigger, rows: cand.rows, metrics: candEval, metricsSingle: cand.metrics, baseline: cand.baseline, why: dec.why, gatesMode: gatesMeta.mode, gatesThresholds: gatesMeta.thresholds || null, gatesMetrics: gatesMeta.metrics || null };
+        // PnL-trade: konteks TA_FEATS yang paling untung/rugi + metrik uji
+        write("learn_pnl.json", Object.assign({ generated: new Date().toISOString(), version: ver, rows: cand.rows, test: cand.pnlTest }, cand.pnl));
+        const meta = { version: ver, promotedAt: new Date().toISOString(), trigger, rows: cand.rows, metrics: candEval, metricsSingle: cand.metrics, baseline: cand.baseline, why: dec.why, pnl: { test: cand.pnlTest, allMeanPnl: cand.pnl && cand.pnl.all, n: cand.pnl && cand.pnl.n }, gatesMode: gatesMeta.mode, gatesThresholds: gatesMeta.thresholds || null, gatesMetrics: gatesMeta.metrics || null };
         write("meta.json", meta);
         modelMeta = meta;
         res.version = ver;

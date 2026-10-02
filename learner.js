@@ -232,6 +232,38 @@ function evalModelRolling(rows, gateRules, touchRules, k = 3) {
     gateBlockers: parts[0].gateBlockers, touchBlockers: parts[0].touchBlockers,
   };
 }
+/* ---------- OBJEKTIF PnL-TRADE (pakai res.trade -> pnlPct) ----------
+   Mengukur rata-rata PnL per trade dari sinyal yang DIAMBIL, agar promosi mengejar PROFIT,
+   bukan hanya winrate. Hanya baris yang punya pnlPct (TA benar-benar masuk & keluar). */
+function evalModelPnl(rows, gateRules, touchRules) {
+  const gb = blockersOf(gateRules.map((r) => ({ ...r, metric: "won" })), "won");
+  const tb = blockersOf(touchRules.map((r) => ({ ...r, metric: "touch" })), "touch");
+  const taken = rows.filter((r) => r.pnlPct != null && decide(r, gb) && decide(r, tb));
+  const n = taken.length;
+  return {
+    n,
+    meanPnl: n ? +mean(taken.map((r) => r.pnlPct)).toFixed(4) : 0,
+    winRate: n ? +mean(taken.map((r) => (r.pnlPct > 0 ? 1 : 0))).toFixed(4) : 0,
+  };
+}
+// Konteks TA_FEATS dengan PnL terburuk/terbaik (lessons + kandidat aturan PnL).
+function pnlContexts(rows, FEATS) {
+  const base = rows.filter((r) => r.pnlPct != null);
+  if (!base.length) return { all: 0, n: 0, contexts: [] };
+  const all = mean(base.map((r) => r.pnlPct));
+  const out = [];
+  for (const name of Object.keys(FEATS)) {
+    const g = groupBy(base, FEATS[name]);
+    for (const [k, arr] of g) {
+      if (arr.length < 15) continue;
+      const m = mean(arr.map((r) => r.pnlPct));
+      out.push({ f: name, k, n: arr.length, meanPnl: +m.toFixed(4), delta: +(m - all).toFixed(4),
+        verdict: m < all - 0.02 ? "suppress" : m > all + 0.02 ? "boost" : "neutral" });
+    }
+  }
+  out.sort((a, b) => a.meanPnl - b.meanPnl);
+  return { all: +all.toFixed(4), n: base.length, contexts: out };
+}
 
 /* ---------- bangun model dari baris fitur ---------- */
 function buildModel(rows, opts = {}) {
@@ -255,6 +287,9 @@ function buildModel(rows, opts = {}) {
     touch: { buckets: touchBuckets, rules: touchRules, suppress: touchSuppress, boost: touchRules.filter((r) => r.verdict === "boost").map((r) => r.k) },
     lessons: { lessons: lessonsFrom(gateRules, touchRules, test, dirBase, touchBase) },
     metrics,
+    // ===== OBJEKTIF PnL (res.trade) =====
+    pnl: pnlContexts(train, TA_FEATS),
+    pnlTest: evalModelPnl(test, gateRules, touchRules),
   };
 }
 
@@ -367,9 +402,15 @@ function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.25) {
   const iMin = (i.parts && i.parts.length) ? Math.min(...i.parts.map((p) => p.takenWinrate)) : i.takenWinrate;
   const dWr = c.takenWinrate - i.takenWinrate;
   if (dWr >= 0.02 && cMin >= iMin) {
-    return { promote: true, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (+${(dWr * 100).toFixed(1)}pp) cakupan ${((c.coverage || 0) * 100).toFixed(0)}% · min-fold ${(cMin * 100).toFixed(1)}% vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)` };
+    // GUARD PnL-TRADE: bila data PnL memadai, kandidat TIDAK boleh menurunkan profit.
+    const cp = c.pnl, ip = i.pnl;
+    if (cp && ip && cp.n >= 30 && ip.n >= 30 && cp.meanPnl < ip.meanPnl - 0.02) {
+      return { promote: false, why: `WR naik tapi PnL kandidat ${cp.meanPnl}% < insiden ${ip.meanPnl}% (profit turun) — ditolak` };
+    }
+    const pnlTxt = (cp && ip) ? ` · PnL ${cp.meanPnl}% vs ${ip.meanPnl}% (n ${cp.n}/${ip.n})` : "";
+    return { promote: true, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (+${(dWr * 100).toFixed(1)}pp) cakupan ${((c.coverage || 0) * 100).toFixed(0)}% · min-fold ${(cMin * 100).toFixed(1)}% vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)${pnlTxt}` };
   }
   return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (min-fold ${(cMin * 100).toFixed(1)}%) tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, shouldPromote, blockersOf, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

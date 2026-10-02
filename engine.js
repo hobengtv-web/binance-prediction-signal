@@ -49,7 +49,7 @@ function createEngine(deps) {
      Dipanggil dari (a) loop utama (2s) dan (b) TICK CEPAT 500ms. Tick cepat ini yang membuat sinyal
      keluar ~t0+2,2-2,8s (bukan ~5s) karena cadence loop 2s tidak sejajar dengan batas sesi.
      Idempoten: kalau sesi sudah terkunci -> return false. Ada guard in-flight anti dobel-emit. */
-  const _locking = {}, _lastRef = {};
+  const _locking = {}, _lastRef = {}, _sched = {};
   async function lockSession(sym, tf) {
     const nowS = Math.floor(Date.now() / 1000);
     const t0 = Math.floor(nowS / DUR_S[tf]) * DUR_S[tf];
@@ -114,8 +114,22 @@ function createEngine(deps) {
         await lockSession(sym, tf);
       }
     }
+    // JADWALKAN lock TEPAT di t0+2050ms untuk SEMUA (sym,tf) -> tidak menunggu tick yg tidak sejajar.
+    // Ini memangkas 0,5-1,5s: sinyal keluar sedini mungkin (fetch+compute saja setelahnya).
+    for (const sym of ["BTC", "ETH", "BNB"]) {
+      for (const tf of tfsOf(sym)) {
+        const dur = (DUR_S[tf] || 300) * 1000;
+        const t0ms = (Math.floor(nowS * 1000 / dur) + 1) * dur;
+        const wait = t0ms + 2050 - Date.now();
+        if (wait < 0 || wait > 2800) continue;
+        const sk = sym + "_" + tf + "_" + t0ms;
+        if (_sched[sk]) continue;
+        _sched[sk] = 1;
+        setTimeout(() => { try { lockSession(sym, tf).catch(() => {}); } catch (_) {} }, wait);
+      }
+    }
   }
-  setInterval(() => { fastLockTick().catch(() => {}); }, 500);   // <- percepat sinyal ke ~t0+2,2-2,8s
+  setInterval(() => { fastLockTick().catch(() => {}); }, 250);   // granularitas lebih halus (cadangan)
   const market = { BTC: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 },
                    ETH: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 },
                    BNB: { ones: [], tf: {}, five5m: [], five5s: [], onesHist: [], lastOne: 0 } };

@@ -334,10 +334,14 @@ function computeTradePlan(bias, ctx) {
       const peakFavNow = (trailRetracePct != null && _px) ? (favor + trailRetracePct * _px / 100) : null;
       const gbHit = !!(TA.TRAIL_GIVEBACK_PCT > 0 && peakFavNow != null && peakFavNow > 0 && favor < peakFavNow
         && ((peakFavNow - favor) / peakFavNow) * 100 >= TA.TRAIL_GIVEBACK_PCT);
-      const trailHitCond = (tpHit || gbHit || (trailRetracePct != null && trailRetracePct >= cbEff));
+      // MODE GAP: keluar bila capture turun >= TRAIL_GAP_PP poin dari PUNCAK capture (mis. 50%->35%).
+      const capPeakV = ctx.capPeak != null ? ctx.capPeak : capturedPct;
+      const gapHit = TA.TRAIL_GAP_PP > 0 && trailArmed && (capPeakV - capturedPct) >= TA.TRAIL_GAP_PP;
+      const trailHitCond = (tpHit || gbHit || gapHit || (TA.TRAIL_GAP_PP <= 0 && trailRetracePct != null && trailRetracePct >= cbEff));
       if (trailArmed && trailHitCond && (trailHeldMs >= MIN_HOLD_TF || hybEarly || beHit || tpHit || gbHit)) {
         state = "CLOSE"; cls = "exit";
-        action = tpHit ? `TRAIL EXIT (TP ${TA.TP_CAP_PCT}%) — profit ${capturedPct}% dari potensi`
+        action = gapHit ? `TRAIL EXIT (GAP) — puncak ${capPeakV.toFixed(0)}% -> sekarang ${capturedPct}% (gap -${(capPeakV - capturedPct).toFixed(0)}pp)`
+          : tpHit ? `TRAIL EXIT (TP ${TA.TP_CAP_PCT}%) — profit ${capturedPct}% dari potensi`
           : gbHit ? `TRAIL EXIT (give-back ${TA.TRAIL_GIVEBACK_PCT}% dari puncak profit) — profit ${capturedPct}% dari potensi`
           : `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${cbEff.toFixed(3)}%${cbStd > cbBase ? ` · adaptif k=${TA.TRAIL_STD_K}` : ""}) · profit ${capturedPct}% dari potensi`;
       } else {
@@ -523,6 +527,8 @@ function buildPlan(input) {
   const capturedPct2 = (pot && pot > C * 0.00001) ? (traveled / pot) * 100 : (traveled > 0 ? 100 : 0);
   const lockTouch = taUp ? (C >= O) : (C <= O);
   const armOnLock = TA.TRAIL_ARM_ON_LOCK ? lockTouch : false;   // default: arm hanya bila capture>=ARM
+  state.capPeak = state.capPeak || {};
+  state.capPeak[key] = Math.max(state.capPeak[key] == null ? -Infinity : state.capPeak[key], capturedPct2);  // puncak capture (%)
   const trailArmed = state.trailArmed[key] || (capturedPct2 >= TA.TRAIL_ARM_PCT) || armOnLock;
   state.trailArmed[key] = trailArmed;
   if (!state.trailSince) state.trailSince = {};
@@ -549,7 +555,7 @@ function buildPlan(input) {
   const plan = computeTradePlan(bias, {
     tf: input.tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
     entered, turn, fade, trail, retreatStd, retraceFromPeakPct, extremeDepthPct,
-    exitLeg, newPeakHigher, retrace2Pct, trailArmed, trailRetracePct, trailHeldMs,
+    exitLeg, newPeakHigher, retrace2Pct, trailArmed, trailRetracePct, trailHeldMs, capPeak: state.capPeak[key],
     durMs: input.durMs, remainMs: input.remainMs,   // gate waktu entry
     entryPrice: state.entered[key] ? state.entered[key].price : null,   // harga entry posisi (untuk kedalaman CUT)
     dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,

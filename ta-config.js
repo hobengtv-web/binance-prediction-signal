@@ -31,6 +31,9 @@ const CFG = {
   TRAIL_MODE: num(process.env.TA_TRAIL_MODE, 1),                     // 1 = pakai exit TRAILING (arm+callback), 0 = leg1/CLOSE2 lama
   TRAIL_ARM_PCT: num(process.env.TA_TRAIL_ARM_PCT, 40),              // arm saat profit >= X% potensi (atau sentuh lock)
   TRAIL_CB_PCT: num(process.env.TA_TRAIL_CB_PCT, 0.02),              // callback: jual saat mundur >= X% dari puncak
+  // ===== MODE GAP (opsional): keluar bila CAPTURE (%) turun >= X poin dari puncak capture. =====
+  // Menggantikan callback 0,03% harga (yg terlalu tipis). 0 = OFF (pakai callback harga spt sekarang).
+  TRAIL_GAP_PP: num(process.env.TA_TRAIL_GAP_PP, 0),
   TRAIL_MIN_HOLD_MS: num(process.env.TA_TRAIL_MIN_HOLD_MS, 10000),   // min tahan sejak arm sebelum boleh exit (hindari prematur)
   TRAIL_STD_K: num(process.env.TA_TRAIL_STD_K, 0),                    // >0 = trailing ADAPTIF: ambang = max(CB, k x std) dalam % harga (0 = off)
   TRAIL_GIVEBACK_PCT: num(process.env.TA_TRAIL_GIVEBACK_PCT, 0),      // >0 = keluar bila harga memberi balik >= X% dari PUNCAK PROFIT (0 = off)

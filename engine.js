@@ -395,7 +395,7 @@ function createEngine(deps) {
             //   entry = TA mendeteksi dip -> BOT ROTATE (tutup posisi awal, entry ulang di harga dip)
             //   exit  = TA minta close -> BOT jual semua
             if (onEvent) {
-              try { onEvent({ type: "start", sym, tf, t0: t0Live, dir: r.signal.dir, accepted: !!r.signal.accepted,
+              try { onEvent({ type: "start", sym, tf, t0: t0, dir: r.signal.dir, accepted: !!r.signal.accepted,
                 grade: r.signal.grade || null, surprise: r.signal.surprise != null ? +r.signal.surprise.toFixed(2) : null,
                 lock: r.signal.lock != null ? r.signal.lock : null, at: Date.now() }); } catch (_) {}
             }

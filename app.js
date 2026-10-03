@@ -46,6 +46,12 @@ const EXTEND = { BTC: 0.02, ETH: 0.025, BNB: 0.025 };
 const TREND_SESSIONS = 3;  // akumulasi trend dari N sesi terakhir interval yg aktif (3 sesi 5m = 15m, dst)
 let confMode = "SIGNAL";  // mode CONFIDENCE: SIGNAL = otomatis counter-trend, UP/DOWN = paksa arah
 const POWER_SIG_LOCK = {}; // KOSMETIK: kunci nilai power sinyal U/D per (coin_tf_t0) selama sesi (nilai saat rekomendasi dihasilkan)
+// LOGGER ERROR GLOBAL (diagnostik): catat error JS agar tak hilang. Lihat window.__JS_ERRORS / console.
+window.__JS_ERRORS = window.__JS_ERRORS || [];
+try {
+  window.addEventListener("error", (e) => { try { const r = { at: new Date().toISOString(), type: "error", msg: e.message, src: (e.filename || "") + ":" + (e.lineno || 0) + ":" + (e.colno || 0), stack: e.error && e.error.stack }; window.__JS_ERRORS.push(r); console.error("[JS ERROR]", r.msg, r.src, r.stack || ""); } catch (_) {} });
+  window.addEventListener("unhandledrejection", (e) => { try { const rs = e.reason; const r = { at: new Date().toISOString(), type: "promise", msg: (rs && (rs.message || rs)) + "", stack: rs && rs.stack }; window.__JS_ERRORS.push(r); console.error("[JS PROMISE ERROR]", r.msg, r.stack || ""); } catch (_) {} });
+} catch (_) {}
 
 // Endpoint fallbacks — `binance.vision` is Binance's public data service,
 // usually not geo-blocked and CORS-friendly (common fix for ID/region blocks).
@@ -3070,7 +3076,7 @@ function renderDual(force) {
           } else {
             playSoundAlert();
             flashCard(a, "signal");
-            flashTitle(`▶ SIGNAL ${dir.toUpperCase()} ${a}/${tf}`);
+            flashTitle(`▶ SIGNAL ${String(dir || "").toUpperCase()} ${a}/${tf}`);
             console.log(`[WIDE][SOUND-SIGNAL] ${a}/${tf} ${dir}${sig && sig.grade ? " " + sig.grade : ""}`);
           }
         }
@@ -3152,7 +3158,7 @@ function renderDual(force) {
     const rEl = g("rec");
     if (rEl) {
       rEl.textContent = graded
-        ? `Recommendation: ${dir.toUpperCase()}${sig.grade ? ` · ${sig.grade}${sig.expectedWR != null ? " " + (sig.expectedWR * 100).toFixed(0) + "%" : ""}` : ""}${sig.minuteIn ? ` · min ${sig.minuteIn}` : ""}`
+        ? `Recommendation: ${String(dir || "").toUpperCase()}${sig.grade ? ` · ${sig.grade}${sig.expectedWR != null ? " " + (sig.expectedWR * 100).toFixed(0) + "%" : ""}` : ""}${sig.minuteIn ? ` · min ${sig.minuteIn}` : ""}`
         : (liveMode ? `No entry · ${liveMode}` : "Menunggu…");
       rEl.className = "dc-rec " + (graded ? dir : "flat");
     }
@@ -3296,8 +3302,8 @@ function renderDual(force) {
     }
     const prEl = g("pred");
     if (prEl) {
-      const rw = plan && plan.levels ? plan.levels.rNow.toFixed(2) + "%" : "—";
-      prEl.innerHTML = chip("PREDIKSI", graded ? dir.toUpperCase() : "—", graded ? dir : "") +
+      const rw = (plan && plan.levels && plan.levels.rNow != null) ? plan.levels.rNow.toFixed(2) + "%" : "—";
+      prEl.innerHTML = chip("PREDIKSI", graded ? String(dir || "").toUpperCase() : "—", graded ? dir : "") +
         chip("CONF", sig && sig.conf != null ? sig.conf : "—") + chip("REWARD", rw);
     }
     const ch = dualCharts[a];
@@ -3705,7 +3711,7 @@ function renderConfidenceReport() {
     // (mis. dua-duanya "U" abu) tetap bisa dibedakan dengan jelas.
     // Label waktu = RENTANG sesi (t0 s/d t0+dur) agar tidak tertukar antar-sesi berdekatan.
     const jam = (r.t0Sec != null) ? (() => { const s = r.t0Sec * 1000 + 7 * 3600e3; const dm = ({ "5m": 300, "15m": 900, "1h": 3600 }[r.interval] || 300) * 1000; return new Date(s).toISOString().slice(11, 16) + "\u2013" + new Date(s + dm).toISOString().slice(11, 16); })() : "";
-    const t = `${jam ? jam + " · " : ""}${r.asset}/${r.interval} · signal ${r.dir.toUpperCase()} ${r.won === undefined ? "(pending)" : (r.won ? "BENAR" : "SALAH")}`
+    const t = `${jam ? jam + " · " : ""}${r.asset}/${r.interval} · signal ${String(r.dir || "?").toUpperCase()} ${r.won === undefined ? "(pending)" : (r.won ? "BENAR" : "SALAH")}`
       + ` · entry ${eTxt} · early close ${cTxt}`
       + ` · lock ${r.lock != null ? r.lock : "?"} close ${r.close != null ? r.close : "?"}`;
     return `<div class="sa-stack" title="${t}"><span class="dot ${sCls}">${sTxt}</span>`

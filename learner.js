@@ -271,6 +271,34 @@ function hourVetoes(rows, opts = {}) {
   return { keys, thr, minN, recentN, recentWin };
 }
 
+/* ---------- ANALISIS KONTEKS FLAT per coin×TF ----------
+   Dari record FLAT (sig.skipped==="flat-price", dir null), ukur distribusi outcome.
+   "majorityWR" = WR bila DIPAKSA arah sisi mayoritas. Ini BUKAN sinyal live — hanya uji apakah
+   konteks flat punya edge. edge=true hanya bila Wilson-LB > 0.5 dan n cukup (bukan noise). */
+function flatStats(records, opts = {}) {
+  const minN = opts.minN || 10;
+  const g = {};
+  for (const r of records || []) {
+    if (!r || !r.sig || r.res == null) continue;
+    if (r.sig.skipped !== "flat-price") continue;
+    const act = r.res.actual;
+    if (act !== "up" && act !== "down") continue;
+    const k = (r.asset || r.sig.asset) + "_" + (r.interval || r.sig.interval);
+    (g[k] = g[k] || []).push(act);
+  }
+  const keys = {};
+  for (const k of Object.keys(g)) {
+    const a = g[k], n = a.length;
+    const up = a.filter((x) => x === "up").length;
+    const pUp = n ? up / n : 0;
+    const side = pUp >= 0.5 ? "up" : "down";
+    const maj = side === "up" ? up : n - up;
+    const wb = n ? wilson(maj, n) : null;
+    keys[k] = { n, up, down: n - up, pUp: +pUp.toFixed(4), majoritySide: side, majorityWR: n ? +(maj / n).toFixed(4) : null, wilsonLB: wb ? +wb.lo.toFixed(4) : null, edge: !!(wb && n >= minN && wb.lo > 0.5) };
+  }
+  return { keys, minN, note: "WR konteks FLAT per coin\u00d7TF (jika dipaksa arah sisi mayoritas). edge=true hanya bila Wilson-LB>0.5 & n>=minN." };
+}
+
 /* ---------- TIER LADDER PER coin×TF (dimining dari data per key) ----------
    Cari ambang (volRel2, surprise) per tier yg mencapai target WR, PER key (bukan global). */
 function keyTiers(rows, opts = {}) {
@@ -529,4 +557,4 @@ function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.35) {   //
   return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (min-fold ${(cMin * 100).toFixed(1)}%) tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, APPLY_KEYS, hourVetoes, keyVetoes, keyTiers, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, APPLY_KEYS, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

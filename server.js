@@ -316,7 +316,7 @@ const MODEL_CUR = path.join(MODEL_DIR, "current");
 const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
 const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
 const GATES_DEF = require("./gates.js");
-const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json" };
+const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json" };
 let gatesMeta = { mode: GATES_DEF.BOOTSTRAP.mode, promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
 
@@ -429,6 +429,8 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       const kv = LEARNER.keyVetoes(rows, { thr: Number(process.env.VETO_WR_THR || 0.50), minN: Number(process.env.VETO_MIN_N || 8) });
       write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv, { prof: kv }));
     } catch (_) {}
+    // ===== ANALISIS KONTEKS FLAT per coin×TF (dari record flat informasional) =====
+    try { const fstat = LEARNER.flatStats(records, { minN: Number(process.env.FLAT_MIN_N || 10) }); write("learn_flat.json", Object.assign({ generated: new Date().toISOString(), version: ver }, fstat)); res.flat = Object.keys(fstat.keys).map((k) => ({ k, n: fstat.keys[k].n, wr: fstat.keys[k].majorityWR, lb: fstat.keys[k].wilsonLB, edge: fstat.keys[k].edge })); } catch (_) {}
     const res = { trigger, at: new Date().toISOString(), rows: rows.length, ok: true, perKey: true, keys: keyRes, promote: anyPromote, gatesPromoted: anyGates,
       why: Object.keys(keyRes).map((k) => `${k}:${keyRes[k].ok === false ? "data-kurang" : (keyRes[k].promote ? "PROMOTE" : "keep")}`).join(" · ") };
     try { fs.appendFileSync(MODEL_LOG, JSON.stringify(res) + "\n"); } catch (_) {}

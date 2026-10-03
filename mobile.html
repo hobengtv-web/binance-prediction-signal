@@ -1024,11 +1024,55 @@
       refresh();
     }
 
+    // 100% SERVER: tampilkan HANYA sinyal dari server (tidak ada kalkulasi prediksi lokal).
+    function displayServerSignal(asset, tf, sig, plan, price) {
+      const dir = sig.dir, acc = sig.accepted === true;
+      const showDir = acc && (dir === "up" || dir === "down");
+      els.signalBadge.className = `signal-badge ${showDir ? dir : "flat"}`;
+      els.signalBadge.textContent = showDir ? (dir === "up" ? "UP \u25b2" : "DOWN \u25bc") + " \u00b7 SERVER" : "MENUNGGU SINYAL";
+      els.signalTitle.className = `signal-title ${showDir ? dir : "flat"}`;
+      els.signalTitle.textContent = showDir ? (dir === "up" ? "UP" : "DOWN") : "\u2014";
+      els.signalSub.textContent = (plan && plan.action) ? plan.action : (sig.reject ? ("Ditolak: " + sig.reject) : (sig.grade || "menunggu"));
+      els.confValue.textContent = (sig.conf != null ? sig.conf : "\u2014") + (sig.conf != null ? "%" : "");
+      els.confBar.style.width = (sig.conf != null ? sig.conf : 0) + "%";
+      if (els.zScore) els.zScore.textContent = (sig.surprise != null) ? (+sig.surprise).toFixed(2) : "\u2014";
+      if (els.trend) els.trend.textContent = sig.grade || "\u2014";
+      if (els.volRel) els.volRel.textContent = (sig.volRel2 != null) ? (+sig.volRel2).toFixed(2) + "\u00d7" : "\u2014";
+      if (els.liquidity) els.liquidity.textContent = (sig.liqRatio != null) ? (+sig.liqRatio).toFixed(2) : "\u2014";
+      if (els.price) els.price.textContent = (price != null) ? fmtPrice(price) : "\u2014";
+      if (els.lockPrice) els.lockPrice.textContent = (sig.lock != null) ? fmtPrice(sig.lock) : "\u2014";
+    }
+    function displayServerWaiting() {
+      els.signalBadge.className = "signal-badge flat"; els.signalBadge.textContent = "MENUNGGU SERVER";
+      els.signalTitle.className = "signal-title flat"; els.signalTitle.textContent = "\u2014";
+      els.signalSub.textContent = "Menunggu sinyal dari server\u2026";
+      setPowerBar(els.pwSigFill, els.pwSigVal, 0, "\u2014"); setPowerBar(els.pwActFill, els.pwActVal, 0, "\u2014");
+    }
+
     async function refresh() {
       const tf = state.interval;
       const asset = state.asset;
       const now = Date.now();
       const dur = INTERVAL_MS[tf] || 300000;
+      // ===== 100% SERVER: JANGAN kalkulasi prediksi lokal =====
+      try {
+        const sigData = await fetchSignal(tf);
+        const a = (sigData && sigData.assets && sigData.assets[asset]) ? sigData.assets[asset] : null;
+        const e = (a && a.all) ? a.all[tf] : null;
+        const sig = e ? e.signal : null;
+        if (sig) {
+          displayServerSignal(asset, tf, sig, e.plan, a.price);
+          updateMobilePower(sigData, asset, tf);
+          updateCountdown();
+          setStatus(sig.accepted ? "Live \u00b7 server (sinyal)" : "Live \u00b7 server (menunggu)", "ok");
+          return;
+        }
+      } catch (e) { /* server tak tersedia */ }
+      displayServerWaiting();
+      updateCountdown();
+      setStatus("Menunggu server\u2026", "warn");
+      return;
+
       const currentRoundStart = getRoundStart(tf, now);
 
       const currentLocked = getCurrentLocked();

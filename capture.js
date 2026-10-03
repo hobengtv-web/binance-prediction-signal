@@ -118,11 +118,14 @@ function computeSignal(o) {
     // Jam OFF PER coin×TF (objektif). Bila file ada tapi key ini belum punya cukup sampel -> [] (jangan blokir).
     const km = vetoM && vetoM.keys && vetoM.keys[`${sym}_${tf}`];
     const vetoHours = vetoM ? ((km && Array.isArray(km.hours)) ? km.hours : []) : TA_VETO.hours;
-    if (gateNow < TA_VETO.rewardMin) veto = "veto-reward";
-    else if (rsi != null && rsi >= TA_VETO.rsiLo && rsi < TA_VETO.rsiHi) veto = "veto-rsi";
-    else if (volRel2 >= TA_VETO.volLo && volRel2 < TA_VETO.volHi) veto = "veto-vol";
+    // VETO THRESHOLD PER coin×TF (dari data key ini). Fallback global hanya bila key belum punya profil.
+    const kp = vetoM && vetoM.prof && vetoM.prof.keys && vetoM.prof.keys[`${sym}_${tf}`];
+    const P = kp || { rewardMin: TA_VETO.rewardMin, liqMin: TA_VETO.liqMin, rsiBad: [[TA_VETO.rsiLo, TA_VETO.rsiHi]], volBad: [[TA_VETO.volLo, TA_VETO.volHi]] };
+    if ((P.rewardMin || 0) > 0 && gateNow < P.rewardMin) veto = "veto-reward";
+    else if ((P.rsiBad || []).some(([lo, hi]) => rsi != null && rsi >= lo && rsi < hi)) veto = "veto-rsi";
+    else if ((P.volBad || []).some(([lo, hi]) => volRel2 >= lo && volRel2 < hi)) veto = "veto-vol";
     else if (vetoHours.indexOf(wibH) >= 0) veto = "veto-hour";
-    else if (liqRatio < TA_VETO.liqMin) veto = "veto-liq";
+    else if ((P.liqMin || 0) > 0 && liqRatio < P.liqMin) veto = "veto-liq";
   }
   let accepted = accepted0 && !veto;
   let reject = accepted ? null : (veto || (!thOK ? "threshold" : !grade ? "tier" : "liq-low"));

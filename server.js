@@ -403,7 +403,11 @@ async function refit(trigger = "manual") {
     write("lessons.json", { generated: new Date().toISOString(), version: ver, byKey: lessonsMap });
     write("learn_pnl.json", { generated: new Date().toISOString(), version: ver, byKey: pnlMap });
     write("meta.json", { version: ver, promotedAt: new Date().toISOString(), trigger, byKey: metaMap });
-    try { const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 8), thr: Number(process.env.VETO_WR_THR || 0.50), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2) }); write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv)); } catch (_) {}
+    try {
+      const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 8), thr: Number(process.env.VETO_WR_THR || 0.50), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2) });
+      const kv = LEARNER.keyVetoes(rows, { thr: Number(process.env.VETO_WR_THR || 0.50), minN: Number(process.env.VETO_MIN_N || 8) });
+      write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv, { prof: kv }));
+    } catch (_) {}
     const res = { trigger, at: new Date().toISOString(), rows: rows.length, ok: true, perKey: true, keys: keyRes, promote: anyPromote, gatesPromoted: anyGates,
       why: Object.keys(keyRes).map((k) => `${k}:${keyRes[k].ok === false ? "data-kurang" : (keyRes[k].promote ? "PROMOTE" : "keep")}`).join(" · ") };
     try { fs.appendFileSync(MODEL_LOG, JSON.stringify(res) + "\n"); } catch (_) {}
@@ -472,15 +476,18 @@ const VETO_CHECK_MIN = Math.max(1, parseInt(process.env.VETO_CHECK_MIN || "2", 1
 let lastVetoKey = null;
 function computeVetoNow() {
   const rows = LEARNER.rowsFrom([...ledger.values()]);
-  return LEARNER.hourVetoes(rows, {
+  const hv = LEARNER.hourVetoes(rows, {
     minN: Number(process.env.VETO_MIN_N || 8), thr: Number(process.env.VETO_WR_THR || 0.50),
     recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2),
   });
+  // VETO THRESHOLD per key (reward/rsi/vol/liq) — dari data per coin×TF (bukan global).
+  const kv = LEARNER.keyVetoes(rows, { thr: Number(process.env.VETO_WR_THR || 0.50), minN: Number(process.env.VETO_MIN_N || 8) });
+  return Object.assign({}, hv, { prof: kv });
 }
 function refreshVeto(tag) {
   try {
-    const hv = computeVetoNow();                              // {keys: {BTC_5m:{hours,stats}, ...}, ...}
-    const key = JSON.stringify(hv.keys);
+    const hv = computeVetoNow();                              // {keys:{key:{hours,stats}}, prof:{key:{rewardMin,...}}, ...}
+    const key = JSON.stringify([hv.keys, hv.prof && hv.prof.keys]);
     if (key !== lastVetoKey) {
       lastVetoKey = key;
       ensureModelDirs();

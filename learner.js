@@ -271,6 +271,30 @@ function hourVetoes(rows, opts = {}) {
   return { keys, thr, minN, recentN, recentWin };
 }
 
+/* ---------- VETO THRESHOLD PER coin×TF (dari data per key, bukan global) ----------
+   Cari ambang "no-edge" utk key ini: rewardMin/liqMin (monoton) + rentang rsi/vol yg buruk.
+   Tujuannya: filter ditentukan PER coin & durasi, tidak digeneralisir. */
+function keyVetoes(rows, opts = {}) {
+  const thr = opts.thr != null ? opts.thr : 0.50, minN = opts.minN || 8;
+  const groups = {};
+  for (const r of rows) { if (r.won == null || !r.symbol || !r.interval) continue; const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r); }
+  const wr = (a) => (a.length ? a.reduce((s, r) => s + (r.won ? 1 : 0), 0) / a.length : null);
+  const out = {};
+  for (const k of Object.keys(groups)) {
+    const a = groups[k];
+    let rewardMin = 0;
+    for (const e of [0, 0.001, 0.002, 0.003, 0.005, 0.008, 0.012]) { const s = a.filter((r) => r.rewardPct != null && r.rewardPct >= e); if (s.length >= minN && wr(s) >= thr) { rewardMin = e; break; } }
+    let liqMin = 0;
+    for (const e of [0, 1, 1.5, 2, 3, 5]) { const s = a.filter((r) => r.liqRatio != null && r.liqRatio >= e); if (s.length >= minN && wr(s) >= thr) { liqMin = e; break; } }
+    const rsiB = [[0, 30], [30, 40], [40, 60], [60, 70], [70, 200]];
+    const rsiBad = rsiB.filter(([lo, hi]) => { const s = a.filter((r) => r.rsi != null && r.rsi >= lo && r.rsi < hi); return s.length >= minN && wr(s) < thr; });
+    const volB = [[0, 0.7], [0.7, 1], [1, 1.3], [1.3, 1.8], [1.8, 2.5], [2.5, 99]];
+    const volBad = volB.filter(([lo, hi]) => { const s = a.filter((r) => r.volRel2 != null && r.volRel2 >= lo && r.volRel2 < hi); return s.length >= minN && wr(s) < thr; });
+    out[k] = { n: a.length, rewardMin, liqMin, rsiBad, volBad };
+  }
+  return { keys: out, thr, minN };
+}
+
 /* ---------- GATE WR PER JAM (jalur responsif utk jam SEKARANG) ----------
    Lihat WR jam WIB saat ini dari K sesi terakhir di jam itu:
    - WR >= thr (mis. 60%) -> ON (boleh trading)
@@ -474,4 +498,4 @@ function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.35) {   //
   return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (min-fold ${(cMin * 100).toFixed(1)}%) tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, APPLY_KEYS, hourVetoes, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, APPLY_KEYS, hourVetoes, keyVetoes, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

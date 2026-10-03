@@ -45,6 +45,7 @@ const VOL_TYPICAL = { BTC: 0.515, ETH: 8.22, BNB: 3.0 };
 const EXTEND = { BTC: 0.02, ETH: 0.025, BNB: 0.025 };
 const TREND_SESSIONS = 3;  // akumulasi trend dari N sesi terakhir interval yg aktif (3 sesi 5m = 15m, dst)
 let confMode = "SIGNAL";  // mode CONFIDENCE: SIGNAL = otomatis counter-trend, UP/DOWN = paksa arah
+const POWER_SIG_LOCK = {}; // KOSMETIK: kunci nilai power sinyal U/D per (coin_tf_t0) selama sesi (nilai saat rekomendasi dihasilkan)
 
 // Endpoint fallbacks — `binance.vision` is Binance's public data service,
 // usually not geo-blocked and CORS-friendly (common fix for ID/region blocks).
@@ -2797,6 +2798,8 @@ function buildDual() {
 
       <div class="dc-sec dc-signal">
         <div class="dc-recrow"><span class="dc-rec" id="dc-${a}-rec">—</span><span class="rec-status" id="dc-${a}-badge"></span></div>
+        <!-- POWER SINYAL U/D (KOSMETIK, TERKUNCI per sesi: nilai saat sinyal dihasilkan) -->
+        <div class="dc-pw" id="dc-${a}-pwsig"><div class="conf-track dc-led-track" id="dc-${a}-pwsig-track"><b id="dc-${a}-pwsig-fill" style="display:block;height:100%;width:0;border-radius:4px;transition:width .2s"></b></div><span class="dc-led-val na" id="dc-${a}-pwsig-val">—</span></div>
         <div class="rz-line" id="dc-${a}-reason" title=""><span class="rz-dot flat"></span><span class="rz-txt">—</span></div>
         <!-- LED bar confidence: HANYA bar + % (tanpa label), arahnya SELALU searah signal -->
         <div class="dc-led" id="dc-${a}-led">
@@ -2819,6 +2822,8 @@ function buildDual() {
         <div class="dc-ta-row">
           <div class="dc-ta-main">
             <div class="dc-act" id="dc-${a}-act">—</div>
+            <!-- POWER AKSI TA (KOSMETIK, DINAMIS: progres menuju state berikutnya) -->
+            <div class="dc-pw" id="dc-${a}-pwact"><div class="conf-track dc-led-track" id="dc-${a}-pwact-track"><b id="dc-${a}-pwact-fill" style="display:block;height:100%;width:0;border-radius:4px;transition:width .3s"></b></div><span class="dc-led-val na" id="dc-${a}-pwact-val">—</span></div>
             <div class="tp-key" id="dc-${a}-key"></div>
           </div>
           <div class="tp-status dc-ta-st">
@@ -3146,6 +3151,18 @@ function renderDual(force) {
         : (liveMode ? `No entry · ${liveMode}` : "Menunggu…");
       rEl.className = "dc-rec " + (graded ? dir : "flat");
     }
+    // POWER SINYAL U/D — TERKUNCI per sesi (nilai saat sinyal dihasilkan, tidak berubah sampai sesi berakhir)
+    {
+      const pf = g("pwsig-fill"), pv = g("pwsig-val");
+      if (pf) {
+        const p0 = (sig && sig.power) ? sig.power.pct : null;
+        const lk = a + "_" + tf + "_" + (sig && sig.t0);
+        if (p0 != null && POWER_SIG_LOCK[lk] == null) POWER_SIG_LOCK[lk] = p0;
+        const pct = (POWER_SIG_LOCK[lk] != null) ? POWER_SIG_LOCK[lk] : p0;
+        if (pct != null) { pf.style.width = Math.max(0, Math.min(100, pct)) + "%"; pf.style.background = pct >= 100 ? "#10b981" : "#f59e0b"; if (pv) { pv.textContent = pct + "%"; pv.className = "dc-led-val " + (pct >= 100 ? "up" : "na"); } }
+        else { pf.style.width = "0%"; if (pv) pv.textContent = "—"; }
+      }
+    }
     const bEl = g("badge");
     if (bEl) { const hl = m && m.health ? m.health.label : ""; bEl.textContent = hl; bEl.className = "rec-status " + (m && m.health ? healthClass(m.health.label) : ""); }
     const aEl = g("act");
@@ -3153,6 +3170,18 @@ function renderDual(force) {
       aEl.textContent = plan ? shortAction(plan.action) : "—";
       aEl.className = "dc-act " + (plan ? plan.cls : "wait");
       aEl.title = plan ? plan.action : "";
+    }
+    // POWER AKSI TA — DINAMIS: progres 0-100% menuju state berikutnya
+    {
+      const pf = g("pwact-fill"), pv = g("pwact-val");
+      if (pf) {
+        const ap = plan && plan.power;
+        if (ap) {
+          pf.style.width = Math.max(0, Math.min(100, ap.pct)) + "%";
+          pf.style.background = ap.pct >= 100 ? "#10b981" : (ap.pct >= 60 ? "#f59e0b" : "#64748b");
+          if (pv) { pv.textContent = ap.pct + "% \u2192 " + (ap.next || ""); pv.title = (ap.parts || []).map((p) => p.label).join(" \u00b7 "); pv.className = "dc-led-val " + (ap.pct >= 100 ? "up" : "na"); }
+        } else { pf.style.width = "0%"; if (pv) pv.textContent = "—"; }
+      }
     }
     // Baris 2 harga kunci (sama seperti kartu mobile): ENTRY/TARGET atau POSISI/TARGET
     const keyEl = g("key");

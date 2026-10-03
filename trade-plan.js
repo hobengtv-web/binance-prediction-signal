@@ -605,24 +605,35 @@ function buildPlan(input) {
   };
   plan.statusClose = { ok: !!_clo, at: _clo ? _clo.at : null, price: _clo ? _clo.price : null, reason: _clo ? _clo.reason : null };
   plan.health = health;
-  // ===== POWER AKSI (KOSMETIK — tidak mengubah keputusan) =====
-  // 100% = tepat memenuhi ambang aksi; >100% = melampaui; <100% = belum penuh.
+  // ===== POWER AKSI TA (KOSMETIK) — DINAMIS: progres 0-100% menuju STATE BERIKUTNYA =====
+  // 100% = saat transisi ke state berikutnya (mis. WAIT->ENTRY, arm->TRAIL EXIT).
   try {
     const parts = [];
-    const add = (label, ratio, met) => parts.push({ label, ratio: +Math.max(0, Math.min(3, ratio)).toFixed(3), met: !!met });
-    if (plan.state === "ENTRY") {
-      add("kedalaman", (extremeDepthPct != null && ENTRY_MIN_EXTREME_PCT > 0) ? extremeDepthPct / ENTRY_MIN_EXTREME_PCT : 1, (extremeDepthPct || 0) >= ENTRY_MIN_EXTREME_PCT);
-      add("retrace", (retraceFromPeakPct != null && ENTRY_RETRACE_PCT > 0) ? retraceFromPeakPct / ENTRY_RETRACE_PCT : 1, (retraceFromPeakPct || 0) >= ENTRY_RETRACE_PCT);
-    } else if (plan.state === "CLOSE" || plan.state === "CLOSE2" || plan.state === "STAND_DOWN") {
-      add("profit-tercapai", (capturedPct2 || 0) / 40, (capturedPct2 || 0) >= 40);
+    const cl = (r) => +Math.max(0, Math.min(1, r)).toFixed(3);
+    const entered = !!(state.entered && state.entered[key]);
+    let next = "\u2014";
+    if (plan.state === "CLOSE" || plan.state === "CLOSE2" || plan.state === "STAND_DOWN") { next = "SELESAI"; parts.push({ label: "aksi", ratio: 1, met: true }); }
+    else if (plan.state === "ENTRY") { next = "POSISI"; parts.push({ label: "entry", ratio: 1, met: true }); }
+    else if (entered) {
+      if (trailArmed) {
+        next = "TRAIL EXIT";
+        const gapPp = (TA.PER_TF && input.tf && TA.PER_TF[input.tf] && TA.PER_TF[input.tf].TRAIL_GAP_PP != null) ? TA.PER_TF[input.tf].TRAIL_GAP_PP : TA.TRAIL_GAP_PP;
+        const capPeakV = (state.capPeak && state.capPeak[key] != null) ? state.capPeak[key] : capturedPct2;
+        if (gapPp > 0) { const g = Math.round(capPeakV - capturedPct2); parts.push({ label: "gap " + g + "/-" + gapPp + "pp", ratio: cl((capPeakV - capturedPct2) / gapPp), met: (capPeakV - capturedPct2) >= gapPp }); }
+        else { const cb = TA.TRAIL_CB_PCT || 0.03; parts.push({ label: "mundur " + (retraceFromPeakPct || 0).toFixed(3) + "%/" + cb + "%", ratio: cl((retraceFromPeakPct || 0) / cb), met: (retraceFromPeakPct || 0) >= cb }); }
+      } else {
+        next = "ARM"; const arm = TA.TRAIL_ARM_PCT || 40;
+        parts.push({ label: "menuju-arm " + Math.round(capturedPct2 || 0) + "/" + arm + "%", ratio: cl((capturedPct2 || 0) / arm), met: (capturedPct2 || 0) >= arm });
+      }
     } else {
-      add("menuju-arm", (capturedPct2 || 0) / 40, (capturedPct2 || 0) >= 40);
+      next = "ENTRY";
+      const ed = (extremeDepthPct != null && ENTRY_MIN_EXTREME_PCT > 0) ? extremeDepthPct / ENTRY_MIN_EXTREME_PCT : 0;
+      const rt = (retraceFromPeakPct != null && ENTRY_RETRACE_PCT > 0) ? retraceFromPeakPct / ENTRY_RETRACE_PCT : 0;
+      parts.push({ label: "kedalaman " + (extremeDepthPct || 0).toFixed(3) + "/" + ENTRY_MIN_EXTREME_PCT + "%", ratio: cl(ed), met: ed >= 1 });
+      parts.push({ label: "retrace " + (retraceFromPeakPct || 0).toFixed(3) + "/" + ENTRY_RETRACE_PCT + "%", ratio: cl(rt), met: rt >= 1 });
     }
-    const ps = parts.reduce((a, x) => a + x.ratio, 0);
-    const metN = parts.filter((p) => p.met).length;
-    let pct = parts.length ? 100 * ps / parts.length : 100;
-    if (parts.length && metN < parts.length) pct = Math.min(pct, 100 * metN / parts.length);
-    plan.power = { pct: Math.round(pct), parts, action: plan.state, allMet: metN === parts.length };
+    const avg = parts.length ? parts.reduce((a, x) => a + x.ratio, 0) / parts.length : 1;
+    plan.power = { pct: Math.round(100 * Math.max(0, Math.min(1, avg))), state: plan.state, next, parts };
   } catch (_) {}
   return plan;
 }

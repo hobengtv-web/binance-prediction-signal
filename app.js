@@ -3789,7 +3789,23 @@ function restoreMobilePredSession() {
 }
 
 
+  // POWER (KOSMETIK) utk panel MOBILE (<1100px) — sumber: sinyal server (LIVE.signalFor).
+  function updateMobilePowerBars() {
+    try {
+      const e = (typeof LIVE !== "undefined" && LIVE.entryFor) ? LIVE.entryFor(state.asset, state.interval) : null;
+      const sig = e ? e.signal : null, plan = e ? e.plan : null;
+      const p0 = (sig && sig.power) ? sig.power.pct : null;
+      const lk = state.asset + "_" + state.interval + "_" + (sig && sig.t0);
+      if (p0 != null && POWER_SIG_LOCK[lk] == null) POWER_SIG_LOCK[lk] = p0;   // kunci per sesi
+      const pct = (POWER_SIG_LOCK[lk] != null) ? POWER_SIG_LOCK[lk] : p0;
+      const setB = (fid, vid, p, txt) => { const f = document.getElementById(fid); if (f) { f.style.width = Math.max(0, Math.min(100, p || 0)) + "%"; f.style.background = (p >= 100 ? "#16a34a" : (p >= 60 ? "#f59e0b" : "#94a3b8")); } const v = document.getElementById(vid); if (v) v.textContent = txt; };
+      if (pct != null) setB("m-pwsig-fill", "m-pwsig-val", pct, pct + "%"); else setB("m-pwsig-fill", "m-pwsig-val", 0, "\u2014");
+      const ap = plan && plan.power;
+      if (ap) setB("m-pwact-fill", "m-pwact-val", ap.pct, ap.pct + "% \u2192 " + (ap.next || "")); else setB("m-pwact-fill", "m-pwact-val", 0, "\u2014");
+    } catch (_) {}
+  }
   function updateMobilePrediction() {
+    try { updateMobilePowerBars(); } catch (_) {}
   const ticker = state.ticker[state.asset];
   if (!ticker) {
     console.log("[MOBILE-PRED] updateMobilePrediction: no ticker for", state.asset);

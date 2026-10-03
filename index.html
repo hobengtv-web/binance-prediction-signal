@@ -190,6 +190,17 @@
       <div class="mstat"><span>DELTA</span><b id="m-delta">—</b></div>
       <div class="mstat"><span>MODE</span><b id="m-mode">—</b></div>
     </div>
+    <!-- POWER (KOSMETIK) - tampil di mobile (<1100px). U/D terkunci/sesi, TA dinamis. -->
+    <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
+      <span style="font-size:10px;opacity:.7;min-width:52px">POWER U/D</span>
+      <div class="conf-track" style="flex:1;height:3px"><b id="m-pwsig-fill" style="display:block;height:100%;width:0;border-radius:2px;transition:width .2s"></b></div>
+      <span id="m-pwsig-val" style="font-size:11px;opacity:.85;min-width:34px;text-align:right">—</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+      <span style="font-size:10px;opacity:.7;min-width:52px">POWER TA</span>
+      <div class="conf-track" style="flex:1;height:3px"><b id="m-pwact-fill" style="display:block;height:100%;width:0;border-radius:2px;transition:width .3s"></b></div>
+      <span id="m-pwact-val" style="font-size:11px;opacity:.85;min-width:34px;text-align:right">—</span>
+    </div>
   </section>
 
   <section class="conf-debug" id="conf-debug">

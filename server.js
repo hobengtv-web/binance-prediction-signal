@@ -879,7 +879,14 @@ http.createServer(async (req, res) => {
         baseline: (g && g.baseline) || null,
         why: modelMeta.why || null,
       },
-      blockers: { gate: single(g && g.suppress, "interval="), touch: single(t && t.suppress, "gap=") },
+      blockers: (() => {
+        const A = LEARNER.APPLY_KEYS;
+        const pick = (list) => (list || []).filter((k) => typeof k === "string" && k.indexOf("&") === -1 && yetOk(k));
+        const yetOk = (k) => { const i = k.indexOf("="); return i > 0 && A.has(k.slice(0, i)); };
+        return { gate: pick(g && g.suppress), touch: pick(t && t.suppress) };
+      })(),
+      apply: readModelPart("apply"),          // {apply, coverage, minApplyCov, note}
+      veto: readModelPart("veto"),            // {hours, stats, trigger, generated}
       gates: (() => { const gg = readGates(); return { mode: gg.mode, thresholds: gg.thresholds || [], liqFloorMul: gg.liqFloorMul, lateFrac: gg.lateFrac, note: gg.note, metrics: gg.metrics || null, promotedAt: gatesMeta.promotedAt || null }; })(),
       capture: capture.status(),
       history,

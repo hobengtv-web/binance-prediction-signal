@@ -2284,6 +2284,17 @@ function renderLearnerStatus() {
   const blk = [...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])];
   if (blk.length) acts.push(`Penahan konteks aktif: ${blk.map((k) => `<code>${esc(k)}</code>`).join(" · ")}`);
   const actsHtml = acts.map((a, i) => `<div class="lstat-line">${i + 1}. ${a}</div>`).join("");
+  // ===== INFO JAM ON/OFF TRADE (selalu dari learner terbaru) =====
+  const vh = (S.veto && Array.isArray(S.veto.hours)) ? S.veto.hours.slice().sort((a, b) => a - b) : null;
+  const onH = vh ? (() => { const a = []; for (let h = 0; h < 24; h++) if (vh.indexOf(h) < 0) a.push(h); return a; })() : null;
+  const ap = S.apply || {};
+  const jamInfo = `<div class="lstat-sec">
+      <b>JAM ON/OFF TRADE (WIB)</b> <span class="lstat-dim">dari learner terbaru${S.veto && S.veto.generated ? " · diperbarui " + new Date(S.veto.generated).toLocaleString() + " (" + esc(S.veto.trigger || "") + ")" : ""}</span>
+      <div class="lstat-line">OFF (tidak trading): ${vh ? (vh.length ? vh.map((h) => `<b>${h}</b>`).join(", ") : '<span class="lstat-dim">tidak ada</span>') : '<span class="lstat-dim">belum tersedia</span>'}</div>
+      <div class="lstat-line">ON (boleh trading): ${onH ? onH.join(", ") : '<span class="lstat-dim">—</span>'}</div>
+      <div class="lstat-line lstat-dim">dasar: jam dgn WR < ${((S.veto && S.veto.thr) || 0.53) * 100}% (n≥${(S.veto && S.veto.minN) || 30}); dibuka cepat bila ${(S.veto && S.veto.recentWin) || 2}/${(S.veto && S.veto.recentN) || 3} sesi terakhir menang</div>
+      <div class="lstat-line lstat-dim">aturan penahan konteks diterapkan: ${ap.apply === false ? '<b>TIDAK</b> (' + esc(ap.note || "terlalu agresif") + ')' : (ap.apply === true ? 'YA' : '<span class="lstat-dim">—</span>')}</div>
+    </div>`;
   el.innerHTML = `
     <div class="lstat-sec">
       <b>1 · PROGRESS DATA BELAJAR</b>
@@ -2306,6 +2317,7 @@ function renderLearnerStatus() {
       <div class="lstat-line">metode: split <b>70/30 berurutan waktu</b> (latih = data paling awal, uji = 30% paling akhir) + <b>Wilson bound</b>; ambang dicari dengan coordinate-ascent memaksimalkan batas bawah Wilson, dengan syarat cakupan ≥20%. Model hanya dipakai bila <b>menang pada jendela uji</b>.</div>
       <div class="lstat-line">status MODEL konteks (aturan penahan): ${M.source === "learned" ? '<span class="lstat-badge ok">DIPAKAI</span>' : '<span class="lstat-badge def">DITAHAN</span>'} · diterapkan: ${([...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])].length) ? [...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])].map((k) => `<code>${esc(k)}</code>`).join(" · ") : '<span class="lstat-dim">belum ada penahan aktif</span>'}</div>
       <div class="lstat-line">status AMBANG numerik (TERPISAH dari model konteks di atas): ${learned ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR AKTIF</span>' : (g.mode === "strict" ? '<span class="lstat-badge def">AMBANG KONSERVATIF</span>' : '<span class="lstat-badge sup">BOOTSTRAP AKTIF (ambang belajar belum menang)</span>')}</div>
+      ${jamInfo}
       <div class="lstat-line">ambang aktif: ${(g.thresholds && g.thresholds.length) ? g.thresholds.map((t) => `<code>${esc(t.f)} ${esc(t.op)} ${esc(t.t)}</code>`).join(" · ") : '<span class="lstat-dim">belum ada (memakai tier ladder saja)</span>'}</div>
       <div class="lstat-line lstat-dim">tier: STRONG volRel2≥${g.tiers ? g.tiers.STRONG.volRel2 : "—"}${g.tiers && g.tiers.STRONG.surprise ? " & surprise≥" + g.tiers.STRONG.surprise : ""} · GOOD ≥${g.tiers ? g.tiers.GOOD.volRel2 : "—"} · FAIR ≥${g.tiers && g.tiers.FAIR ? g.tiers.FAIR.volRel2 : "—"} · floor likuiditas ×${g.liqFloorMul != null ? g.liqFloorMul : "—"} · batas telat ${g.lateFrac != null ? (g.lateFrac * 100).toFixed(0) + "%" : "—"}${learned && g.promotedAt ? ` · dipromosikan ${new Date(g.promotedAt).toLocaleString()}` : ""}</div>
     </div>

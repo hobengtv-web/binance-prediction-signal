@@ -3504,7 +3504,14 @@ function renderTradeHours() {
   const el = document.getElementById("th-body");
   if (!el) return;
   let th = (typeof LIVE !== "undefined" && LIVE.snap && LIVE.snap.tradeHours) ? LIVE.snap.tradeHours : null;
-  if (!th) th = { tz: "WIB", off: [4, 22], on: [[0, 4], [5, 22], [23, 24]] };
+  // Fallback: pakai hasil learner terbaru (bukan hardcode lama 4,22).
+  if (!th && typeof LEARNER_STATUS !== "undefined" && LEARNER_STATUS && LEARNER_STATUS.veto && Array.isArray(LEARNER_STATUS.veto.hours)) {
+    const off = LEARNER_STATUS.veto.hours.slice().sort((a, b) => a - b);
+    const on = []; let s = null;
+    for (let h = 0; h < 24; h++) { const isOff = off.indexOf(h) >= 0; if (!isOff && s === null) s = h; if ((isOff || h === 23) && s !== null) { on.push([s, isOff ? h : 24]); s = null; } }
+    th = { tz: "WIB", off, on, src: "learner" };
+  }
+  if (!th) th = { tz: "WIB", off: [], on: [[0, 24]], src: "default" };
   const pad = (h) => String(h).padStart(2, "0") + ":00";
   const offTxt = (th.off || []).map((h) => pad(h) + "\u2013" + pad(h + 1)).join(" \u00b7 ") || "\u2014";
   const onTxt = (th.on || []).map((r) => pad(r[0]) + "\u2013" + pad(r[1])).join(" \u00b7 ") || "\u2014";

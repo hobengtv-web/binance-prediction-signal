@@ -600,12 +600,27 @@ function fallbackPoll() {
   }, 1000);
 }
 
+// Jam ON/OFF utk panel UI — diambil dari hasil learner terbaru (learn_veto.json), BUKAN hardcode.
+function tradeHoursNow() {
+  const v = readModelPart("veto");
+  const off = (v && Array.isArray(v.hours)) ? v.hours.slice().sort((a, b) => a - b) : null;
+  if (!off) return null;
+  const on = []; let s = null;
+  for (let h = 0; h < 24; h++) {
+    const isOff = off.indexOf(h) >= 0;
+    if (!isOff && s === null) s = h;
+    if ((isOff || h === 23) && s !== null) { on.push([s, isOff ? h : 24]); s = null; }
+  }
+  return { tz: "WIB", off, on, updatedAt: (v && v.generated) || null, trigger: (v && v.trigger) || null, src: "learner" };
+}
+
 http.createServer(async (req, res) => {
   const u = new URL(req.url, "http://x");
 
   if (u.pathname === "/api/snapshot") {
     try {
       const snap = await getSnapshot(u.searchParams.get("history") === "1");
+      snap.tradeHours = tradeHoursNow();
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
       res.end(JSON.stringify(snap));
     } catch (e) {
@@ -625,6 +640,7 @@ http.createServer(async (req, res) => {
     res.write("\n");
     try {
       const snap = await getSnapshot(true);
+      snap.tradeHours = tradeHoursNow();
       res.write(`event: snapshot\ndata: ${JSON.stringify(snap)}\n\n`);
     } catch (e) {
       res.write(`event: error\ndata: ${JSON.stringify({ error: String(e) })}\n\n`);

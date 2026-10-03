@@ -314,9 +314,13 @@ function createCapture(deps) {
           try {
             const r = await captureOne(sym, tf, t0 / 1000);
             if (r && r.skipped) { stats.skipped++; log(`[CAPTURE] ${sym} ${tf} dilewati: ${r.skipped}`); }
+            else if (r && r.ok && r.flat) {
+              stats.flat = (stats.flat || 0) + 1;
+              log(`[CAPTURE] ${sym} ${tf} ${r.rec.k} FLAT (informasional, tanpa sinyal/trade)`);
+            }
             else if (r && r.ok) {
               if (r.rec.gate && r.rec.gate.accepted) stats.accepted = (stats.accepted || 0) + 1; else stats.rejected = (stats.rejected || 0) + 1;
-              log(`[CAPTURE] ${sym} ${tf} ${r.rec.k} dir=${r.rec.sig.dir} grade=${r.rec.sig.grade || "-"} volRel2=${r.rec.sig.volRel2} surprise=${String(r.rec.sig.surprise).slice(0, 6)} gap=${r.rec.sig.learn.gap} ${r.rec.gate.accepted ? "DITERIMA" : "DITOLAK:" + r.rec.gate.reject}`);
+              log(`[CAPTURE] ${sym} ${tf} ${r.rec.k} dir=${r.rec.sig.dir} grade=${r.rec.sig.grade || "-"} volRel2=${r.rec.sig.volRel2} surprise=${String(r.rec.sig.surprise).slice(0, 6)} gap=${(r.rec.sig.learn && r.rec.sig.learn.gap) || "-"} ${r.rec.gate.accepted ? "DITERIMA" : "DITOLAK:" + (r.rec.gate.reject || "-")}`);
             }
           } catch (e) { stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] gagal ${sym} ${tf}: ${e && e.message}`); }
         }

@@ -408,8 +408,12 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       if (gatesPromoted) { gEntry.thresholds = th.thresholds; gEntry.thMetrics = th.test; gEntry.train = th.train; gEntry.baselineTest = th.baselineTest; anyGates = true; }
       gatesMap[key] = gEntry;
       pnlMap[key] = Object.assign({ test: cand.pnlTest }, cand.pnl);
+      // LESSONS ditulis SELALU (informatif), terlepas dari promote. Dulu hanya saat `dec.promote` true ->
+      // karena tak ada key yang promote, panel "pelajaran" selalu kosong. Lessons = insight konteks,
+      // TIDAK bergantung adopsi model.
+      if (cand && cand.lessons) lessonsMap[key] = cand.lessons;
       if (dec.promote) {
-        gateMap[key] = cand.gate; touchMap[key] = cand.touch; lessonsMap[key] = cand.lessons;
+        gateMap[key] = cand.gate; touchMap[key] = cand.touch;
         metaMap[key] = { version: ver, promotedAt: new Date().toISOString(), n: kr.length, rows: cand.rows, metrics: candEval, why: dec.why, promoted: true };
         anyPromote = true;
       } else {

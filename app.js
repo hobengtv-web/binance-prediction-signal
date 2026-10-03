@@ -2234,15 +2234,22 @@ function renderLessons() {
     st.textContent = `${rulesCount(LEARN.gate)} aturan arah · ${rulesCount(LEARN.touch)} aturan lock-touch · baseline uji ${baseTxt != null ? (baseTxt * 100).toFixed(1) + "%" : "—"} (${LEARN.gate.rows || "?"} sinyal) · sumber: ${LEARN.src || "—"}${ver}`;
   }
   const l = LEARN.lessons;
-  if (!l || !l.lessons || !l.lessons.length) { el.innerHTML = '<div class="cd-empty">belum ada data pelajaran</div>'; return; }
+  // Dukung DUA format: lama ({lessons:[...]}) & server baru ({byKey:{key:{lessons:[...]}}}).
+  let flat = [];
+  if (l && Array.isArray(l.lessons)) flat = l.lessons.slice();
+  else if (l && l.byKey && typeof l.byKey === "object") {
+    for (const k of Object.keys(l.byKey)) { const arr = (l.byKey[k] && l.byKey[k].lessons) || []; for (const x of arr) flat.push(Object.assign({ key: k }, x)); }
+  }
+  if (!flat.length) { el.innerHTML = '<div class="cd-empty">belum ada data pelajaran</div>'; return; }
+  const kk = (x) => (x.key ? x.key + " · " : "");
   const row = (x) => x.type === "cause"
-    ? `<div class="ls-row ls-cause"><span class="ls-k">${x.feature}=${x.bucket}</span><span class="ls-v">muncul ${(x.pLose * 100).toFixed(1)}% di sinyal SALAH vs ${(x.pWin * 100).toFixed(1)}% benar</span></div>`
-    : `<div class="ls-row ${x.type === "boost" ? "ls-boost" : "ls-sup"}"><span class="ls-k">${x.rule}</span><span class="ls-v">${(x.wrTest * 100).toFixed(1)}% (n=${x.nTest})</span></div>`;
+    ? `<div class="ls-row ls-cause"><span class="ls-k">${kk(x)}${x.feature}=${x.bucket}</span><span class="ls-v">muncul ${(x.pLose * 100).toFixed(1)}% di sinyal SALAH vs ${(x.pWin * 100).toFixed(1)}% benar</span></div>`
+    : `<div class="ls-row ${x.type === "boost" ? "ls-boost" : "ls-sup"}"><span class="ls-k">${kk(x)}${x.rule}</span><span class="ls-v">${(x.wrTest * 100).toFixed(1)}% (n=${x.nTest})</span></div>`;
   const sec = (t, arr, cls) => arr.length ? `<div class="ls-sec ${cls}"><b>${t}</b>${arr.slice(0, 6).map(row).join("")}</div>` : "";
   el.innerHTML =
-    sec("✔ Konteks kuat (lolos uji)", l.lessons.filter((x) => x.type === "boost"), "c-boost") +
-    sec("⚠ Konteks lemah — hindari", l.lessons.filter((x) => x.type === "suppress"), "c-sup") +
-    sec("🔎 Penyebab sinyal salah", l.lessons.filter((x) => x.type === "cause"), "c-cause");
+    sec("✔ Konteks kuat (lolos uji)", flat.filter((x) => x.type === "boost"), "c-boost") +
+    sec("⚠ Konteks lemah — hindari", flat.filter((x) => x.type === "suppress"), "c-sup") +
+    sec("🔎 Penyebab sinyal salah", flat.filter((x) => x.type === "cause"), "c-cause");
 }
 window.setLearnBlock = (v) => { LEARN_BLOCK = !!v; console.log("[LEARN] tahan konteks lemah =", LEARN_BLOCK); return LEARN_BLOCK; };
 window.learnStatus = () => ({ status: LEARN.status, block: LEARN_BLOCK, gateRules: rulesCount(LEARN.gate), touchRules: rulesCount(LEARN.touch) });

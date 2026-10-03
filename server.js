@@ -410,8 +410,9 @@ async function refit(trigger = "manual") {
       // ===== JAM OFF ADAPTIF: hitung WR per jam WIB dari data, tulis tiap refit =====
       try {
         const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 30), thr: Number(process.env.VETO_WR_THR || 0.53), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2) });
-        write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv));
-        res.vetoHours = hv.hours;
+        const lg = LEARNER.liveHourGate(rows, { thr: Number(process.env.LIVE_HOUR_THR != null ? process.env.LIVE_HOUR_THR : 0.60), k: Number(process.env.LIVE_HOUR_K || 6), minN: Number(process.env.LIVE_HOUR_MIN || 3) });
+        write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv, { liveOff: lg }));
+        res.vetoHours = hv.hours; res.liveOff = lg;
       } catch (e) { res.vetoErr = String(e && e.message); }
       if (dec.promote) {
         write("learn_gate.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.gate));
@@ -494,15 +495,24 @@ function computeVetoNow() {
     recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2),
   });
 }
+// GATE WR PER JAM (pengaman): jam SEKARANG, WR >= LIVE_HOUR_THR (60%) -> ON; < -> OFF (sisa jam ini).
+function liveGateNow() {
+  const rows = LEARNER.rowsFrom([...ledger.values()]);
+  return LEARNER.liveHourGate(rows, {
+    thr: Number(process.env.LIVE_HOUR_THR != null ? process.env.LIVE_HOUR_THR : 0.60),
+    k: Number(process.env.LIVE_HOUR_K || 6), minN: Number(process.env.LIVE_HOUR_MIN || 3),
+  });
+}
 function refreshVeto(tag) {
   try {
     const hv = computeVetoNow();
-    const key = JSON.stringify(hv.hours);
+    const lg = liveGateNow();
+    const key = JSON.stringify([hv.hours, lg.h, lg.off, lg.n]);
     if (key !== lastVetoKey) {
       lastVetoKey = key;
       ensureModelDirs();
-      fs.writeFileSync(path.join(MODEL_CUR, "learn_veto.json"), JSON.stringify(Object.assign({ generated: new Date().toISOString(), trigger: tag }, hv), null, 1));
-      console.log(`[VETO] jam OFF diperbarui (${tag}): [${hv.hours.join(",")}]`);
+      fs.writeFileSync(path.join(MODEL_CUR, "learn_veto.json"), JSON.stringify(Object.assign({ generated: new Date().toISOString(), trigger: tag }, hv, { liveOff: lg }), null, 1));
+      console.log(`[VETO] jam OFF diperbarui (${tag}): off=[${hv.hours.join(",")}] · jam ${lg.h} WR=${lg.wr} n=${lg.n} -> ${lg.off ? "OFF (WR<" + (lg.thr * 100) + "%)" : "ON"}`);
     }
   } catch (e) { console.log(`[VETO] error: ${e && e.message}`); }
 }

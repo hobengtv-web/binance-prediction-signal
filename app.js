@@ -2245,6 +2245,8 @@ async function loadLearnerStatus() {
   renderLearnerStatus();
 }
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let HIST_SHOW_ALL = false;
+if (typeof window !== "undefined") window.__toggleHistAll = () => { HIST_SHOW_ALL = !HIST_SHOW_ALL; try { renderLearnerStatus(); } catch (_) {} };
 function renderLearnerStatus() {
   updateLearnChip();
   const el = document.getElementById("lstat-body"); if (!el) return;
@@ -2265,10 +2267,18 @@ function renderLearnerStatus() {
   // ---- riwayat + alasan belum diganti ----
   const hist = (S.history || []).slice().reverse();
   const lastKeep = hist.find((h) => !h.promote);
-  const histHtml = hist.length ? hist.slice(0, 6).map((h) => `<div class="lstat-row">
+  // Tampilkan hanya 5 riwayat terakhir; sisanya via CTA "Lihat semua" (hindari scroll panjang).
+  const HMAX = 5;
+  const histRow = (h) => `<div class="lstat-row">
       <span class="lstat-badge ${h.promote ? "ok" : "def"}">${h.promote ? "DIPAKAI" : "DITAHAN"}</span>
       <span class="lstat-dim">${h.at ? new Date(h.at).toLocaleString() : ""} · pemicu ${esc(h.trigger || "—")} · data ${h.rows != null ? h.rows : "—"}</span>
-      <span>${esc(h.why || "")}</span></div>`).join("") : '<div class="lstat-dim">belum ada keputusan (menunggu data cukup)</div>';
+      <span>${esc(h.why || "")}</span></div>`;
+  const histShown = HIST_SHOW_ALL ? hist : hist.slice(0, HMAX);
+  const histHtml = hist.length
+    ? histShown.map(histRow).join("") + (hist.length > HMAX
+      ? `<div class="lstat-line"><a href="#" onclick="if(window.__toggleHistAll){window.__toggleHistAll();}return false;">${HIST_SHOW_ALL ? "Sembunyikan (tampilkan 5 terakhir)" : `Lihat semua (${hist.length} riwayat)`}</a></div>`
+      : "")
+    : '<div class="lstat-dim">belum ada keputusan (menunggu data cukup)</div>';
   // ---- aksi selanjutnya ----
   const acts = [];
   if (need > 0) {
@@ -2294,6 +2304,7 @@ function renderLearnerStatus() {
       <div class="lstat-line">ON (boleh trading): ${onH ? onH.join(", ") : '<span class="lstat-dim">—</span>'}</div>
       <div class="lstat-line lstat-dim">dasar: jam dgn WR < ${((S.veto && S.veto.thr) || 0.53) * 100}% (n≥${(S.veto && S.veto.minN) || 30}); dibuka cepat bila ${(S.veto && S.veto.recentWin) || 2}/${(S.veto && S.veto.recentN) || 3} sesi terakhir menang</div>
       <div class="lstat-line lstat-dim">aturan penahan konteks diterapkan: ${ap.apply === false ? '<b>TIDAK</b> (' + esc(ap.note || "terlalu agresif") + ')' : (ap.apply === true ? 'YA' : '<span class="lstat-dim">—</span>')}</div>
+      ${S.veto && S.veto.liveOff ? `<div class="lstat-line">gate jam LIVE (sekarang): jam ${S.veto.liveOff.h} · WR ${S.veto.liveOff.wr != null ? (S.veto.liveOff.wr * 100).toFixed(0) + "%" : "—"} (n=${S.veto.liveOff.n}) → ${S.veto.liveOff.off ? "<b>OFF</b> (WR < " + (S.veto.liveOff.thr * 100) + "%)" : "<b>ON</b>"}</div>` : ""}
     </div>`;
   el.innerHTML = `
     <div class="lstat-sec">

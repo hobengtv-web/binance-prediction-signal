@@ -309,7 +309,7 @@ const MODEL_CUR = path.join(MODEL_DIR, "current");
 const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
 const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
 const GATES_DEF = require("./gates.js");
-const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json" };
+const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json" };
 let gatesMeta = { mode: GATES_DEF.BOOTSTRAP.mode, promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
 

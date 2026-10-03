@@ -207,7 +207,10 @@ function computeSignal(o) {
     add("liqLow", liqLow ? 0 : 1, !liqLow);
     add("learner-block", (learn && learn.blocking) ? 0 : 1, !(learn && learn.blocking));
     const psum = parts.reduce((a, x) => a + x.ratio, 0);
-    power = { pct: parts.length ? Math.round(100 * psum / parts.length) : (accepted ? 100 : 0), parts, accepted: !!accepted };
+    const metN = parts.filter((p) => p.met).length;
+    let pct = parts.length ? 100 * psum / parts.length : (accepted ? 100 : 0);
+    if (parts.length && metN < parts.length) pct = Math.min(pct, 100 * metN / parts.length);  // ada yg belum terpenuhi -> <100%
+    power = { pct: Math.round(pct), parts, accepted: !!accepted, allMet: metN === parts.length };
   } catch (_) {}
 
   return {

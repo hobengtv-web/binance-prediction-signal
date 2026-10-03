@@ -619,7 +619,10 @@ function buildPlan(input) {
       add("menuju-arm", (capturedPct2 || 0) / 40, (capturedPct2 || 0) >= 40);
     }
     const ps = parts.reduce((a, x) => a + x.ratio, 0);
-    plan.power = { pct: parts.length ? Math.round(100 * ps / parts.length) : 100, parts, action: plan.state };
+    const metN = parts.filter((p) => p.met).length;
+    let pct = parts.length ? 100 * ps / parts.length : 100;
+    if (parts.length && metN < parts.length) pct = Math.min(pct, 100 * metN / parts.length);
+    plan.power = { pct: Math.round(pct), parts, action: plan.state, allMet: metN === parts.length };
   } catch (_) {}
   return plan;
 }

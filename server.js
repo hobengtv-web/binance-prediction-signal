@@ -363,7 +363,10 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     const gateMap = Object.assign({}, prevGate.byKey || {});
     const touchMap = Object.assign({}, prevTouch.byKey || {});
     const gatesMap = Object.assign({}, prevGates.byKey || {});
-    const applyMap = {}, lessonsMap = {}, pnlMap = {};
+    const prevApply = readModelPart("apply") || {}, prevLessons = readModelPart("lessons") || {}, prevPnl = readModelPart("pnl") || {};
+    const applyMap = Object.assign({}, prevApply.byKey || {});      // PERTAHANKAN key lain (jangan wipe saat refit per-key)
+    const lessonsMap = Object.assign({}, prevLessons.byKey || {});
+    const pnlMap = Object.assign({}, prevPnl.byKey || {});
     const metaMap = Object.assign({}, prevMeta.byKey || {});
     const allKeys = [...new Set(rows.map((r) => r.symbol + "_" + r.interval))].sort();
     const keys = onlyKey ? [onlyKey] : allKeys;   // per-key trigger -> proses key itu saja

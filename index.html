@@ -94,6 +94,13 @@
       <div class="rec-status" id="rec-status"></div>
     </div>
 
+    <!-- POWER SINYAL U/D (KOSMETIK, TERKUNCI per sesi) — PENEMPATAN SAMA seperti desktop:
+         tepat di bawah rekomendasi sinyal, di atas "reason". -->
+    <div class="dc-pw" id="m-pwsig" style="display:flex;align-items:center;gap:6px;margin:6px 0 2px">
+      <div style="flex:1;height:3px;background:#1c2230;border-radius:2px;overflow:hidden"><b id="m-pwsig-fill" style="display:block;height:100%;width:0;border-radius:2px;transition:width .2s"></b></div>
+      <span id="m-pwsig-val" style="font-size:11px;opacity:.85;white-space:nowrap;min-width:34px;text-align:right">—</span>
+    </div>
+
     <!-- REASON = kenapa rekomendasi di atas diambil. Nilai saja, tanpa label, dipaksa
          1 baris (kelebihan dipotong "…"). Teks lengkap tetap tersedia di tooltip. -->
     <div class="rz-line" id="entryReason" title=""><span class="rz-dot flat"></span><span class="rz-txt">Menunggu sinyal…</span></div>
@@ -103,6 +110,12 @@
       <div class="tp-head">TRADE ASSISTANT</div>
       <!-- INTI 1: aksi yang harus dilakukan sekarang (teks pendek, satu baris besar) -->
       <div class="tp-action" id="tp-action">—</div>
+      <!-- POWER AKSI TA (KOSMETIK, DINAMIS) — PENEMPATAN SAMA seperti desktop:
+           di dalam kartu TA, tepat di bawah informasi aksi ("Tahan"/"Menunggu PEAK"). -->
+      <div class="dc-pw" id="m-pwact" style="display:flex;align-items:center;gap:6px;margin:2px 0">
+        <div style="flex:1;height:3px;background:#1c2230;border-radius:2px;overflow:hidden"><b id="m-pwact-fill" style="display:block;height:100%;width:0;border-radius:2px;transition:width .3s"></b></div>
+        <span id="m-pwact-val" style="font-size:11px;opacity:.85;white-space:nowrap;text-align:right">—</span>
+      </div>
       <!-- INTI 2: harga kunci — boleh entry di mana, target di mana -->
       <div class="tp-key" id="tp-key"></div>
       <!-- INTI 3: status apakah ENTRY dan EARLY CLOSE sudah terjadi -->
@@ -189,17 +202,6 @@
       <div class="mstat"><span>PRICE</span><b id="m-price">—</b></div>
       <div class="mstat"><span>DELTA</span><b id="m-delta">—</b></div>
       <div class="mstat"><span>MODE</span><b id="m-mode">—</b></div>
-    </div>
-    <!-- POWER (KOSMETIK) - tampil di mobile (<1100px). U/D terkunci/sesi, TA dinamis. -->
-    <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
-      <span style="font-size:10px;opacity:.7;min-width:52px">POWER U/D</span>
-      <div class="conf-track" style="flex:1;height:3px"><b id="m-pwsig-fill" style="display:block;height:100%;width:0;border-radius:2px;transition:width .2s"></b></div>
-      <span id="m-pwsig-val" style="font-size:11px;opacity:.85;min-width:34px;text-align:right">—</span>
-    </div>
-    <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
-      <span style="font-size:10px;opacity:.7;min-width:52px">POWER TA</span>
-      <div class="conf-track" style="flex:1;height:3px"><b id="m-pwact-fill" style="display:block;height:100%;width:0;border-radius:2px;transition:width .3s"></b></div>
-      <span id="m-pwact-val" style="font-size:11px;opacity:.85;min-width:34px;text-align:right">—</span>
     </div>
   </section>
 

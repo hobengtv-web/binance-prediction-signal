@@ -3789,19 +3789,30 @@ function restoreMobilePredSession() {
 }
 
 
-  // POWER (KOSMETIK) utk panel MOBILE (<1100px) — sumber: sinyal server (LIVE.signalFor).
+  // POWER (KOSMETIK) utk KARTU MOBILE (<1100px) — sumber: sinyal server (LIVE.entryFor).
+  // VISUAL DISAMAKAN PERSIS dgn desktop (warna & format identik): bar U/D & bar TA.
   function updateMobilePowerBars() {
     try {
       const e = (typeof LIVE !== "undefined" && LIVE.entryFor) ? LIVE.entryFor(state.asset, state.interval) : null;
       const sig = e ? e.signal : null, plan = e ? e.plan : null;
-      const p0 = (sig && sig.power) ? sig.power.pct : null;
-      const lk = state.asset + "_" + state.interval + "_" + (sig && sig.t0);
-      if (p0 != null && POWER_SIG_LOCK[lk] == null) POWER_SIG_LOCK[lk] = p0;   // kunci per sesi
-      const pct = (POWER_SIG_LOCK[lk] != null) ? POWER_SIG_LOCK[lk] : p0;
-      const setB = (fid, vid, p, txt) => { const f = document.getElementById(fid); if (f) { f.style.width = Math.max(0, Math.min(100, p || 0)) + "%"; f.style.background = (p >= 100 ? "#16a34a" : (p >= 60 ? "#f59e0b" : "#94a3b8")); } const v = document.getElementById(vid); if (v) v.textContent = txt; };
-      if (pct != null) setB("m-pwsig-fill", "m-pwsig-val", pct, pct + "%"); else setB("m-pwsig-fill", "m-pwsig-val", 0, "\u2014");
-      const ap = plan && plan.power;
-      if (ap) setB("m-pwact-fill", "m-pwact-val", ap.pct, ap.pct + "% \u2192 " + (ap.next || "")); else setB("m-pwact-fill", "m-pwact-val", 0, "\u2014");
+      const setVal = (vid, txt) => { const v = document.getElementById(vid); if (v) v.textContent = txt; };
+      // POWER SINYAL U/D — TERKUNCI per sesi (sama seperti desktop)
+      const pf = document.getElementById("m-pwsig-fill");
+      if (pf) {
+        const p0 = (sig && sig.power) ? sig.power.pct : null;
+        const lk = state.asset + "_" + state.interval + "_" + (sig && sig.t0);
+        if (p0 != null && POWER_SIG_LOCK[lk] == null) POWER_SIG_LOCK[lk] = p0;
+        const pct = (POWER_SIG_LOCK[lk] != null) ? POWER_SIG_LOCK[lk] : p0;
+        if (pct != null) { pf.style.width = Math.max(0, Math.min(100, pct)) + "%"; pf.style.background = pct >= 100 ? "#10b981" : "#f59e0b"; setVal("m-pwsig-val", pct + "%"); }
+        else { pf.style.width = "0%"; setVal("m-pwsig-val", "\u2014"); }
+      }
+      // POWER AKSI TA — DINAMIS (sama seperti desktop)
+      const af = document.getElementById("m-pwact-fill");
+      if (af) {
+        const ap = plan && plan.power;
+        if (ap) { af.style.width = Math.max(0, Math.min(100, ap.pct)) + "%"; af.style.background = ap.pct >= 100 ? "#10b981" : (ap.pct >= 60 ? "#f59e0b" : "#64748b"); setVal("m-pwact-val", ap.pct + "% \u2192 " + (ap.next || "")); }
+        else { af.style.width = "0%"; setVal("m-pwact-val", "\u2014"); }
+      }
     } catch (_) {}
   }
   function updateMobilePrediction() {

@@ -111,6 +111,7 @@ function computeSignal(o) {
   const accepted0 = !!grade && !liqLow && thOK;
   // ===== VETO no-edge: buang cohort WR~50% (reward kecil, RSI 30-40, vol choppy, jam buruk, liqud tipis)
   let veto = null;
+  const pv = { reward: false, rsi: false, vol: false, hour: false, liq: false, rewardMin: 0, liqMin: 0, rsiBadRanges: null, volBadRanges: null, offHours: null }; // KOSMETIK: salinan status kriteria utk power bar
   if (TA_VETO.on) {
     const wibH = new Date((t0 + 7 * 3600) * 1000).getUTCHours();
     // Jam OFF ADAPTIF dari learner (bila ada); fallback ke default kode.
@@ -121,6 +122,13 @@ function computeSignal(o) {
     // VETO THRESHOLD PER coin×TF (dari data key ini). Fallback global hanya bila key belum punya profil.
     const kp = vetoM && vetoM.prof && vetoM.prof.keys && vetoM.prof.keys[`${sym}_${tf}`];
     const P = kp || { rewardMin: TA_VETO.rewardMin, liqMin: TA_VETO.liqMin, rsiBad: [[TA_VETO.rsiLo, TA_VETO.rsiHi]], volBad: [[TA_VETO.volLo, TA_VETO.volHi]] };
+    // KOSMETIK: salin status kriteria (kondisi SAMA, tidak mengubah rantai veto di bawah)
+    pv.rewardMin = P.rewardMin || 0; pv.liqMin = P.liqMin || 0; pv.rsiBadRanges = P.rsiBad; pv.volBadRanges = P.volBad; pv.offHours = vetoHours;
+    pv.reward = (P.rewardMin || 0) > 0 && gateNow < P.rewardMin;
+    pv.rsi = (P.rsiBad || []).some(([lo, hi]) => rsi != null && rsi >= lo && rsi < hi);
+    pv.vol = (P.volBad || []).some(([lo, hi]) => volRel2 >= lo && volRel2 < hi);
+    pv.hour = vetoHours.indexOf(wibH) >= 0;
+    pv.liq = (P.liqMin || 0) > 0 && liqRatio < P.liqMin;
     if ((P.rewardMin || 0) > 0 && gateNow < P.rewardMin) veto = "veto-reward";
     else if ((P.rsiBad || []).some(([lo, hi]) => rsi != null && rsi >= lo && rsi < hi)) veto = "veto-rsi";
     else if ((P.volBad || []).some(([lo, hi]) => volRel2 >= lo && volRel2 < hi)) veto = "veto-vol";
@@ -180,10 +188,33 @@ function computeSignal(o) {
   // menandai konteks ini (mis. gap<0.005) -> tolak sinyal, supaya pembelajaran benar-benar menajamkan.
   if (learn && learn.blocking && accepted) { accepted = false; reject = reject || "learn-block"; }
 
+  // ===== POWER SINYAL U/D (KOSMETIK — tidak mengubah accepted/reject) =====
+  // 100% = tepat di ambang minimum utk menghasilkan sinyal; >100% = melampaui; <100% = ada kriteria belum terpenuhi.
+  let power = null;
+  try {
+    const parts = [];
+    const add = (label, ratio, met) => parts.push({ label, ratio: +Math.max(0, Math.min(3, ratio)).toFixed(3), met: !!met });
+    const FV = (T && T.FAIR && T.FAIR.volRel2) || 0, FS = (T && T.FAIR && T.FAIR.surprise) || 0;
+    add("tier volRel2", FV > 0 ? volRel2 / FV : (volRel2 > 0 ? 1.001 : 1), volRel2 >= FV);
+    add("tier surprise", FS > 0 ? surprise / FS : (surprise > 0 ? 1.001 : 1), surprise >= FS);
+    const FVv = { volRel2, surprise, liqRatio, gapPct: gateNow, histStrength: histTrend.strength, rsi };
+    for (const th of (profile.thresholds || [])) { const v = FVv[th.f]; if (v == null || !(th.t > 0)) continue; const r = th.op === ">=" ? v / th.t : th.t / v; add("ambang " + th.f, r, th.op === ">=" ? v >= th.t : v <= th.t); }
+    if ((pv.rewardMin || 0) > 0) add("reward", gateNow / pv.rewardMin, gateNow >= pv.rewardMin);
+    if ((pv.liqMin || 0) > 0) add("likuiditas", liqRatio / pv.liqMin, liqRatio >= pv.liqMin);
+    add("rsi", pv.rsi ? 0 : 1, !pv.rsi);
+    add("vol choppy", pv.vol ? 0 : 1, !pv.vol);
+    add("jam sesi", pv.hour ? 0 : 1, !pv.hour);
+    add("liqLow", liqLow ? 0 : 1, !liqLow);
+    add("learner-block", (learn && learn.blocking) ? 0 : 1, !(learn && learn.blocking));
+    const psum = parts.reduce((a, x) => a + x.ratio, 0);
+    power = { pct: parts.length ? Math.round(100 * psum / parts.length) : (accepted ? 100 : 0), parts, accepted: !!accepted };
+  } catch (_) {}
+
   return {
     ok: true,
     signal: {
       asset: sym, interval: tf, t0, lock,
+      power,
       dir: currentDir, mode, conf,
       grade: grade || null, accepted, reject, thresholdsOK: !!thOK,
       volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5),

@@ -605,6 +605,22 @@ function buildPlan(input) {
   };
   plan.statusClose = { ok: !!_clo, at: _clo ? _clo.at : null, price: _clo ? _clo.price : null, reason: _clo ? _clo.reason : null };
   plan.health = health;
+  // ===== POWER AKSI (KOSMETIK — tidak mengubah keputusan) =====
+  // 100% = tepat memenuhi ambang aksi; >100% = melampaui; <100% = belum penuh.
+  try {
+    const parts = [];
+    const add = (label, ratio, met) => parts.push({ label, ratio: +Math.max(0, Math.min(3, ratio)).toFixed(3), met: !!met });
+    if (plan.state === "ENTRY") {
+      add("kedalaman", (extremeDepthPct != null && ENTRY_MIN_EXTREME_PCT > 0) ? extremeDepthPct / ENTRY_MIN_EXTREME_PCT : 1, (extremeDepthPct || 0) >= ENTRY_MIN_EXTREME_PCT);
+      add("retrace", (retraceFromPeakPct != null && ENTRY_RETRACE_PCT > 0) ? retraceFromPeakPct / ENTRY_RETRACE_PCT : 1, (retraceFromPeakPct || 0) >= ENTRY_RETRACE_PCT);
+    } else if (plan.state === "CLOSE" || plan.state === "CLOSE2" || plan.state === "STAND_DOWN") {
+      add("profit-tercapai", (capturedPct || 0) / 40, (capturedPct || 0) >= 40);
+    } else {
+      add("menuju-arm", (capturedPct || 0) / 40, (capturedPct || 0) >= 40);
+    }
+    const ps = parts.reduce((a, x) => a + x.ratio, 0);
+    plan.power = { pct: parts.length ? Math.round(100 * ps / parts.length) : 100, parts, action: plan.state };
+  } catch (_) {}
   return plan;
 }
 

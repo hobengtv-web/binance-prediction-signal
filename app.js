@@ -1015,6 +1015,27 @@ function applyType() {
     paintLedBar(track, val);   // implementasi bersama (lihat paintLedBar di scope global)
   }
 
+  // ===== POWER (KOSMETIK) — kekuatan sinyal U/D & aksi TA. Tidak memengaruhi keputusan. =====
+  function updatePowerBars(sig) {
+    try {
+      const fill = (id, pct, ok) => { const e = document.getElementById(id); if (e) { e.style.width = Math.max(0, Math.min(100, pct || 0)) + "%"; e.style.background = (ok ? "#10b981" : "#f59e0b"); } };
+      const sigP = sig && sig.power;
+      if (sigP) {
+        const el = document.getElementById("pw-sig"); if (el) el.textContent = sigP.pct + "%";
+        const note = document.getElementById("pw-sig-note");
+        if (note) { const miss = (sigP.parts || []).filter((p) => !p.met).map((p) => p.label); note.textContent = sigP.accepted ? " \u00b7 layak (" + (sigP.pct >= 100 ? "melampaui ambang" : "di ambang") + ")" : " \u00b7 belum layak" + (miss.length ? " \u00b7 kurang: " + miss.slice(0, 3).join(", ") : ""); }
+        fill("pw-sig-fill", sigP.pct, sigP.pct >= 100);
+      } else { const el = document.getElementById("pw-sig"); if (el) el.textContent = "—"; }
+      const actP = sig && sig.plan && sig.plan.power;
+      if (actP) {
+        const el = document.getElementById("pw-act"); if (el) el.textContent = actP.pct + "%" + (actP.action ? " (" + actP.action + ")" : "");
+        const note = document.getElementById("pw-act-note");
+        if (note) { const p = (actP.parts || [])[0]; note.textContent = p ? " \u00b7 " + p.label + " " + (p.met ? "terpenuhi" : "belum") : ""; }
+        fill("pw-act-fill", actP.pct, actP.pct >= 100);
+      } else { const el = document.getElementById("pw-act"); if (el) el.textContent = "—"; }
+    } catch (_) {}
+  }
+
   // Distribusi per-candle volume trailing (~15 menit) utk threshold LIQUIDITAS dinamis.
   function volDistribution(sym, five, winLen) {
     const N = 180; // ~15 menit (candle 5s)
@@ -1269,6 +1290,7 @@ function applyType() {
       }
     }
     updateConfidenceDisplay(ledDir, ledConf);
+    try { updatePowerBars((typeof LIVE !== "undefined" && LIVE.signalFor) ? LIVE.signalFor(state.asset, state.interval) : null); } catch (_) {}
 
      
 

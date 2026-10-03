@@ -1291,7 +1291,6 @@ function applyType() {
       }
     }
     updateConfidenceDisplay(ledDir, ledConf);
-    try { updatePowerBars((typeof LIVE !== "undefined" && LIVE.signalFor) ? LIVE.signalFor(state.asset, state.interval) : null); } catch (_) {}
 
      
 
@@ -2798,8 +2797,11 @@ function buildDual() {
 
       <div class="dc-sec dc-signal">
         <div class="dc-recrow"><span class="dc-rec" id="dc-${a}-rec">—</span><span class="rec-status" id="dc-${a}-badge"></span></div>
-        <!-- POWER SINYAL U/D (KOSMETIK, TERKUNCI per sesi: nilai saat sinyal dihasilkan) -->
-        <div class="dc-pw" id="dc-${a}-pwsig"><div class="conf-track dc-led-track" id="dc-${a}-pwsig-track"><b id="dc-${a}-pwsig-fill" style="display:block;height:100%;width:0;border-radius:4px;transition:width .2s"></b></div><span class="dc-led-val na" id="dc-${a}-pwsig-val">—</span></div>
+        <!-- POWER SINYAL U/D (KOSMETIK, TERKUNCI per sesi) — bar tipis + nilai di kanan -->
+        <div class="dc-pw" id="dc-${a}-pwsig" style="display:flex;align-items:center;gap:6px;margin:2px 0">
+          <div style="flex:1;height:3px;background:#1c2230;border-radius:2px;overflow:hidden"><b id="dc-${a}-pwsig-fill" style="display:block;height:100%;width:0;border-radius:2px;transition:width .2s"></b></div>
+          <span id="dc-${a}-pwsig-val" style="font-size:11px;opacity:.85;white-space:nowrap;min-width:34px;text-align:right">—</span>
+        </div>
         <div class="rz-line" id="dc-${a}-reason" title=""><span class="rz-dot flat"></span><span class="rz-txt">—</span></div>
         <!-- LED bar confidence: HANYA bar + % (tanpa label), arahnya SELALU searah signal -->
         <div class="dc-led" id="dc-${a}-led">
@@ -2822,8 +2824,11 @@ function buildDual() {
         <div class="dc-ta-row">
           <div class="dc-ta-main">
             <div class="dc-act" id="dc-${a}-act">—</div>
-            <!-- POWER AKSI TA (KOSMETIK, DINAMIS: progres menuju state berikutnya) -->
-            <div class="dc-pw" id="dc-${a}-pwact"><div class="conf-track dc-led-track" id="dc-${a}-pwact-track"><b id="dc-${a}-pwact-fill" style="display:block;height:100%;width:0;border-radius:4px;transition:width .3s"></b></div><span class="dc-led-val na" id="dc-${a}-pwact-val">—</span></div>
+            <!-- POWER AKSI TA (KOSMETIK, DINAMIS) — bar tipis + %/next di kanan -->
+            <div class="dc-pw" id="dc-${a}-pwact" style="display:flex;align-items:center;gap:6px;margin:2px 0">
+              <div style="flex:1;height:3px;background:#1c2230;border-radius:2px;overflow:hidden"><b id="dc-${a}-pwact-fill" style="display:block;height:100%;width:0;border-radius:2px;transition:width .3s"></b></div>
+              <span id="dc-${a}-pwact-val" style="font-size:11px;opacity:.85;white-space:nowrap;text-align:right">—</span>
+            </div>
             <div class="tp-key" id="dc-${a}-key"></div>
           </div>
           <div class="tp-status dc-ta-st">

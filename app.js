@@ -3517,7 +3517,10 @@ function renderTradeHours() {
   let th = (typeof LIVE !== "undefined" && LIVE.snap && LIVE.snap.tradeHours) ? LIVE.snap.tradeHours : null;
   // Fallback: pakai hasil learner terbaru (bukan hardcode lama 4,22).
   if (!th && typeof LEARNER_STATUS !== "undefined" && LEARNER_STATUS && LEARNER_STATUS.veto && Array.isArray(LEARNER_STATUS.veto.hours)) {
-    const off = LEARNER_STATUS.veto.hours.slice().sort((a, b) => a - b);
+    const vt = LEARNER_STATUS.veto;
+    const off = vt.hours.slice();
+    if (vt.liveOff && vt.liveOff.off === true && off.indexOf(vt.liveOff.h) < 0) off.push(vt.liveOff.h);
+    off.sort((a, b) => a - b);
     const on = []; let s = null;
     for (let h = 0; h < 24; h++) { const isOff = off.indexOf(h) >= 0; if (!isOff && s === null) s = h; if ((isOff || h === 23) && s !== null) { on.push([s, isOff ? h : 24]); s = null; } }
     th = { tz: "WIB", off, on, src: "learner" };
@@ -3534,7 +3537,9 @@ function renderTradeHours() {
     + '<div class="th-row"><span class="th-chip off">OFF</span><b>' + offTxt + '</b> ' + (th.tz || "WIB")
       + ' \u2014 tidak ada entry baru; posisi yang sudah terbuka <b>tetap dieksekusi exit</b></div>'
     + '<div class="th-now">Sekarang <b>' + pad(wibH) + '</b> ' + (th.tz || "WIB") + ' \u2192 '
-      + (isOff ? '<b class="th-off">OFF \u2014 tidak ada entry</b>' : '<b class="th-on">ON \u2014 entry aktif</b>') + '</div>';
+      + (isOff ? '<b class="th-off">OFF \u2014 tidak ada entry</b>' : '<b class="th-on">ON \u2014 entry aktif</b>') + '</div>'
+    + (th.liveOff ? '<div class="th-now">gate jam LIVE: jam ' + th.liveOff.h + ' · WR ' + (th.liveOff.wr != null ? (th.liveOff.wr * 100).toFixed(0) + '%' : '—') + ' (n=' + th.liveOff.n + ', ambang ' + (th.liveOff.thr * 100) + '%) \u2192 ' + (th.liveOff.off ? '<b class="th-off">OFF</b>' : '<b class="th-on">ON</b>') + '</div>' : '')
+    + (th.updatedAt ? '<div class="th-now" style="opacity:.6">sumber: learner \u00b7 diperbarui ' + new Date(th.updatedAt).toLocaleTimeString() + ' (' + (th.trigger || "—") + ')</div>' : '');
 }
 
 function renderConfidenceReport() {

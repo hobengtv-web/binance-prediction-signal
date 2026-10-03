@@ -613,15 +613,20 @@ function fallbackPoll() {
 // Jam ON/OFF utk panel UI — diambil dari hasil learner terbaru (learn_veto.json), BUKAN hardcode.
 function tradeHoursNow() {
   const v = readModelPart("veto");
-  const off = (v && Array.isArray(v.hours)) ? v.hours.slice().sort((a, b) => a - b) : null;
-  if (!off) return null;
+  const base = (v && Array.isArray(v.hours)) ? v.hours.slice() : null;
+  if (!base) return null;
+  const lg = v && v.liveOff;
+  const off = base.slice();
+  // Jam SEKARANG bisa OFF walau tidak ada di daftar adaptif (gate WR per jam) -> masukkan ke OFF.
+  if (lg && lg.off === true && off.indexOf(lg.h) < 0) off.push(lg.h);
+  off.sort((a, b) => a - b);
   const on = []; let s = null;
   for (let h = 0; h < 24; h++) {
     const isOff = off.indexOf(h) >= 0;
     if (!isOff && s === null) s = h;
     if ((isOff || h === 23) && s !== null) { on.push([s, isOff ? h : 24]); s = null; }
   }
-  return { tz: "WIB", off, on, updatedAt: (v && v.generated) || null, trigger: (v && v.trigger) || null, src: "learner" };
+  return { tz: "WIB", off, on, updatedAt: (v && v.generated) || null, trigger: (v && v.trigger) || null, liveOff: lg || null, src: "learner" };
 }
 
 http.createServer(async (req, res) => {
@@ -735,7 +740,7 @@ http.createServer(async (req, res) => {
     });
     res.write("retry: 3000\n\n");
     const release = engine.addSubscriber();
-    const send = () => { try { res.write(`data: ${JSON.stringify(engine.snapshot(tf))}\n\n`); } catch (_) {} };
+    const send = () => { try { const s = engine.snapshot(tf); s.tradeHours = tradeHoursNow(); res.write(`data: ${JSON.stringify(s)}\n\n`); } catch (_) {} };
     send();                                   // snapshot pertama langsung
     const iv = setInterval(send, 1000);       // lalu tiap detik (harga live + sinyal terkunci)
     const ka = setInterval(() => { try { res.write(": keep-alive\n\n"); } catch (_) {} }, 20000);

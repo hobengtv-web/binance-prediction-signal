@@ -271,6 +271,37 @@ function hourVetoes(rows, opts = {}) {
   return { keys, thr, minN, recentN, recentWin };
 }
 
+/* ---------- TIER LADDER PER coin×TF (dimining dari data per key) ----------
+   Cari ambang (volRel2, surprise) per tier yg mencapai target WR, PER key (bukan global). */
+function keyTiers(rows, opts = {}) {
+  const minN = opts.minN || 20;
+  const targets = opts.targets || { FAIR: 0.50, GOOD: 0.55, STRONG: 0.60 };
+  const gridV = [0.3, 0.5, 0.7, 1, 1.5, 2, 3, 4];
+  const gridS = [0, 0.5, 1, 1.5, 2, 3, 4];
+  const groups = {};
+  for (const r of rows) {
+    if (r.won == null || !r.symbol || !r.interval || r.volRel2 == null || r.surprise == null) continue;
+    const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r);
+  }
+  const out = {};
+  for (const k of Object.keys(groups)) {
+    const a = groups[k]; const tier = {};
+    for (const name of ["FAIR", "GOOD", "STRONG"]) {
+      const t = targets[name]; let best = null;
+      for (const v of gridV) for (const s of gridS) {
+        const sub = a.filter((r) => r.volRel2 >= v && r.surprise >= s);
+        if (sub.length < minN) continue;
+        const w = sub.reduce((x, r) => x + (r.won ? 1 : 0), 0) / sub.length;
+        // pilih ambang TERENDAH yg masih mencapai target (paling permisif)
+        if (w >= t && (!best || (v + s / 2) < (best.volRel2 + best.surprise / 2))) best = { volRel2: v, surprise: s, wr: +w.toFixed(4), n: sub.length };
+      }
+      if (best) tier[name] = best;
+    }
+    out[k] = tier;
+  }
+  return { keys: out, targets };
+}
+
 /* ---------- VETO THRESHOLD PER coin×TF (dari data per key, bukan global) ----------
    Cari ambang "no-edge" utk key ini: rewardMin/liqMin (monoton) + rentang rsi/vol yg buruk.
    Tujuannya: filter ditentukan PER coin & durasi, tidak digeneralisir. */
@@ -498,4 +529,4 @@ function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.35) {   //
   return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (min-fold ${(cMin * 100).toFixed(1)}%) tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, APPLY_KEYS, hourVetoes, keyVetoes, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, APPLY_KEYS, hourVetoes, keyVetoes, keyTiers, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

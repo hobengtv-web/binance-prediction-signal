@@ -385,7 +385,17 @@ async function refit(trigger = "manual") {
       applyMap[key] = { apply: applyBlockers, coverage: liveEval ? liveEval.coverage : null, minApplyCov, note: applyBlockers ? "blocker diterapkan" : `cakupan ${(100 * (liveEval ? liveEval.coverage : 0)).toFixed(0)}% < ${(minApplyCov * 100).toFixed(0)}% -> blocker TIDAK diterapkan` };
       const th = LEARNER.learnThresholds(kr);
       const gatesPromoted = !!(th.ok && th.beatsBaseline);
-      if (gatesPromoted) { gatesMap[key] = Object.assign(GATES_DEF.fromThresholds(th.thresholds, { metrics: th.test, note: th.note }), { generated: new Date().toISOString(), version: ver, rows: kr.length, train: th.train, baselineTest: th.baselineTest }); anyGates = true; }
+      // TIER LADDER per key (dimining) — menggantikan bootstrap global utk key ini.
+      const kt = LEARNER.keyTiers(kr, { minN: Number(process.env.TIER_MIN_N || 20) });
+      const gt = (kt.keys[key] && Object.keys(kt.keys[key]).length) ? kt.keys[key] : null;
+      const gEntry = Object.assign({}, gatesMap[key] || {}, {
+        mode: "perkey", liqFloorMul: Number(process.env.LIQ_FLOOR_MUL != null ? process.env.LIQ_FLOOR_MUL : 0.12),
+        lateFrac: Number(process.env.LATE_FRAC != null ? process.env.LATE_FRAC : 0.85),
+        generated: new Date().toISOString(), version: ver, rows: kr.length,
+      });
+      if (gt) gEntry.tiers = gt;
+      if (gatesPromoted) { gEntry.thresholds = th.thresholds; gEntry.thMetrics = th.test; gEntry.train = th.train; gEntry.baselineTest = th.baselineTest; anyGates = true; }
+      gatesMap[key] = gEntry;
       pnlMap[key] = Object.assign({ test: cand.pnlTest }, cand.pnl);
       if (dec.promote) {
         gateMap[key] = cand.gate; touchMap[key] = cand.touch; lessonsMap[key] = cand.lessons;

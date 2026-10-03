@@ -112,11 +112,10 @@ function computeSignal(o) {
     const wibH = new Date((t0 + 7 * 3600) * 1000).getUTCHours();
     // Jam OFF ADAPTIF dari learner (bila ada); fallback ke default kode.
     const vetoM = (() => { try { return (typeof getModel === "function" ? getModel("veto") : null); } catch (_) { return null; } })();
-    const vetoHours = (vetoM && Array.isArray(vetoM.hours)) ? vetoM.hours : TA_VETO.hours;
-    // GATE WR PER JAM: bila jam SEKARANG ber-WR < 60% -> OFF untuk sisa jam ini.
-    const liveOff = !!(vetoM && vetoM.liveOff && vetoM.liveOff.h === wibH && vetoM.liveOff.off === true);
-    if (liveOff) veto = "veto-hour-live";
-    else if (gateNow < TA_VETO.rewardMin) veto = "veto-reward";
+    // Jam OFF PER coin×TF (objektif). Bila file ada tapi key ini belum punya cukup sampel -> [] (jangan blokir).
+    const km = vetoM && vetoM.keys && vetoM.keys[`${sym}_${tf}`];
+    const vetoHours = vetoM ? ((km && Array.isArray(km.hours)) ? km.hours : []) : TA_VETO.hours;
+    if (gateNow < TA_VETO.rewardMin) veto = "veto-reward";
     else if (rsi != null && rsi >= TA_VETO.rsiLo && rsi < TA_VETO.rsiHi) veto = "veto-rsi";
     else if (volRel2 >= TA_VETO.volLo && volRel2 < TA_VETO.volHi) veto = "veto-vol";
     else if (vetoHours.indexOf(wibH) >= 0) veto = "veto-hour";

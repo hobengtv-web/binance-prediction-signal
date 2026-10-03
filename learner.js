@@ -243,26 +243,32 @@ function evalModelRolling(rows, gateRules, touchRules, k = 3) {
 /* ---------- JAM OFF ADAPTIF ----------
    Hitung WR per jam WIB dari data; jam dgn WR < thr & n cukup dijadikan OFF (diperbarui tiap refit). */
 function hourVetoes(rows, opts = {}) {
-  const minN = opts.minN || 30, thr = opts.thr != null ? opts.thr : 0.53;
+  const minN = opts.minN || 8, thr = opts.thr != null ? opts.thr : 0.50;
   const recentN = opts.recentN || 3, recentWin = opts.recentWin != null ? opts.recentWin : 2;
-  const g = {};
+  // PER coin × TF (objektif, tidak digeneralisir): WR tiap jam dihitung utk tiap key sendiri.
+  const acc = {};
   for (const r of rows) {
-    if (r.won == null) continue;
+    if (r.won == null || !r.symbol || !r.interval) continue;
+    const key = r.symbol + "_" + r.interval;
     const h = new Date((r.t0 + 7 * 3600) * 1000).getUTCHours();
+    const g = acc[key] = acc[key] || {};
     (g[h] = g[h] || []).push({ t0: r.t0, w: r.won ? 1 : 0 });
   }
-  const stats = [], hours = [];
-  for (let h = 0; h < 24; h++) {
-    const all = (g[h] || []).sort((a, b) => b.t0 - a.t0);
-    if (all.length < minN) continue;
-    const wr = all.reduce((s, x) => s + x.w, 0) / all.length;
-    const rec = all.slice(0, recentN);                     // RECENT (terbaru) untuk jam ini
-    const recWins = rec.reduce((s, x) => s + x.w, 0);
-    const improving = rec.length >= recentN && recWins >= recentWin;   // mulai membaik -> JANGAN blokir
-    stats.push({ h, n: all.length, wr: +wr.toFixed(4), recWins, recN: rec.length, improving });
-    if (wr < thr && !improving) hours.push(h);
+  const keys = {};
+  for (const key of Object.keys(acc)) {
+    const hours = [], stats = [];
+    for (let h = 0; h < 24; h++) {
+      const all = (acc[key][h] || []).sort((a, b) => b.t0 - a.t0);
+      if (all.length < minN) continue;                              // sampel kurang -> jangan putuskan
+      const wr = all.reduce((s, x) => s + x.w, 0) / all.length;
+      const rec = all.slice(0, recentN); const recWins = rec.reduce((s, x) => s + x.w, 0);
+      const improving = rec.length >= recentN && recWins >= recentWin;
+      stats.push({ h, n: all.length, wr: +wr.toFixed(4), recWins, recN: rec.length, improving });
+      if (wr < thr && !improving) hours.push(h);
+    }
+    keys[key] = { hours, stats };
   }
-  return { hours, stats, thr, minN, recentN, recentWin };
+  return { keys, thr, minN, recentN, recentWin };
 }
 
 /* ---------- GATE WR PER JAM (jalur responsif utk jam SEKARANG) ----------

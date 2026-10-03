@@ -409,10 +409,9 @@ async function refit(trigger = "manual") {
       res.applyBlockers = applyBlockers;
       // ===== JAM OFF ADAPTIF: hitung WR per jam WIB dari data, tulis tiap refit =====
       try {
-        const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 30), thr: Number(process.env.VETO_WR_THR || 0.53), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2) });
-        const lg = LEARNER.liveHourGate(rows, { thr: Number(process.env.LIVE_HOUR_THR != null ? process.env.LIVE_HOUR_THR : 0.50), k: Number(process.env.LIVE_HOUR_K || 6), minN: Number(process.env.LIVE_HOUR_MIN || 3) });
-        write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv, { liveOff: lg }));
-        res.vetoHours = hv.hours; res.liveOff = lg;
+        const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 8), thr: Number(process.env.VETO_WR_THR || 0.50), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2) });
+        write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv));
+        res.vetoByKey = Object.fromEntries(Object.keys(hv.keys).map((k) => [k, hv.keys[k].hours]));
       } catch (e) { res.vetoErr = String(e && e.message); }
       if (dec.promote) {
         write("learn_gate.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.gate));
@@ -495,24 +494,16 @@ function computeVetoNow() {
     recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2),
   });
 }
-// GATE WR PER JAM (pengaman): jam SEKARANG, WR >= LIVE_HOUR_THR (50%) -> ON; < -> OFF (sisa jam ini).
-function liveGateNow() {
-  const rows = LEARNER.rowsFrom([...ledger.values()]);
-  return LEARNER.liveHourGate(rows, {
-    thr: Number(process.env.LIVE_HOUR_THR != null ? process.env.LIVE_HOUR_THR : 0.50),
-    k: Number(process.env.LIVE_HOUR_K || 6), minN: Number(process.env.LIVE_HOUR_MIN || 3),
-  });
-}
 function refreshVeto(tag) {
   try {
-    const hv = computeVetoNow();
-    const lg = liveGateNow();
-    const key = JSON.stringify([hv.hours, lg.h, lg.off, lg.n]);
+    const hv = computeVetoNow();                              // {keys: {BTC_5m:{hours,stats}, ...}, ...}
+    const key = JSON.stringify(hv.keys);
     if (key !== lastVetoKey) {
       lastVetoKey = key;
       ensureModelDirs();
-      fs.writeFileSync(path.join(MODEL_CUR, "learn_veto.json"), JSON.stringify(Object.assign({ generated: new Date().toISOString(), trigger: tag }, hv, { liveOff: lg }), null, 1));
-      console.log(`[VETO] jam OFF diperbarui (${tag}): off=[${hv.hours.join(",")}] · jam ${lg.h} WR=${lg.wr} n=${lg.n} -> ${lg.off ? "OFF (WR<" + (lg.thr * 100) + "%)" : "ON"}`);
+      fs.writeFileSync(path.join(MODEL_CUR, "learn_veto.json"), JSON.stringify(Object.assign({ generated: new Date().toISOString(), trigger: tag }, hv), null, 1));
+      const summary = Object.keys(hv.keys).map((k) => `${k}:[${(hv.keys[k].hours || []).join(",")}]`).join(" ");
+      console.log(`[VETO] jam OFF per coin/TF (${tag}): ${summary}`);
     }
   } catch (e) { console.log(`[VETO] error: ${e && e.message}`); }
 }
@@ -613,20 +604,19 @@ function fallbackPoll() {
 // Jam ON/OFF utk panel UI — diambil dari hasil learner terbaru (learn_veto.json), BUKAN hardcode.
 function tradeHoursNow() {
   const v = readModelPart("veto");
-  const base = (v && Array.isArray(v.hours)) ? v.hours.slice() : null;
-  if (!base) return null;
-  const lg = v && v.liveOff;
-  const off = base.slice();
-  // Jam SEKARANG bisa OFF walau tidak ada di daftar adaptif (gate WR per jam) -> masukkan ke OFF.
-  if (lg && lg.off === true && off.indexOf(lg.h) < 0) off.push(lg.h);
-  off.sort((a, b) => a - b);
-  const on = []; let s = null;
-  for (let h = 0; h < 24; h++) {
-    const isOff = off.indexOf(h) >= 0;
-    if (!isOff && s === null) s = h;
-    if ((isOff || h === 23) && s !== null) { on.push([s, isOff ? h : 24]); s = null; }
+  if (!v || !v.keys) return null;
+  const keys = {};
+  for (const key of Object.keys(v.keys)) {
+    const off = (v.keys[key].hours || []).slice().sort((a, b) => a - b);
+    const on = []; let s = null;
+    for (let h = 0; h < 24; h++) {
+      const isOff = off.indexOf(h) >= 0;
+      if (!isOff && s === null) s = h;
+      if ((isOff || h === 23) && s !== null) { on.push([s, isOff ? h : 24]); s = null; }
+    }
+    keys[key] = { off, on };
   }
-  return { tz: "WIB", off, on, updatedAt: (v && v.generated) || null, trigger: (v && v.trigger) || null, liveOff: lg || null, src: "learner" };
+  return { tz: "WIB", keys, updatedAt: v.generated || null, trigger: v.trigger || null, thr: v.thr, minN: v.minN, src: "learner" };
 }
 
 http.createServer(async (req, res) => {

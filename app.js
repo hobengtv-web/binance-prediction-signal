@@ -2294,17 +2294,19 @@ function renderLearnerStatus() {
   const blk = [...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])];
   if (blk.length) acts.push(`Penahan konteks aktif: ${blk.map((k) => `<code>${esc(k)}</code>`).join(" · ")}`);
   const actsHtml = acts.map((a, i) => `<div class="lstat-line">${i + 1}. ${a}</div>`).join("");
-  // ===== INFO JAM ON/OFF TRADE (selalu dari learner terbaru) =====
-  const vh = (S.veto && Array.isArray(S.veto.hours)) ? S.veto.hours.slice().sort((a, b) => a - b) : null;
-  const onH = vh ? (() => { const a = []; for (let h = 0; h < 24; h++) if (vh.indexOf(h) < 0) a.push(h); return a; })() : null;
+  // ===== INFO JAM ON/OFF TRADE — PER coin × durasi (objektif) =====
+  const vkeys = (S.veto && S.veto.keys) ? S.veto.keys : null;
+  const mkOn = (off) => { off = (off || []).slice().sort((a, b) => a - b); const on = []; let s = null; for (let h = 0; h < 24; h++) { const isOff = off.indexOf(h) >= 0; if (!isOff && s === null) s = h; if ((isOff || h === 23) && s !== null) { on.push(s + "\u2013" + (isOff ? h : 24)); s = null; } } return on.join(" \u00b7 ") || "\u2014"; };
+  const jamRows = vkeys ? Object.keys(vkeys).sort().map((k) => {
+    const off = (vkeys[k].hours || []);
+    return `<div class="lstat-row"><b>${esc(k)}</b> <span class="lstat-dim">OFF: ${off.length ? off.map((h) => esc(h)).join(",") : "\u2014"} \u00b7 ON: ${esc(mkOn(off))}</span></div>`;
+  }).join("") : '<div class="lstat-dim">belum tersedia</div>';
   const ap = S.apply || {};
   const jamInfo = `<div class="lstat-sec">
-      <b>JAM ON/OFF TRADE (WIB)</b> <span class="lstat-dim">dari learner terbaru${S.veto && S.veto.generated ? " · diperbarui " + new Date(S.veto.generated).toLocaleString() + " (" + esc(S.veto.trigger || "") + ")" : ""}</span>
-      <div class="lstat-line">OFF (tidak trading): ${vh ? (vh.length ? vh.map((h) => `<b>${h}</b>`).join(", ") : '<span class="lstat-dim">tidak ada</span>') : '<span class="lstat-dim">belum tersedia</span>'}</div>
-      <div class="lstat-line">ON (boleh trading): ${onH ? onH.join(", ") : '<span class="lstat-dim">—</span>'}</div>
-      <div class="lstat-line lstat-dim">dasar: jam dgn WR < ${((S.veto && S.veto.thr) || 0.53) * 100}% (n≥${(S.veto && S.veto.minN) || 30}); dibuka cepat bila ${(S.veto && S.veto.recentWin) || 2}/${(S.veto && S.veto.recentN) || 3} sesi terakhir menang</div>
+      <b>JAM ON/OFF TRADE (WIB) \u2014 per coin &amp; durasi</b> <span class="lstat-dim">dari learner terbaru${S.veto && S.veto.generated ? " · diperbarui " + new Date(S.veto.generated).toLocaleString() + " (" + esc(S.veto.trigger || "") + ")" : ""}</span>
+      ${jamRows}
+      <div class="lstat-line lstat-dim">dasar: per (coin×durasi) — jam dgn WR &lt; ${((S.veto && S.veto.thr) || 0.5) * 100}% (n≥${(S.veto && S.veto.minN) || 8}) \u2192 OFF; dibuka bila ${(S.veto && S.veto.recentWin) || 2}/${(S.veto && S.veto.recentN) || 3} sesi terakhir menang. Tiap coin/TF independen (tidak digeneralisir).</div>
       <div class="lstat-line lstat-dim">aturan penahan konteks diterapkan: ${ap.apply === false ? '<b>TIDAK</b> (' + esc(ap.note || "terlalu agresif") + ')' : (ap.apply === true ? 'YA' : '<span class="lstat-dim">—</span>')}</div>
-      ${S.veto && S.veto.liveOff ? `<div class="lstat-line">gate jam LIVE (sekarang): jam ${S.veto.liveOff.h} · WR ${S.veto.liveOff.wr != null ? (S.veto.liveOff.wr * 100).toFixed(0) + "%" : "—"} (n=${S.veto.liveOff.n}) → ${S.veto.liveOff.off ? "<b>OFF</b> (WR < " + (S.veto.liveOff.thr * 100) + "%)" : "<b>ON</b>"}</div>` : ""}
     </div>`;
   el.innerHTML = `
     <div class="lstat-sec">
@@ -3515,31 +3517,27 @@ function renderTradeHours() {
   const el = document.getElementById("th-body");
   if (!el) return;
   let th = (typeof LIVE !== "undefined" && LIVE.snap && LIVE.snap.tradeHours) ? LIVE.snap.tradeHours : null;
-  // Fallback: pakai hasil learner terbaru (bukan hardcode lama 4,22).
-  if (!th && typeof LEARNER_STATUS !== "undefined" && LEARNER_STATUS && LEARNER_STATUS.veto && Array.isArray(LEARNER_STATUS.veto.hours)) {
-    const vt = LEARNER_STATUS.veto;
-    const off = vt.hours.slice();
-    if (vt.liveOff && vt.liveOff.off === true && off.indexOf(vt.liveOff.h) < 0) off.push(vt.liveOff.h);
-    off.sort((a, b) => a - b);
-    const on = []; let s = null;
-    for (let h = 0; h < 24; h++) { const isOff = off.indexOf(h) >= 0; if (!isOff && s === null) s = h; if ((isOff || h === 23) && s !== null) { on.push([s, isOff ? h : 24]); s = null; } }
-    th = { tz: "WIB", off, on, src: "learner" };
+  const mkRanges = (off) => { off = (off || []).slice().sort((a, b) => a - b); const on = []; let s = null; for (let h = 0; h < 24; h++) { const isOff = off.indexOf(h) >= 0; if (!isOff && s === null) s = h; if ((isOff || h === 23) && s !== null) { on.push([s, isOff ? h : 24]); s = null; } } return { off, on }; };
+  // Fallback: hasil learner terbaru (per coin×TF).
+  if ((!th || !th.keys) && typeof LEARNER_STATUS !== "undefined" && LEARNER_STATUS && LEARNER_STATUS.veto && LEARNER_STATUS.veto.keys) {
+    const vk = LEARNER_STATUS.veto.keys; const keys = {};
+    for (const k of Object.keys(vk)) keys[k] = mkRanges(vk[k].hours);
+    th = { tz: "WIB", keys, thr: LEARNER_STATUS.veto.thr, minN: LEARNER_STATUS.veto.minN, src: "learner" };
   }
-  if (!th) th = { tz: "WIB", off: [], on: [[0, 24]], src: "default" };
+  if (!th || !th.keys) { el.innerHTML = '<div class="cd-empty">jam ON/OFF per coin &amp; durasi belum tersedia</div>'; return; }
   const pad = (h) => String(h).padStart(2, "0") + ":00";
-  const offTxt = (th.off || []).map((h) => pad(h) + "\u2013" + pad(h + 1)).join(" \u00b7 ") || "\u2014";
-  const onTxt = (th.on || []).map((r) => pad(r[0]) + "\u2013" + pad(r[1])).join(" \u00b7 ") || "\u2014";
   const wibH = Math.floor(((Date.now() / 1000 + 7 * 3600) % 86400) / 3600);
-  const isOff = (th.off || []).indexOf(wibH) !== -1;
-  el.innerHTML =
-    '<div class="th-row"><span class="th-chip on">ON</span><b>' + onTxt + '</b> ' + (th.tz || "WIB")
-      + ' \u2014 entry aktif (sesi 5m &amp; 15m; BNB hanya 5m)</div>'
-    + '<div class="th-row"><span class="th-chip off">OFF</span><b>' + offTxt + '</b> ' + (th.tz || "WIB")
-      + ' \u2014 tidak ada entry baru; posisi yang sudah terbuka <b>tetap dieksekusi exit</b></div>'
-    + '<div class="th-now">Sekarang <b>' + pad(wibH) + '</b> ' + (th.tz || "WIB") + ' \u2192 '
-      + (isOff ? '<b class="th-off">OFF \u2014 tidak ada entry</b>' : '<b class="th-on">ON \u2014 entry aktif</b>') + '</div>'
-    + (th.liveOff ? '<div class="th-now">gate jam LIVE: jam ' + th.liveOff.h + ' · WR ' + (th.liveOff.wr != null ? (th.liveOff.wr * 100).toFixed(0) + '%' : '—') + ' (n=' + th.liveOff.n + ', ambang ' + (th.liveOff.thr * 100) + '%) \u2192 ' + (th.liveOff.off ? '<b class="th-off">OFF</b>' : '<b class="th-on">ON</b>') + '</div>' : '')
-    + (th.updatedAt ? '<div class="th-now" style="opacity:.6">sumber: learner \u00b7 diperbarui ' + new Date(th.updatedAt).toLocaleTimeString() + ' (' + (th.trigger || "—") + ')</div>' : '');
+  const rows = Object.keys(th.keys).sort().map((k) => {
+    const o = th.keys[k];
+    const offTxt = (o.off || []).map((h) => pad(h) + "\u2013" + pad(h + 1)).join(" \u00b7 ") || "\u2014";
+    const onTxt = (o.on || []).map((r) => pad(r[0]) + "\u2013" + pad(r[1])).join(" \u00b7 ") || "\u2014";
+    const isOff = (o.off || []).indexOf(wibH) !== -1;
+    return '<div class="th-row"><b>' + esc(k) + '</b> <span class="th-chip ' + (isOff ? "off" : "on") + '">' + (isOff ? "OFF" : "ON") + '</span> '
+      + (th.tz || "WIB") + ' \u2014 ON: <b>' + esc(onTxt) + '</b> \u00b7 OFF: <b>' + esc(offTxt) + '</b></div>';
+  }).join("");
+  el.innerHTML = rows
+    + '<div class="th-now">Sekarang <b>' + pad(wibH) + '</b> ' + (th.tz || "WIB") + ' \u2014 dinilai <b>per coin &amp; durasi</b> (objektif; tiap baris independen)</div>'
+    + (th.updatedAt ? '<div class="th-now" style="opacity:.6">sumber: learner \u00b7 diperbarui ' + new Date(th.updatedAt).toLocaleTimeString() + ' (' + (th.trigger || "\u2014") + ')' + (th.thr != null ? ' \u00b7 ambang WR&lt;' + (th.thr * 100) + '% (n\u2265' + (th.minN || 8) + ')' : '') + '</div>' : '');
 }
 
 function renderConfidenceReport() {

@@ -2210,6 +2210,20 @@ function learnNote(L) {
   const src = (LEARN.gate && LEARN.gate.source === "ledger") ? `MODEL BELAJAR${LEARN.gate.version ? " " + String(LEARN.gate.version).slice(0, 16) : ""}` : "BELAJAR 90d (backtest)";
   return `${src} (diuji): ${p.join(" · ")}${tag}.`;
 }
+/* Jumlah aturan model: dukung DUA format — statis (array `rules`) & server (per-key `byKey`).
+   Server /api/model/gate kini berformat byKey{TANPA `rules`} -> akses `.rules.length` dulu THROW
+   ("Cannot read properties of undefined"), mematikan seluruh loadLearn. Helper ini aman (return 0). */
+function rulesCount(m) {
+  if (!m) return 0;
+  if (Array.isArray(m.rules)) return m.rules.length;
+  const bk = m.byKey;
+  if (bk && typeof bk === "object") {
+    let n = 0;
+    for (const k in bk) { const v = bk[k]; if (v && Array.isArray(v.rules)) n += v.rules.length; else if (v && Array.isArray(v.conditions)) n += v.conditions.length; }
+    return n > 0 ? n : Object.keys(bk).length;
+  }
+  return 0;
+}
 function renderLessons() {
   const el = document.getElementById("lessons-body"); if (!el) return;
   const st = document.getElementById("ls-status");
@@ -2217,7 +2231,7 @@ function renderLessons() {
     const bt = LEARN.gate.baseline || {};
     const baseTxt = bt.test != null ? bt.test : (bt.dirTest != null ? bt.dirTest : null);
     const ver = LEARN.meta && LEARN.meta.meta && LEARN.meta.meta.version ? ` · model ${String(LEARN.meta.meta.version).slice(0, 16)}` : "";
-    st.textContent = `${LEARN.gate.rules.length} aturan arah · ${LEARN.touch ? LEARN.touch.rules.length : 0} aturan lock-touch · baseline uji ${baseTxt != null ? (baseTxt * 100).toFixed(1) + "%" : "—"} (${LEARN.gate.rows || "?"} sinyal) · sumber: ${LEARN.src || "—"}${ver}`;
+    st.textContent = `${rulesCount(LEARN.gate)} aturan arah · ${rulesCount(LEARN.touch)} aturan lock-touch · baseline uji ${baseTxt != null ? (baseTxt * 100).toFixed(1) + "%" : "—"} (${LEARN.gate.rows || "?"} sinyal) · sumber: ${LEARN.src || "—"}${ver}`;
   }
   const l = LEARN.lessons;
   if (!l || !l.lessons || !l.lessons.length) { el.innerHTML = '<div class="cd-empty">belum ada data pelajaran</div>'; return; }
@@ -2231,7 +2245,7 @@ function renderLessons() {
     sec("🔎 Penyebab sinyal salah", l.lessons.filter((x) => x.type === "cause"), "c-cause");
 }
 window.setLearnBlock = (v) => { LEARN_BLOCK = !!v; console.log("[LEARN] tahan konteks lemah =", LEARN_BLOCK); return LEARN_BLOCK; };
-window.learnStatus = () => ({ status: LEARN.status, block: LEARN_BLOCK, gateRules: LEARN.gate ? LEARN.gate.rules.length : 0, touchRules: LEARN.touch ? LEARN.touch.rules.length : 0 });
+window.learnStatus = () => ({ status: LEARN.status, block: LEARN_BLOCK, gateRules: rulesCount(LEARN.gate), touchRules: rulesCount(LEARN.touch) });
 
 /* ===== STATUS LEARNER (panel UI): progress, pelajaran, penahan aktif, riwayat penyesuaian =====
    Dihitung dari /api/learner (server) + penghitung sesi ini di browser. Tujuannya agar user bisa

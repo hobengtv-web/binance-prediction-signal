@@ -490,7 +490,7 @@ let lastVetoKey = null;
 function computeVetoNow() {
   const rows = LEARNER.rowsFrom([...ledger.values()]);
   return LEARNER.hourVetoes(rows, {
-    minN: Number(process.env.VETO_MIN_N || 30), thr: Number(process.env.VETO_WR_THR || 0.53),
+    minN: Number(process.env.VETO_MIN_N || 8), thr: Number(process.env.VETO_WR_THR || 0.50),
     recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2),
   });
 }

@@ -274,10 +274,10 @@ function createEngine(deps) {
   // sinyal basi + entry BOT terlewat). Lock disimpan ke volume /data; sesi yang sama tetap
   // "sudah terkunci" setelah restart -> tidak ada re-lock / re-emit.
   const SESS_FILE = process.env.ENGINE_SESSION_FILE || path.join(process.env.DATA_DIR || "/data/ledger", "engine_session.json");
-  let _saveT = null;
+  let _saveT = null, _savedOnce = false;
   function saveSessions() {
     if (_saveT) return;
-    _saveT = setTimeout(() => { _saveT = null; try { fs.mkdirSync(path.dirname(SESS_FILE), { recursive: true }); fs.writeFileSync(SESS_FILE, JSON.stringify(session)); } catch (_) {} }, 500);
+    _saveT = setTimeout(() => { _saveT = null; try { fs.mkdirSync(path.dirname(SESS_FILE), { recursive: true }); fs.writeFileSync(SESS_FILE, JSON.stringify(session)); if (!_savedOnce) { _savedOnce = true; log(`[ENGINE] lock sesi disimpan ke ${SESS_FILE}`); } } catch (e) { log(`[ENGINE] GAGAL simpan sesi: ${e && e.message}`); } }, 500);
   }
   try {
     const j = JSON.parse(fs.readFileSync(SESS_FILE, "utf8"));

@@ -343,7 +343,7 @@ function incumbentModel() {          // bentuk {metrics, gate:{rules}, touch:{ru
   return { metrics: g.metrics, gate: { rules: g.rules || [] }, touch: { rules: (t && t.rules) || [] } };
 }
 let refitting = false;
-async function refit(trigger = "manual") {
+async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit HANYA 1 coin×TF
   if (refitting) return { ok: false, why: "re-fit sedang berjalan" };
   refitting = true;
   try {
@@ -365,7 +365,8 @@ async function refit(trigger = "manual") {
     const gatesMap = Object.assign({}, prevGates.byKey || {});
     const applyMap = {}, lessonsMap = {}, pnlMap = {};
     const metaMap = Object.assign({}, prevMeta.byKey || {});
-    const keys = [...new Set(rows.map((r) => r.symbol + "_" + r.interval))].sort();
+    const allKeys = [...new Set(rows.map((r) => r.symbol + "_" + r.interval))].sort();
+    const keys = onlyKey ? [onlyKey] : allKeys;   // per-key trigger -> proses key itu saja
     const minApplyCov = Number(process.env.MIN_APPLY_COV != null ? process.env.MIN_APPLY_COV : 0.35);
     const keyRes = {}; let anyPromote = false, anyGates = false;
     for (const key of keys) {
@@ -818,7 +819,7 @@ http.createServer(async (req, res) => {
     const part = u.pathname.replace("/api/model", "").replace(/^\//, "");
     if (part === "refit") {
       if (req.method !== "POST") { res.writeHead(405, CORS); res.end('{"error":"POST only"}'); return; }
-      refit("manual").then((r) => {
+      refit("manual", u.searchParams.get("key") || null).then((r) => {
         res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
         res.end(JSON.stringify(r));
       }).catch((e) => { res.writeHead(500, CORS); res.end(JSON.stringify({ error: String(e) })); });

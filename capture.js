@@ -85,7 +85,7 @@ function computeSignal(o) {
   const mv2 = lock > 0 ? (moveAbs / lock) * 100 : 0;
   const surprise = sigma1s > 0 ? moveAbs / sigma1s : 0;
   const currentDir = C2 > lock ? "up" : C2 < lock ? "down" : "flat";
-  if (currentDir === "flat") return { skipped: "flat-price" };
+  if (currentDir === "flat") return { skipped: "flat-price", flat: { asset: sym, interval: tf, t0, lock, price: C2, volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5), histStrength: histTrend.strength, align: align || null } };
   // rsi dari candle 5m yang SUDAH SELESAI (tanpa lookahead)
   let rsi = null;
   try {
@@ -269,7 +269,16 @@ function createCapture(deps) {
       }
     } catch (_) {}
     const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m, profile, getModel, SignalCore, nowSec, align });
-    if (r.skipped) return { skipped: r.skipped };
+    if (r.skipped) {
+      // Sesi FLAT: rekam INFORMASIONAL (tanpa sinyal/trade) agar audit & learner bisa menganalisis konteks flat.
+      if (r.skipped === "flat-price" && r.flat) {
+        const rec = { k: `${sym}_${tf}_${t0}`, asset: sym, interval: tf, t0, src: "server",
+          sig: Object.assign({ dir: null, accepted: false, reject: null, skipped: "flat-price", capOffsetMs: 2000, capturedAt: nowSec, prov: "server", minuteIn: 1, ofi: null, gateWr: null }, r.flat) };
+        save(rec, "server"); stats.captured++; stats.skipped++; stats.lastAt = Date.now(); stats.lastKey = rec.k;
+        return { ok: true, flat: true, rec };
+      }
+      return { skipped: r.skipped };
+    }
     const sig = r.signal;
     const rec = {
       k: `${sym}_${tf}_${t0}`, asset: sym, interval: tf, t0, src: "server",

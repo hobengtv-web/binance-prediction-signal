@@ -113,7 +113,8 @@ async function resolveMissing() {
     for (const r of all) {
       if (r.res || !r.sig || !r.t0) continue;
       const dir = r.sig.dir;
-      if (dir !== "up" && dir !== "down") continue;
+      const isFlat = (dir !== "up" && dir !== "down");
+      if (isFlat && r.sig.skipped !== "flat-price") continue;   // hanya record FLAT (informasional) yg ikut di-resolve
       const dur = DUR_S[r.interval];
       if (!dur) continue;
       if (now < r.t0 + dur + 5) continue;                  // ronde belum berakhir
@@ -123,6 +124,12 @@ async function resolveMissing() {
         const sess = bars.filter((b) => b.time >= r.t0 && b.time < r.t0 + dur);
         if (sess.length < 2) continue;
         const lock = sess[0].open, close = sess[sess.length - 1].close;
+        if (isFlat) {
+          // Record FLAT: cukup lock/close/actual (tanpa won, tanpa trade) — untuk analisis konteks flat.
+          const merged = Object.assign({}, r, { res: { lock: +lock, close: +close, actual: (close >= lock ? "up" : "down"), won: null, flat: true, bars: sess.length - 1, src: "server-1m" }, upd: Date.now() });
+          ledger.set(r.k, merged); appendLedger(merged); ledgerDirty++; done++;
+          continue;
+        }
         const path = sess.slice(1);
         const v = (p) => (dir === "up" ? (p - lock) / lock * 100 : (lock - p) / lock * 100);
         let mfe = -Infinity, mae = Infinity, touch = 0, tTouch = null;

@@ -88,16 +88,24 @@ function createEngine(deps) {
       const plan = computePlan(sym, tf, t0, nowS, sigForPlan, market[sym]);
       const conf = computeConf(sym, tf, t0, nowS, sigForPlan, market[sym]);
       session[sym][tf] = { t0, signal: sigForPlan, skipped: r.skipped || null, at: Date.now(), plan, conf };
+      saveSessions();
       if (!r.skipped) {
         stats.locked++;
+        const latMs = Date.now() - t0 * 1000;
         // ===== EVENT "start" (KONTRAK S2): entry SEKARANG searah sinyal di harga pasar =====
-        if (onEvent) {
+        // ANTI SINYAL-BASI: bila lock terjadi melewati jendela entry konsumen (default 90s —
+        // samakan dengan START_WINDOW_MS BOT), JANGAN emit "start". Restart/redeploy di tengah
+        // sesi dulu memicu re-emit sinyal telat yang ditolak BOT; kini cukup jadi "resume" saja.
+        const EMIT_MAX_MS = Number(process.env.EMIT_START_MAX_MS || 90000);
+        if (onEvent && latMs <= EMIT_MAX_MS) {
           try { onEvent({ type: "start", sym, tf, t0: t0, dir: r.signal.dir, accepted: !!r.signal.accepted,
             grade: r.signal.grade || null, surprise: r.signal.surprise != null ? +r.signal.surprise.toFixed(2) : null,
             lock: r.signal.lock != null ? r.signal.lock : null, at: Date.now(),
-            latMs: Date.now() - t0 * 1000 }); } catch (_) {}
+            latMs: latMs }); } catch (_) {}
+        } else if (onEvent) {
+          log(`[ENGINE] ${sym} ${tf} terkunci-telat ${Math.round(latMs / 1000)}s > ${Math.round(EMIT_MAX_MS / 1000)}s — TIDAK re-emit start (anti sinyal basi)`);
         }
-        log(`[ENGINE] ${sym} ${tf} terkunci: dir=${r.signal.dir} grade=${r.signal.grade || "-"} accepted=${r.signal.accepted} volRel2=${r.signal.volRel2} surprise=${String(r.signal.surprise).slice(0, 6)} lat=${Date.now() - t0 * 1000}ms`);
+        log(`[ENGINE] ${sym} ${tf} terkunci: dir=${r.signal.dir} grade=${r.signal.grade || "-"} accepted=${r.signal.accepted} volRel2=${r.signal.volRel2} surprise=${String(r.signal.surprise).slice(0, 6)} lat=${latMs}ms`);
       } else {
         log(`[ENGINE] ${sym} ${tf} tanpa sinyal: ${r.skipped}`);
       }
@@ -261,6 +269,27 @@ function createEngine(deps) {
     m.lastOne = last;
   }
   const session = { BTC: {}, ETH: {}, BNB: {} };          // sym -> tf -> { t0, signal|null, skipped, at }
+  // ===== PERSISTENSI LOCK SESI (anti-hilang saat redeploy mid-sesi) =====
+  // Restart/redeploy dulu menghapus lock in-memory -> sesi berjalan di-lock ULANG telat (memicu
+  // sinyal basi + entry BOT terlewat). Lock disimpan ke volume /data; sesi yang sama tetap
+  // "sudah terkunci" setelah restart -> tidak ada re-lock / re-emit.
+  const SESS_FILE = process.env.ENGINE_SESSION_FILE || path.join(process.env.DATA_DIR || "/data/ledger", "engine_session.json");
+  let _saveT = null;
+  function saveSessions() {
+    if (_saveT) return;
+    _saveT = setTimeout(() => { _saveT = null; try { fs.mkdirSync(path.dirname(SESS_FILE), { recursive: true }); fs.writeFileSync(SESS_FILE, JSON.stringify(session)); } catch (_) {} }, 500);
+  }
+  try {
+    const j = JSON.parse(fs.readFileSync(SESS_FILE, "utf8"));
+    const nowS = Math.floor(Date.now() / 1000);
+    const restored = [];
+    for (const sym of Object.keys(session)) for (const tf of Object.keys((j && j[sym]) || {})) {
+      const rec = j[sym][tf];
+      if (!rec || rec.t0 == null) continue;
+      if (rec.t0 === Math.floor(nowS / (DUR_S[tf] || 300)) * (DUR_S[tf] || 300)) { session[sym][tf] = rec; restored.push(sym + "_" + tf); }
+    }
+    if (restored.length) log(`[ENGINE] lock sesi dipulihkan dari ${SESS_FILE}: ${restored.join(", ")}`);
+  } catch (_) {}
   const stats = { refreshes: 0, errors: 0, locked: 0, lastAt: null, lastErr: null, subscribers: 0, demand: 0 };
   let busy = false;
 

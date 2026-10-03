@@ -85,14 +85,15 @@ function computeSignal(o) {
   const mv2 = lock > 0 ? (moveAbs / lock) * 100 : 0;
   const surprise = sigma1s > 0 ? moveAbs / sigma1s : 0;
   const currentDir = C2 > lock ? "up" : C2 < lock ? "down" : "flat";
-  if (currentDir === "flat") return { skipped: "flat-price", flat: { asset: sym, interval: tf, t0, lock, price: C2, volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5), histStrength: histTrend.strength, align: align || null } };
-  // ===== C: GUARD GERAK MINIMUM =====
-  // Arah sinyal = tanda (C2 - lock) pada 2 detik pertama. Bila geraknya terlalu kecil (mis. mv2 ~0.0004%)
-  // arah berubah = LEMPAR KOIN dan bergantung timing fetch -> ENGINE vs CAPTURE bisa BERBEDA arah
-  // (insiden ETH_5m_1791023400: engine down vs capture up). Di bawah ambang ini: JANGAN keluarkan
-  // arah (skipped "flat-noise") supaya tak ada entry acak & tak ada divergensi.
+  // ===== FLAT / NOISE (guard C: gerak minim) =====
+  // PENTING: JANGAN return objek ringkas di sini. Dulu flat-price/flat-noise return objek minimal ->
+  // seluruh detail (rsi, micro, liqRatio, rewardPct, gate, power, ofi) HILANG, sehingga sesi TANPA
+  // sinyal tidak selengkap sesi bersinyal & tak bisa dianalisa penuh oleh learner. Sekarang sinyal
+  // dihitung PENUH di bawah, lalu ditandai `flatReason` di akhir (dir=null utk flat-price; dir tetap
+  // utk flat-noise) + accepted=false + reject=null. Yang TIDAK disimpan hanya kasus benar-benar tanpa
+  // data (bad-tf/no-core/no-session/no-lock/no-1s) di atas.
   const MIN_MV2_PCT = Number(process.env.MIN_MV2_PCT != null ? process.env.MIN_MV2_PCT : 0.005);
-  if (MIN_MV2_PCT > 0 && mv2 < MIN_MV2_PCT) return { skipped: "flat-noise", flat: { asset: sym, interval: tf, t0, lock, price: C2, volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5), histStrength: histTrend.strength, align: align || null } };
+  const flatReason = (currentDir === "flat") ? "flat-price" : ((MIN_MV2_PCT > 0 && mv2 < MIN_MV2_PCT) ? "flat-noise" : null);
   // rsi dari candle 5m yang SUDAH SELESAI (tanpa lookahead)
   let rsi = null;
   try {
@@ -222,11 +223,13 @@ function computeSignal(o) {
 
   return {
     ok: true,
+    skipped: flatReason || undefined,
     signal: {
       asset: sym, interval: tf, t0, lock,
       power,
-      dir: currentDir, mode, conf,
-      grade: grade || null, accepted, reject, thresholdsOK: !!thOK,
+      dir: (flatReason === "flat-price") ? null : currentDir, mode, conf,
+      grade: grade || null, accepted: flatReason ? false : accepted, reject: flatReason ? null : reject, thresholdsOK: !!thOK,
+      skipped: flatReason || null,
       volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5),
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
       rewardPct: +rewardPct.toFixed(4), liqRatio: +liqRatio.toFixed(3), liqLow: !!liqLow,
@@ -277,10 +280,14 @@ function createCapture(deps) {
     } catch (_) {}
     const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m, profile, getModel, SignalCore, nowSec, align });
     if (r.skipped) {
-      // Sesi FLAT: rekam INFORMASIONAL (tanpa sinyal/trade) agar audit & learner bisa menganalisis konteks flat.
-      if (r.skipped === "flat-price" && r.flat) {
+      // Sesi FLAT/NOISE: rekam INFORMASIONAL dgn objek sinyal PENUH (field SAMA seperti sesi bersinyal:
+      // rsi/micro/liqRatio/rewardPct/gate/power/ofi). Dulu hanya `flat-price` yg disimpan & objek ringkas
+      // -> sesi tanpa sinyal tak lengkap / hilang. Selain yg benar-benar tanpa data (no-1s dll) -> disimpan.
+      if ((r.skipped === "flat-price" || r.skipped === "flat-noise") && r.signal) {
+        const sig = r.signal;
         const rec = { k: `${sym}_${tf}_${t0}`, asset: sym, interval: tf, t0, src: "server",
-          sig: Object.assign({ dir: null, accepted: false, reject: null, skipped: "flat-price", capOffsetMs: 2000, capturedAt: nowSec, prov: "server", minuteIn: 1, ofi: null, gateWr: null }, r.flat) };
+          sig: Object.assign({}, sig, { skipped: r.skipped, capOffsetMs: 2000, capturedAt: nowSec, prov: "server", minuteIn: 1, gateWr: null }),
+          gate: { grade: sig.grade, liqLow: sig.liqLow, liqRatio: sig.liqRatio, thresholdsOK: sig.thresholdsOK, accepted: false, reject: null, profile: profile.mode } };
         save(rec, "server"); stats.captured++; stats.skipped++; stats.lastAt = Date.now(); stats.lastKey = rec.k;
         return { ok: true, flat: true, rec };
       }

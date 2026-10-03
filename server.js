@@ -113,8 +113,9 @@ async function resolveMissing() {
     for (const r of all) {
       if (r.res || !r.sig || !r.t0) continue;
       const dir = r.sig.dir;
-      const isFlat = (dir !== "up" && dir !== "down");
-      if (isFlat && r.sig.skipped !== "flat-price") continue;   // hanya record FLAT (informasional) yg ikut di-resolve
+      const flatSig = (r.sig.skipped === "flat-price" || r.sig.skipped === "flat-noise");
+      const isFlat = flatSig || (dir !== "up" && dir !== "down");
+      if (isFlat && !flatSig) continue;   // resolve record FLAT/NOISE informasional (flat-price & flat-noise)
       const dur = DUR_S[r.interval];
       if (!dur) continue;
       if (now < r.t0 + dur + 5) continue;                  // ronde belum berakhir

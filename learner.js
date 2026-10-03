@@ -240,6 +240,26 @@ function evalModelRolling(rows, gateRules, touchRules, k = 3) {
     gateBlockers: parts[0].gateBlockers, touchBlockers: parts[0].touchBlockers,
   };
 }
+/* ---------- JAM OFF ADAPTIF ----------
+   Hitung WR per jam WIB dari data; jam dgn WR < thr & n cukup dijadikan OFF (diperbarui tiap refit). */
+function hourVetoes(rows, opts = {}) {
+  const minN = opts.minN || 30, thr = opts.thr != null ? opts.thr : 0.53;
+  const g = {};
+  for (const r of rows) {
+    if (r.won == null) continue;
+    const h = new Date((r.t0 + 7 * 3600) * 1000).getUTCHours();
+    (g[h] = g[h] || []).push(r.won ? 1 : 0);
+  }
+  const stats = [], hours = [];
+  for (let h = 0; h < 24; h++) {
+    const a = g[h] || []; if (a.length < minN) continue;
+    const wr = a.reduce((x, y) => x + y, 0) / a.length;
+    stats.push({ h, n: a.length, wr: +wr.toFixed(4) });
+    if (wr < thr) hours.push(h);
+  }
+  return { hours, stats, thr, minN };
+}
+
 /* ---------- OBJEKTIF PnL-TRADE (pakai res.trade -> pnlPct) ----------
    Mengukur rata-rata PnL per trade dari sinyal yang DIAMBIL, agar promosi mengejar PROFIT,
    bukan hanya winrate. Hanya baris yang punya pnlPct (TA benar-benar masuk & keluar). */
@@ -426,4 +446,4 @@ function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.25) {
   return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (min-fold ${(cMin * 100).toFixed(1)}%) tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, APPLY_KEYS, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, APPLY_KEYS, hourVetoes, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

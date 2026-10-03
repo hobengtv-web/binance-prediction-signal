@@ -36,7 +36,7 @@ const TA_VETO = {
   rewardMin: _n(process.env.TA_VETO_REWARD_MIN, 0.002),
   rsiLo: _n(process.env.TA_VETO_RSI_LO, 30), rsiHi: _n(process.env.TA_VETO_RSI_HI, 40),
   volLo: _n(process.env.TA_VETO_VOL_LO, 1.3), volHi: _n(process.env.TA_VETO_VOL_HI, 1.8),
-  hours: String(process.env.TA_VETO_HOURS || "2,3,5,12,21").split(",").map((x) => parseInt(x, 10)).filter((x) => !isNaN(x)), // WIB
+  hours: String(process.env.TA_VETO_HOURS || "3,5,10,12,14,21,22").split(",").map((x) => parseInt(x, 10)).filter((x) => !isNaN(x)), // WIB — diperbarui dari data 2998 sesi (WR<53%)
   liqMin: _n(process.env.TA_VETO_LIQ_MIN, 2),
 };
 
@@ -110,10 +110,13 @@ function computeSignal(o) {
   let veto = null;
   if (TA_VETO.on) {
     const wibH = new Date((t0 + 7 * 3600) * 1000).getUTCHours();
+    // Jam OFF ADAPTIF dari learner (bila ada); fallback ke default kode.
+    const vetoM = (() => { try { return (typeof getModel === "function" ? getModel("veto") : null); } catch (_) { return null; } })();
+    const vetoHours = (vetoM && Array.isArray(vetoM.hours)) ? vetoM.hours : TA_VETO.hours;
     if (gateNow < TA_VETO.rewardMin) veto = "veto-reward";
     else if (rsi != null && rsi >= TA_VETO.rsiLo && rsi < TA_VETO.rsiHi) veto = "veto-rsi";
     else if (volRel2 >= TA_VETO.volLo && volRel2 < TA_VETO.volHi) veto = "veto-vol";
-    else if (TA_VETO.hours.indexOf(wibH) >= 0) veto = "veto-hour";
+    else if (vetoHours.indexOf(wibH) >= 0) veto = "veto-hour";
     else if (liqRatio < TA_VETO.liqMin) veto = "veto-liq";
   }
   let accepted = accepted0 && !veto;

@@ -309,7 +309,7 @@ const MODEL_CUR = path.join(MODEL_DIR, "current");
 const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
 const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
 const GATES_DEF = require("./gates.js");
-const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json" };
+const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json" };
 let gatesMeta = { mode: GATES_DEF.BOOTSTRAP.mode, promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
 
@@ -407,6 +407,12 @@ async function refit(trigger = "manual") {
       const applyBlockers = !!liveEval && (liveEval.coverage || 1) >= minApplyCov;
       try { write("learn_apply.json", { apply: applyBlockers, coverage: liveEval ? liveEval.coverage : null, minApplyCov, at: new Date().toISOString(), note: applyBlockers ? "blocker diterapkan" : `cakupan ${(100 * (liveEval ? liveEval.coverage : 0)).toFixed(0)}% < ${(minApplyCov * 100).toFixed(0)}% -> blocker TIDAK diterapkan (cegah agresif)` }); } catch (_) {}
       res.applyBlockers = applyBlockers;
+      // ===== JAM OFF ADAPTIF: hitung WR per jam WIB dari data, tulis tiap refit =====
+      try {
+        const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 30), thr: Number(process.env.VETO_WR_THR || 0.53) });
+        write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), version: ver }, hv));
+        res.vetoHours = hv.hours;
+      } catch (e) { res.vetoErr = String(e && e.message); }
       if (dec.promote) {
         write("learn_gate.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.gate));
         write("learn_touch90.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.touch));

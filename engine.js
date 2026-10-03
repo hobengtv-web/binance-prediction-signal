@@ -66,14 +66,14 @@ function createEngine(deps) {
       const tfc = market[sym].tf[tf] || [];
       const idx = tfc.findIndex((c) => c.time === t0);
       let ones = market[sym].ones;
-      // CEPAT: kalau cache 1s sudah memuat candle t0 & t0+1, JANGAN fetch lagi (hemat 0,5-2s).
-      const cachedOK = ones && ones.some((c) => c.time === t0) && ones.some((c) => c.time === t0 + 1);
-      if (!cachedOK) {
-        try {
-          const targeted = await getKlines(sym, "1s", t0 + 2, 70);
-          if (targeted && targeted.some((c) => c.time === t0) && targeted.some((c) => c.time === t0 + 1)) ones = targeted;
-        } catch (_) {}
-      }
+      // ===== B: DATA SEGAR WAJIB SAAT LOCK =====
+      // Cache 1s bisa memuat candle t0+1 yang BELUM FINAL (di-refresh sebelum t0+2) -> C2 (close t0+1)
+      // beda tipis vs CAPTURE -> arah bisa flip (penyebab divergensi engine vs capture). Karena itu
+      // SELALU fetch targeted segar (candle t0+1 pasti sudah final di t0+2+); cache hanya fallback bila fetch gagal.
+      try {
+        const targeted = await getKlines(sym, "1s", t0 + 2, 70);
+        if (targeted && targeted.some((c) => c.time === t0) && targeted.some((c) => c.time === t0 + 1)) ones = targeted;
+      } catch (_) {}
       // Alignment multi-TF (arah tren tf lain SEBELUM t0) — fitur model arah U/D
       let align = null;
       try {

@@ -86,6 +86,13 @@ function computeSignal(o) {
   const surprise = sigma1s > 0 ? moveAbs / sigma1s : 0;
   const currentDir = C2 > lock ? "up" : C2 < lock ? "down" : "flat";
   if (currentDir === "flat") return { skipped: "flat-price", flat: { asset: sym, interval: tf, t0, lock, price: C2, volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5), histStrength: histTrend.strength, align: align || null } };
+  // ===== C: GUARD GERAK MINIMUM =====
+  // Arah sinyal = tanda (C2 - lock) pada 2 detik pertama. Bila geraknya terlalu kecil (mis. mv2 ~0.0004%)
+  // arah berubah = LEMPAR KOIN dan bergantung timing fetch -> ENGINE vs CAPTURE bisa BERBEDA arah
+  // (insiden ETH_5m_1791023400: engine down vs capture up). Di bawah ambang ini: JANGAN keluarkan
+  // arah (skipped "flat-noise") supaya tak ada entry acak & tak ada divergensi.
+  const MIN_MV2_PCT = Number(process.env.MIN_MV2_PCT != null ? process.env.MIN_MV2_PCT : 0.005);
+  if (MIN_MV2_PCT > 0 && mv2 < MIN_MV2_PCT) return { skipped: "flat-noise", flat: { asset: sym, interval: tf, t0, lock, price: C2, volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5), histStrength: histTrend.strength, align: align || null } };
   // rsi dari candle 5m yang SUDAH SELESAI (tanpa lookahead)
   let rsi = null;
   try {

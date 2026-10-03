@@ -425,7 +425,7 @@ function learnThresholds(rows, opts = {}) {
    Untuk sinyal ke BOT, yang penting = WINRATE dari sinyal yang DIAMBIL (makin sedikit rugi),
    dengan syarat cakupan masih memadai & stabil di tiap lipatan. Metrik lama (WR x akar(coverage))
    menghukum selektivitas sehingga filter penajam tak pernah bisa promote. */
-function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.25) {
+function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.35) {   // minCov = MIN_APPLY_COV supaya model yg dipakai PASTI diterapkan
   const c = candidate && candidate.metrics, i = incumbent && incumbent.metrics;
   if (!c) return { promote: false, why: "kandidat tidak valid" };
   if (c.taken < minTake) return { promote: false, why: `sinyal diambil hanya ${c.taken} (< ${minTake}) — bukti belum cukup` };

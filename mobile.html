@@ -292,6 +292,18 @@
       <div class="signal-title" id="signalTitle">—</div>
       <div class="signal-sub" id="signalSub">Sinyal akan muncul saat sesi prediction aktif</div>
 
+      <!-- POWER (KOSMETIK): bar tipis + nilai di kanan. U/D terkunci/sesi, TA dinamis. -->
+      <div style="display:flex;align-items:center;gap:6px;margin:6px 0 2px">
+        <span style="font-size:10px;opacity:.7;min-width:52px">POWER U/D</span>
+        <div style="flex:1;height:3px;background:#e5e7eb;border-radius:2px;overflow:hidden"><div id="pwSigFill" style="height:100%;width:0;border-radius:2px;transition:width .2s"></div></div>
+        <span id="pwSigVal" style="font-size:11px;opacity:.85;white-space:nowrap;min-width:34px;text-align:right">—</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin:2px 0 6px">
+        <span style="font-size:10px;opacity:.7;min-width:52px">POWER TA</span>
+        <div style="flex:1;height:3px;background:#e5e7eb;border-radius:2px;overflow:hidden"><div id="pwActFill" style="height:100%;width:0;border-radius:2px;transition:width .3s"></div></div>
+        <span id="pwActVal" style="font-size:11px;opacity:.85;white-space:nowrap;text-align:right">—</span>
+      </div>
+
       <div class="conf-row">
         <span class="conf-label">Confidence</span>
         <span class="conf-value" id="confValue">0%</span>
@@ -820,8 +832,34 @@
       lockPriceManual: document.getElementById('lockPriceManual'),
       status: document.getElementById('status'),
       statusText: document.getElementById('statusText'),
-      refreshBtn: document.getElementById('refreshBtn')
+      refreshBtn: document.getElementById('refreshBtn'),
+      pwSigFill: document.getElementById('pwSigFill'),
+      pwSigVal: document.getElementById('pwSigVal'),
+      pwActFill: document.getElementById('pwActFill'),
+      pwActVal: document.getElementById('pwActVal')
     };
+    const POWER_LOCK = {};   // KOSMETIK: kunci power U/D per sesi (asset_tf_t0)
+    // Ambil power sinyal TA dari server (untuk bar kosmetik). U/D dikunci/sesi, TA dinamis.
+    function setPowerBar(fillEl, valEl, pct, text) {
+      try {
+        if (fillEl) { fillEl.style.width = Math.max(0, Math.min(100, pct || 0)) + "%"; fillEl.style.background = (pct >= 100 ? "#16a34a" : (pct >= 60 ? "#f59e0b" : "#94a3b8")); }
+        if (valEl) valEl.textContent = text;
+      } catch (_) {}
+    }
+    function updateMobilePower(sigData, asset, tf) {
+      try {
+        const e = (sigData && sigData.assets && sigData.assets[asset] && sigData.assets[asset].all) ? sigData.assets[asset].all[tf] : null;
+        const sig = e ? e.signal : null, plan = e ? e.plan : null;
+        const p0 = (sig && sig.power) ? sig.power.pct : null;
+        const lk = asset + "_" + tf + "_" + ((sig && sig.t0) || "");
+        if (p0 != null && POWER_LOCK[lk] == null) POWER_LOCK[lk] = p0;
+        const pct = (POWER_LOCK[lk] != null) ? POWER_LOCK[lk] : p0;
+        if (pct != null) setPowerBar(els.pwSigFill, els.pwSigVal, pct, pct + "%"); else setPowerBar(els.pwSigFill, els.pwSigVal, 0, "—");
+        const ap = plan && plan.power;
+        if (ap) setPowerBar(els.pwActFill, els.pwActVal, ap.pct, ap.pct + "% \u2192 " + (ap.next || "")); else setPowerBar(els.pwActFill, els.pwActVal, 0, "—");
+      } catch (_) {}
+    }
+    async function fetchSignal(tf) { try { const r = await fetch(`${API_BASE}/api/signal?tf=${encodeURIComponent(tf)}`); if (!r.ok) return null; return await r.json(); } catch (_) { return null; } }
 
     function fmt(n, d = 2) {
       if (n == null || isNaN(n)) return "—";
@@ -1028,6 +1066,7 @@
         setStatus("Mengambil data Binance...", "warn");
 
         const data = await fetchSnapshot();
+        try { const sigData = await fetchSignal(tf); updateMobilePower(sigData, asset, tf); } catch (_) {}
 
         state.candles[state.asset] = data.candles[state.asset] || {};
         state.ticker[state.asset] = data.ticker[state.asset];

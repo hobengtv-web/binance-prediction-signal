@@ -3703,7 +3703,8 @@ function renderConfidenceReport() {
     const cCls = r.c === undefined ? "dot-pending" : (r.c ? "dot-win" : "dot-lose");
     // jam sesi ditampilkan di tooltip supaya dua sesi berdampingan yang tampak kembar
     // (mis. dua-duanya "U" abu) tetap bisa dibedakan dengan jelas.
-    const jam = (r.t0Sec != null) ? new Date(r.t0Sec * 1000 + 7 * 3600e3).toISOString().slice(11, 16) : "";
+    // Label waktu = RENTANG sesi (t0 s/d t0+dur) agar tidak tertukar antar-sesi berdekatan.
+    const jam = (r.t0Sec != null) ? (() => { const s = r.t0Sec * 1000 + 7 * 3600e3; const dm = ({ "5m": 300, "15m": 900, "1h": 3600 }[r.interval] || 300) * 1000; return new Date(s).toISOString().slice(11, 16) + "\u2013" + new Date(s + dm).toISOString().slice(11, 16); })() : "";
     const t = `${jam ? jam + " · " : ""}${r.asset}/${r.interval} · signal ${r.dir.toUpperCase()} ${r.won === undefined ? "(pending)" : (r.won ? "BENAR" : "SALAH")}`
       + ` · entry ${eTxt} · early close ${cTxt}`
       + ` · lock ${r.lock != null ? r.lock : "?"} close ${r.close != null ? r.close : "?"}`;

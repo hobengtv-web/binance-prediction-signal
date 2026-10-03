@@ -409,8 +409,8 @@ async function refit(trigger = "manual") {
       res.applyBlockers = applyBlockers;
       // ===== JAM OFF ADAPTIF: hitung WR per jam WIB dari data, tulis tiap refit =====
       try {
-        const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 30), thr: Number(process.env.VETO_WR_THR || 0.53) });
-        write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), version: ver }, hv));
+        const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 30), thr: Number(process.env.VETO_WR_THR || 0.53), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2) });
+        write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv));
         res.vetoHours = hv.hours;
       } catch (e) { res.vetoErr = String(e && e.message); }
       if (dec.promote) {
@@ -481,6 +481,34 @@ setInterval(() => {
   }
 }, REFIT_CHECK_MIN * 60 * 1000);
 console.log(`[REFIT] otomatis: cek tiap ${REFIT_CHECK_MIN} menit · re-fit tiap ${REFIT_INTERVAL_H} jam`);
+
+// ===== JAM OFF RESPONSIF =====
+// Cek tiap VETO_CHECK_MIN (default 2 mnt): bila jam yang diblokir mulai MEMBAIK
+// (mis. 3 sesi terakhir jam itu >=2 menang), jam tsb DIBUKA segera (tak menunggu refit 3 jam).
+const VETO_CHECK_MIN = Math.max(1, parseInt(process.env.VETO_CHECK_MIN || "2", 10));
+let lastVetoKey = null;
+function computeVetoNow() {
+  const rows = LEARNER.rowsFrom([...ledger.values()]);
+  return LEARNER.hourVetoes(rows, {
+    minN: Number(process.env.VETO_MIN_N || 30), thr: Number(process.env.VETO_WR_THR || 0.53),
+    recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2),
+  });
+}
+function refreshVeto(tag) {
+  try {
+    const hv = computeVetoNow();
+    const key = JSON.stringify(hv.hours);
+    if (key !== lastVetoKey) {
+      lastVetoKey = key;
+      ensureModelDirs();
+      fs.writeFileSync(path.join(MODEL_CUR, "learn_veto.json"), JSON.stringify(Object.assign({ generated: new Date().toISOString(), trigger: tag }, hv), null, 1));
+      console.log(`[VETO] jam OFF diperbarui (${tag}): [${hv.hours.join(",")}]`);
+    }
+  } catch (e) { console.log(`[VETO] error: ${e && e.message}`); }
+}
+setTimeout(() => refreshVeto("awal"), 15000);
+setInterval(() => refreshVeto("periodik"), VETO_CHECK_MIN * 60 * 1000);
+console.log(`[VETO] cek jam OFF tiap ${VETO_CHECK_MIN} menit (buka cepat bila jam membaik >=${Number(process.env.VETO_RECENT_WIN || 2)}/${Number(process.env.VETO_RECENT_N || 3)} sesi terakhir)`);
 setTimeout(() => { try { const l = lastRefitTime(); if (l) console.log(`[REFIT] re-fit terakhir: ${new Date(l).toISOString()}`); } catch (_) {} }, 3000);
 
 const clients = new Set();

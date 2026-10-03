@@ -244,20 +244,25 @@ function evalModelRolling(rows, gateRules, touchRules, k = 3) {
    Hitung WR per jam WIB dari data; jam dgn WR < thr & n cukup dijadikan OFF (diperbarui tiap refit). */
 function hourVetoes(rows, opts = {}) {
   const minN = opts.minN || 30, thr = opts.thr != null ? opts.thr : 0.53;
+  const recentN = opts.recentN || 3, recentWin = opts.recentWin != null ? opts.recentWin : 2;
   const g = {};
   for (const r of rows) {
     if (r.won == null) continue;
     const h = new Date((r.t0 + 7 * 3600) * 1000).getUTCHours();
-    (g[h] = g[h] || []).push(r.won ? 1 : 0);
+    (g[h] = g[h] || []).push({ t0: r.t0, w: r.won ? 1 : 0 });
   }
   const stats = [], hours = [];
   for (let h = 0; h < 24; h++) {
-    const a = g[h] || []; if (a.length < minN) continue;
-    const wr = a.reduce((x, y) => x + y, 0) / a.length;
-    stats.push({ h, n: a.length, wr: +wr.toFixed(4) });
-    if (wr < thr) hours.push(h);
+    const all = (g[h] || []).sort((a, b) => b.t0 - a.t0);
+    if (all.length < minN) continue;
+    const wr = all.reduce((s, x) => s + x.w, 0) / all.length;
+    const rec = all.slice(0, recentN);                     // RECENT (terbaru) untuk jam ini
+    const recWins = rec.reduce((s, x) => s + x.w, 0);
+    const improving = rec.length >= recentN && recWins >= recentWin;   // mulai membaik -> JANGAN blokir
+    stats.push({ h, n: all.length, wr: +wr.toFixed(4), recWins, recN: rec.length, improving });
+    if (wr < thr && !improving) hours.push(h);
   }
-  return { hours, stats, thr, minN };
+  return { hours, stats, thr, minN, recentN, recentWin };
 }
 
 /* ---------- OBJEKTIF PnL-TRADE (pakai res.trade -> pnlPct) ----------

@@ -1246,6 +1246,12 @@
       refresh();
     });
 
+    // 100% SERVER (defense-in-depth): netralkan prediktor lokal -> tak ada kalkulasi di browser,
+    // walau ada yang memanggil fungsi ini dari console sekalipun.
+    try { predictImmediately = () => null; } catch (_) {}
+    try { predictWithPatterns = async () => null; } catch (_) {}
+    try { evaluatePastRound = () => null; } catch (_) {}
+
     setInterval(refresh, 5000);
     setInterval(updateCountdown, 1000);
 

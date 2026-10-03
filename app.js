@@ -2302,7 +2302,19 @@ function renderLearnerStatus() {
     return `<div class="lstat-row"><b>${esc(k)}</b> <span class="lstat-dim">OFF: ${off.length ? off.map((h) => esc(h)).join(",") : "\u2014"} \u00b7 ON: ${esc(mkOn(off))}</span></div>`;
   }).join("") : '<div class="lstat-dim">belum tersedia</div>';
   const ap = S.apply || {};
-  const jamInfo = `<div class="lstat-sec">
+  // Model & ambang per coin×TF (independen)
+  const _gatesByKey = (S.gates && S.gates.byKey) || {};
+  const _metaByKey = (S.model && S.model.byKey) || {};
+  const _applyByKey = (S.apply && S.apply.byKey) || {};
+  const _bk = Object.keys(Object.assign({}, _gatesByKey, _metaByKey, _applyByKey)).sort();
+  const modelRows = _bk.map((k) => {
+    const th = (_gatesByKey[k] && Array.isArray(_gatesByKey[k].thresholds) && _gatesByKey[k].thresholds.length)
+      ? _gatesByKey[k].thresholds.map((t) => `${t.f}${t.op}${t.t}`).join(" & ") : "\u2014 (bootstrap)";
+    const v = _metaByKey[k] || {}; const a = _applyByKey[k] || {};
+    return `<div class="lstat-row"><b>${esc(k)}</b> <span class="lstat-dim">ambang: ${esc(th)} \u00b7 model: ${v.promoted ? "DIPAKAI" : "belum menang"} \u00b7 blocker: ${a.apply === false ? "OFF" : (a.apply === true ? "ON" : "\u2014")}</span></div>`;
+  }).join("");
+  const modelSec = _bk.length ? `<div class="lstat-sec"><b>MODEL &amp; AMBANG per coin &amp; durasi</b> <span class="lstat-dim">(terpisah, tidak digeneralisir)</span>${modelRows}</div>` : "";
+  const jamInfo = modelSec + `<div class="lstat-sec">
       <b>JAM ON/OFF TRADE (WIB) \u2014 per coin &amp; durasi</b> <span class="lstat-dim">dari learner terbaru${S.veto && S.veto.generated ? " · diperbarui " + new Date(S.veto.generated).toLocaleString() + " (" + esc(S.veto.trigger || "") + ")" : ""}</span>
       ${jamRows}
       <div class="lstat-line lstat-dim">dasar: per (coin×durasi) — jam dgn WR &lt; ${((S.veto && S.veto.thr) || 0.5) * 100}% (n≥${(S.veto && S.veto.minN) || 8}) \u2192 OFF; dibuka bila ${(S.veto && S.veto.recentWin) || 2}/${(S.veto && S.veto.recentN) || 3} sesi terakhir menang. Tiap coin/TF independen (tidak digeneralisir).</div>

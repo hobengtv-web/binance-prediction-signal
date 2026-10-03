@@ -349,82 +349,65 @@ async function refit(trigger = "manual") {
   try {
     const records = [...ledger.values()];
     const rows = LEARNER.rowsFrom(records);
-    const cand = LEARNER.buildModel(rows);
-    const res = { trigger, at: new Date().toISOString(), rows: rows.length, ok: cand.ok };
-    if (!cand.ok) { res.why = cand.reason; res.promote = false; }
-    else {
-      const inc = incumbentModel();
-      // FIX: bandingkan kandidat vs incumbent pada JENDELA UJI SEKARANG yang SAMA, dengan
-      // validasi BERGULIR (3 lipatan). Sebelumnya incumbent dinilai dari metrik lama (jendela
-      // kecil 3 hari lalu) sehingga kandidat bagus tak pernah bisa promote.
-      const splitIdxNow = Math.floor(rows.length * 0.7);
-      const testNow = rows.slice(splitIdxNow);
+    ensureModelDirs();
+    const ver = new Date().toISOString().replace(/[:.]/g, "-");
+    const hist = path.join(MODEL_DIR, "v-" + ver);
+    try { fs.mkdirSync(hist, { recursive: true }); } catch (_) {}
+    const write = (name, obj) => {
+      fs.writeFileSync(path.join(MODEL_CUR, name), JSON.stringify(obj, null, 1));
+      try { fs.writeFileSync(path.join(hist, name), JSON.stringify(obj, null, 1)); } catch (_) {}
+    };
+    // ===== PER coin × TF (INDEPENDEN, tidak digeneralisir) =====
+    const prevGate = readModelPart("gate") || {}, prevTouch = readModelPart("touch") || {};
+    const prevGates = readGates() || {}, prevMeta = readModelPart("meta") || {};
+    const gateMap = Object.assign({}, prevGate.byKey || {});
+    const touchMap = Object.assign({}, prevTouch.byKey || {});
+    const gatesMap = Object.assign({}, prevGates.byKey || {});
+    const applyMap = {}, lessonsMap = {}, pnlMap = {};
+    const metaMap = Object.assign({}, prevMeta.byKey || {});
+    const keys = [...new Set(rows.map((r) => r.symbol + "_" + r.interval))].sort();
+    const minApplyCov = Number(process.env.MIN_APPLY_COV != null ? process.env.MIN_APPLY_COV : 0.35);
+    const keyRes = {}; let anyPromote = false, anyGates = false;
+    for (const key of keys) {
+      const kr = rows.filter((r) => r.symbol + "_" + r.interval === key);
+      const cand = LEARNER.buildModel(kr);
+      if (!cand.ok) { keyRes[key] = { n: kr.length, ok: false, why: cand.reason }; continue; }
+      const splitIdxNow = Math.floor(kr.length * 0.7);
+      const testNow = kr.slice(splitIdxNow);
+      const inc = gateMap[key] ? { gate: { rules: gateMap[key].rules || [] }, touch: { rules: (touchMap[key] && touchMap[key].rules) || [] }, metrics: (metaMap[key] && metaMap[key].metrics) || null } : null;
       const candEval = LEARNER.evalModelRolling(testNow, cand.gate.rules, cand.touch.rules, 3);
       const incEval = inc ? LEARNER.evalModelRolling(testNow, inc.gate.rules, inc.touch.rules, 3) : null;
-      // OBJEKTIF PnL-TRADE (res.trade): agar promosi mengejar PROFIT, bukan hanya winrate.
       const candPnl = LEARNER.evalModelPnl(testNow, cand.gate.rules, cand.touch.rules);
       const incPnl = inc ? LEARNER.evalModelPnl(testNow, inc.gate.rules, inc.touch.rules) : null;
-      const dec = LEARNER.shouldPromote(
-        { metrics: Object.assign({}, candEval, { pnl: candPnl }) },
-        incEval ? { metrics: Object.assign({}, incEval, { pnl: incPnl }) } : null);
-      res.promote = dec.promote; res.why = dec.why;
-      res.candidate = candEval;
-      res.candidateSingle = cand.metrics;
-      res.incumbent = incEval;
-      res.incumbentStored = inc ? inc.metrics : null;
-      res.rollFold = { k: 3, candScoreMin: candEval.scoreMin, incScoreMin: incEval ? incEval.scoreMin : null };
-      res.pnl = { candidate: candPnl, incumbent: incPnl, allMeanPnl: cand.pnl && cand.pnl.all, n: cand.pnl && cand.pnl.n };
-      ensureModelDirs();
-      const ver = new Date().toISOString().replace(/[:.]/g, "-");
-      const hist = path.join(MODEL_DIR, "v-" + ver);
-      try { fs.mkdirSync(hist, { recursive: true }); } catch (_) {}
-      const write = (name, obj) => {
-        fs.writeFileSync(path.join(MODEL_CUR, name), JSON.stringify(obj, null, 1));
-        try { fs.writeFileSync(path.join(hist, name), JSON.stringify(obj, null, 1)); } catch (_) {}
-      };
-
-      // ---- BELAJAR THRESHOLD: sesuaikan ambang kriteria/filter dari data nyata ----
-      // Hanya dipakai bila pada jendela UJI dia benar-benar lebih baik (Wilson LB naik,
-      // cakupan masih memadai, winrate naik). Kalau tidak, profil gate lama tetap berlaku.
-      const th = LEARNER.learnThresholds(rows);
-      res.thresholds = th.ok
-        ? { note: th.note, train: th.train, test: th.test, baselineTest: th.baselineTest, testLb: th.testLb, baselineLbTest: th.baselineLbTest, beatsBaseline: th.beatsBaseline }
-        : { ok: false, reason: th.reason };
-      if (th.ok && th.beatsBaseline) {
-        const gates = GATES_DEF.fromThresholds(th.thresholds, { metrics: th.test, note: th.note });
-        gates.generated = new Date().toISOString(); gates.version = ver; gates.rows = rows.length;
-        gates.train = th.train; gates.baselineTest = th.baselineTest; gates.testLb = th.testLb; gates.baselineLbTest = th.baselineLbTest;
-        write("gates.json", gates);
-        gatesMeta = { mode: "learned", promotedAt: gates.generated, version: ver, thresholds: th.thresholds, metrics: th.test, note: th.note };
-        res.gatesPromoted = true;
-      } else res.gatesPromoted = false;
-
-      // Tulis konteks PnL-trade SETIAP refit (informasional: konteks TA_FEATS paling untung/rugi)
-      try { write("learn_pnl.json", Object.assign({ generated: new Date().toISOString(), version: ver, rows: cand.rows, test: cand.pnlTest }, cand.pnl)); } catch (_) {}
-      // ===== LANGKAH CAKUPAN: jangan terapkan blocker bila model memblok terlalu banyak (mis. seluruh BTC/down) =====
+      const dec = LEARNER.shouldPromote({ metrics: Object.assign({}, candEval, { pnl: candPnl }) }, incEval ? { metrics: Object.assign({}, incEval, { pnl: incPnl }) } : null);
       const liveEval = dec.promote ? candEval : (incEval || candEval);
-      const minApplyCov = Number(process.env.MIN_APPLY_COV != null ? process.env.MIN_APPLY_COV : 0.35);
       const applyBlockers = !!liveEval && (liveEval.coverage || 1) >= minApplyCov;
-      try { write("learn_apply.json", { apply: applyBlockers, coverage: liveEval ? liveEval.coverage : null, minApplyCov, at: new Date().toISOString(), note: applyBlockers ? "blocker diterapkan" : `cakupan ${(100 * (liveEval ? liveEval.coverage : 0)).toFixed(0)}% < ${(minApplyCov * 100).toFixed(0)}% -> blocker TIDAK diterapkan (cegah agresif)` }); } catch (_) {}
-      res.applyBlockers = applyBlockers;
-      // ===== JAM OFF ADAPTIF: hitung WR per jam WIB dari data, tulis tiap refit =====
-      try {
-        const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 8), thr: Number(process.env.VETO_WR_THR || 0.50), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2) });
-        write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv));
-        res.vetoByKey = Object.fromEntries(Object.keys(hv.keys).map((k) => [k, hv.keys[k].hours]));
-      } catch (e) { res.vetoErr = String(e && e.message); }
+      applyMap[key] = { apply: applyBlockers, coverage: liveEval ? liveEval.coverage : null, minApplyCov, note: applyBlockers ? "blocker diterapkan" : `cakupan ${(100 * (liveEval ? liveEval.coverage : 0)).toFixed(0)}% < ${(minApplyCov * 100).toFixed(0)}% -> blocker TIDAK diterapkan` };
+      const th = LEARNER.learnThresholds(kr);
+      const gatesPromoted = !!(th.ok && th.beatsBaseline);
+      if (gatesPromoted) { gatesMap[key] = Object.assign(GATES_DEF.fromThresholds(th.thresholds, { metrics: th.test, note: th.note }), { generated: new Date().toISOString(), version: ver, rows: kr.length, train: th.train, baselineTest: th.baselineTest }); anyGates = true; }
+      pnlMap[key] = Object.assign({ test: cand.pnlTest }, cand.pnl);
       if (dec.promote) {
-        write("learn_gate.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.gate));
-        write("learn_touch90.json", Object.assign({ generated: new Date().toISOString(), source: "ledger", version: ver, rows: cand.rows, metrics: cand.metrics, baseline: cand.baseline }, cand.touch));
-        write("lessons.json", Object.assign({ generated: new Date().toISOString(), version: ver }, cand.lessons));
-        const meta = { version: ver, promotedAt: new Date().toISOString(), trigger, rows: cand.rows, metrics: candEval, metricsSingle: cand.metrics, baseline: cand.baseline, why: dec.why, pnl: { test: cand.pnlTest, allMeanPnl: cand.pnl && cand.pnl.all, n: cand.pnl && cand.pnl.n }, gatesMode: gatesMeta.mode, gatesThresholds: gatesMeta.thresholds || null, gatesMetrics: gatesMeta.metrics || null };
-        write("meta.json", meta);
-        modelMeta = meta;
-        res.version = ver;
+        gateMap[key] = cand.gate; touchMap[key] = cand.touch; lessonsMap[key] = cand.lessons;
+        metaMap[key] = { version: ver, promotedAt: new Date().toISOString(), n: kr.length, rows: cand.rows, metrics: candEval, why: dec.why, promoted: true };
+        anyPromote = true;
+      } else {
+        metaMap[key] = Object.assign({}, metaMap[key], { n: kr.length, why: dec.why, lastCandidate: candEval });
       }
+      keyRes[key] = { n: kr.length, promote: dec.promote, why: dec.why, coverage: liveEval ? liveEval.coverage : null, gatesPromoted };
     }
+    write("learn_gate.json", { generated: new Date().toISOString(), source: "ledger", version: ver, byKey: gateMap });
+    write("learn_touch90.json", { generated: new Date().toISOString(), source: "ledger", version: ver, byKey: touchMap });
+    write("gates.json", { generated: new Date().toISOString(), version: ver, mode: "perkey", byKey: gatesMap });
+    write("learn_apply.json", { generated: new Date().toISOString(), version: ver, byKey: applyMap });
+    write("lessons.json", { generated: new Date().toISOString(), version: ver, byKey: lessonsMap });
+    write("learn_pnl.json", { generated: new Date().toISOString(), version: ver, byKey: pnlMap });
+    write("meta.json", { version: ver, promotedAt: new Date().toISOString(), trigger, byKey: metaMap });
+    try { const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 8), thr: Number(process.env.VETO_WR_THR || 0.50), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2) }); write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv)); } catch (_) {}
+    const res = { trigger, at: new Date().toISOString(), rows: rows.length, ok: true, perKey: true, keys: keyRes, promote: anyPromote, gatesPromoted: anyGates,
+      why: Object.keys(keyRes).map((k) => `${k}:${keyRes[k].ok === false ? "data-kurang" : (keyRes[k].promote ? "PROMOTE" : "keep")}`).join(" · ") };
     try { fs.appendFileSync(MODEL_LOG, JSON.stringify(res) + "\n"); } catch (_) {}
-    console.log(`[REFIT] ${res.promote ? "PROMOTE" : "KEEP"} · ${res.why || ""} · rows ${rows.length} · gates ${res.gatesPromoted ? "BELAJAR-DIPAKAI" : "tetap"}`);
+    console.log(`[REFIT] per-key · rows ${rows.length} · ${res.why}`);
     return res;
   } finally { refitting = false; }
 }
@@ -895,20 +878,19 @@ http.createServer(async (req, res) => {
       model: {
         source: learned ? "learned" : "default",
         version: modelMeta.version || "default", promotedAt: modelMeta.promotedAt || null, trigger: modelMeta.trigger || null,
-        rows: modelMeta.rows || (g && g.rows) || null,
-        metrics: modelMeta.metrics || (g && g.metrics) || null,
-        baseline: (g && g.baseline) || null,
-        why: modelMeta.why || null,
+        byKey: (readModelPart("meta") || {}).byKey || {},   // METRIK/why PER coin×TF
       },
       blockers: (() => {
         const A = LEARNER.APPLY_KEYS;
-        const pick = (list) => (list || []).filter((k) => typeof k === "string" && k.indexOf("&") === -1 && yetOk(k));
-        const yetOk = (k) => { const i = k.indexOf("="); return i > 0 && A.has(k.slice(0, i)); };
-        return { gate: pick(g && g.suppress), touch: pick(t && t.suppress) };
+        const pick = (list) => (list || []).filter((k) => typeof k === "string" && k.indexOf("&") === -1 && k.indexOf("=") > 0 && A.has(k.slice(0, k.indexOf("="))));
+        const gM = readModelPart("gate") || {}, tM = readModelPart("touch") || {};
+        const byKey = {};
+        for (const k of Object.keys(gM.byKey || {})) byKey[k] = { gate: pick(gM.byKey[k] && gM.byKey[k].suppress), touch: pick(tM.byKey && tM.byKey[k] && tM.byKey[k].suppress) };
+        return { byKey };
       })(),
-      apply: readModelPart("apply"),          // {apply, coverage, minApplyCov, note}
-      veto: readModelPart("veto"),            // {hours, stats, trigger, generated}
-      gates: (() => { const gg = readGates(); return { mode: gg.mode, thresholds: gg.thresholds || [], liqFloorMul: gg.liqFloorMul, lateFrac: gg.lateFrac, note: gg.note, metrics: gg.metrics || null, promotedAt: gatesMeta.promotedAt || null }; })(),
+      apply: readModelPart("apply"),          // {byKey: {key:{apply,coverage,...}}}
+      veto: readModelPart("veto"),            // {keys:{key:{hours,stats}}, ...}
+      gates: (() => { const gg = readGates() || {}; return { mode: gg.mode, byKey: gg.byKey || {}, thresholds: gg.thresholds || [], liqFloorMul: gg.liqFloorMul, lateFrac: gg.lateFrac, note: gg.note }; })(),
       capture: capture.status(),
       history,
     }));

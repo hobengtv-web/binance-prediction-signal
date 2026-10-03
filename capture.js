@@ -50,7 +50,10 @@ const TA_VETO = {
    ============================================================================ */
 function computeSignal(o) {
   const { sym, tf, t0, tfc, idx, ones, five5m, getModel, SignalCore, nowSec } = o;
-  const profile = o.profile || GATES_DEF.BOOTSTRAP;
+  const _key = sym + "_" + tf;
+  // PER coin × TF: pakai profil (tiers+thresholds) MILIK key ini (independen), fallback bootstrap.
+  let profile = o.profile || GATES_DEF.BOOTSTRAP;
+  if (profile && profile.byKey) profile = Object.assign({}, GATES_DEF.BOOTSTRAP, profile.byKey[_key] || {});
   const tfSec = DUR_S[tf];
   if (!tfSec) return { skipped: "bad-tf" };
   if (!SignalCore) return { skipped: "no-core" };
@@ -133,7 +136,9 @@ function computeSignal(o) {
   let touchRate = null, learn = { trend, gap: gapB, hour: hourB };
   try {
     if (typeof getModel === "function") {
-      const g = getModel("gate"), t = getModel("touch");
+      const gM = getModel("gate"), tM = getModel("touch");
+      const g = (gM && gM.byKey) ? gM.byKey[_key] : gM;      // PER key (independen)
+      const t = (tM && tM.byKey) ? tM.byKey[_key] : tM;
       const tb = t && t.buckets && t.buckets.gap ? t.buckets.gap[gapB] : null;
       if (tb && tb.nTest >= 200) touchRate = tb.touchTest;
       const iv = g && g.buckets && g.buckets.interval ? g.buckets.interval[tf] : null;
@@ -148,7 +153,8 @@ function computeSignal(o) {
       // Terapkan aturan penahan learner yang DIKENAL saat lock (tunggal; kunci: interval/symbol/dir/hour/gap/mode).
       // Dulu hanya `interval=`/`gap=` yang diakui -> aturan `hour=`/`symbol=` hasil mining TAK PERNAH diterapkan.
       // LANGKAH CAKUPAN: bila model memblok terlalu banyak, flag apply=false -> jangan terapkan.
-      const applyM = (() => { try { return (typeof getModel === "function" ? getModel("apply") : null); } catch (_) { return null; } })();
+      const applyWhole = (() => { try { return (typeof getModel === "function" ? getModel("apply") : null); } catch (_) { return null; } })();
+      const applyM = (applyWhole && applyWhole.byKey) ? applyWhole.byKey[_key] : applyWhole;   // PER key
       const applyBlockers = !applyM || applyM.apply !== false;
       const blocking = (!applyBlockers) ? false : (() => {
         const rules = [].concat((g && g.suppress) || [], (t && t.suppress) || []);

@@ -826,10 +826,14 @@ http.createServer(async (req, res) => {
     if (u.searchParams.get("dump") === "1") {
       res.end(JSON.stringify({ stats: st, records: [...ledger.values()] }));
     } else if (u.searchParams.get("n")) {
-      // ENDPOINT RINGAN: hanya N record terakhir (untuk panel akurasi app). Hindari transfer 6+ MB.
+      // ENDPOINT RINGAN: N record terakhir, DITRIM ke field yg dipakai panel akurasi saja.
+      // (record penuh ~1,7KB berisi micro/ind/learn → 500 record = 0,8MB; trim → ~0,12MB.)
       const n = Math.max(1, Math.min(3000, Number(u.searchParams.get("n")) || 600));
       const arr = [...ledger.values()];
-      res.end(JSON.stringify({ stats: st, records: arr.slice(-n) }));
+      const trim = (r) => ({ k: r.k, t0: r.t0, asset: r.asset, interval: r.interval,
+        sig: r.sig ? { verdict: r.sig.verdict, dir: r.sig.dir, accepted: r.sig.accepted, grade: r.sig.grade } : null,
+        res: r.res ? { won: r.res.won, actual: r.res.actual, lock: r.res.lock, close: r.res.close, trade: r.res.trade } : null });
+      res.end(JSON.stringify({ stats: st, records: arr.slice(-n).map(trim) }));
     } else {
       res.end(JSON.stringify(st));
     }

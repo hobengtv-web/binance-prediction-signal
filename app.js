@@ -2463,11 +2463,11 @@ const LEDGER = (() => {
   // bukan hanya apa yang sempat tercatat di localStorage device ini.
   let srvCache = null, srvAt = 0, srvLoading = false;
   async function server(force) {
-    if (!force && srvCache && Date.now() - srvAt < 5000) return srvCache;
+    if (!force && srvCache && Date.now() - srvAt < 20000) return srvCache;   // cache 20s (dulu 5s → fetch terlalu sering)
     if (srvLoading) return srvCache;
     srvLoading = true;
     try {
-      const res = await fetch("/api/ledger?n=800", { cache: "no-store" });   // RINGAN: 800 record terakhir (dulu dump=1 = 6,4 MB tiap 5s)
+      const res = await fetch("/api/ledger?n=500", { cache: "no-store" });   // RINGAN: 500 record terakhir (dulu dump=1 = 6,4 MB tiap 5s)
       const j = await res.json();
       srvCache = { records: (j && j.records) || [], stats: (j && j.stats) || null };
       srvAt = Date.now();

@@ -155,9 +155,13 @@ function computeSignal(o) {
   const mode = "TREND", conf = 65;
   const T = profile.tiers || GATES_DEF.BOOTSTRAP.tiers;
   const gateNow = Math.abs((C2 - lock) / lock) * 100;
-  const grade = (volRel2 >= T.STRONG.volRel2 && surprise >= (T.STRONG.surprise || 0)) ? "STRONG"
-    : (volRel2 >= T.GOOD.volRel2 && surprise >= (T.GOOD.surprise || 0)) ? "GOOD"
-      : (volRel2 >= T.FAIR.volRel2 && surprise >= (T.FAIR.surprise || 0)) ? "FAIR" : null;
+  // GUARD: profil per-key (dari learner/keyTiers) bisa TIDAK punya semua tier (STRONG/GOOD/FAIR).
+  // Tanpa guard ini -> "Cannot read properties of undefined (reading 'volRel2')" mematikan capture
+  // key tsb (terbukti: ETH 5m error tiap sesi). Tier yang hilang = fallback ke tier lebih rendah.
+  const gS = T.STRONG || {}, gG = T.GOOD || gS, gF = T.FAIR || gG;
+  const grade = (gS.volRel2 != null && volRel2 >= gS.volRel2 && surprise >= (gS.surprise || 0)) ? "STRONG"
+    : (gG.volRel2 != null && volRel2 >= gG.volRel2 && surprise >= (gG.surprise || 0)) ? "GOOD"
+      : (gF.volRel2 != null && volRel2 >= gF.volRel2 && surprise >= (gF.surprise || 0)) ? "FAIR" : null;
   const typ5m = (VOL_TYPICAL[sym] || 0) * 60;
   const proj = vol2sum * (tfSec / 2);
   const liqMul = profile.liqFloorMul != null ? profile.liqFloorMul : 0.3;

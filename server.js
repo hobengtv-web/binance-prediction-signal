@@ -825,6 +825,11 @@ http.createServer(async (req, res) => {
     res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
     if (u.searchParams.get("dump") === "1") {
       res.end(JSON.stringify({ stats: st, records: [...ledger.values()] }));
+    } else if (u.searchParams.get("n")) {
+      // ENDPOINT RINGAN: hanya N record terakhir (untuk panel akurasi app). Hindari transfer 6+ MB.
+      const n = Math.max(1, Math.min(3000, Number(u.searchParams.get("n")) || 600));
+      const arr = [...ledger.values()];
+      res.end(JSON.stringify({ stats: st, records: arr.slice(-n) }));
     } else {
       res.end(JSON.stringify(st));
     }

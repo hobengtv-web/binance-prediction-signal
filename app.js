@@ -2467,7 +2467,7 @@ const LEDGER = (() => {
     if (srvLoading) return srvCache;
     srvLoading = true;
     try {
-      const res = await fetch("/api/ledger?dump=1", { cache: "no-store" });
+      const res = await fetch("/api/ledger?n=800", { cache: "no-store" });   // RINGAN: 800 record terakhir (dulu dump=1 = 6,4 MB tiap 5s)
       const j = await res.json();
       srvCache = { records: (j && j.records) || [], stats: (j && j.stats) || null };
       srvAt = Date.now();

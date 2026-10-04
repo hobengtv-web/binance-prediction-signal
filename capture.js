@@ -103,13 +103,51 @@ function computeSignal(o) {
   try {
     if (five5m && five5m.length) rsi = SignalCore.rsiFromSeries(five5m.filter((c) => c.time + 300 <= nowSec).slice(-50), 14);
   } catch (_) {}
-  // ===== FILTER RSI 40–60 (scalper) =====
-  // Uji 6 hari (data nyata): mv>=0.02 + RSI 40-60 menaikkan WR 62,5% → 70,6% dan $ (di entry
-  // realistis 0,59–0,62) dari +$4 → +$23. RSI ekstrem (<40 / >=70) netral/buruk. rsi null (data 5m
-  // kosong) -> filter dilewati (jangan blokir karena data hilang). Reversibel via env RSI_MIN/RSI_MAX.
+  // ===== FILTER RSI (scalper) — zona tengah 40–70 =====
+  // Uji ketat (data nyata, 6 hari): binning -> RSI <40 / >=70 = 51–57% (buruk); RSI 40–70 = 67–80%
+  // (60–70 justru 80%). Uji statistik z=2,18 (≈95% signifikan), konsisten di dua paruh waktu.
+  // rsi null (data 5m kosong) -> filter dilewati (jangan blokir karena data hilang). Env RSI_MIN/RSI_MAX.
   const RSI_MIN = Number(process.env.RSI_MIN != null ? process.env.RSI_MIN : 40);
-  const RSI_MAX = Number(process.env.RSI_MAX != null ? process.env.RSI_MAX : 60);
+  const RSI_MAX = Number(process.env.RSI_MAX != null ? process.env.RSI_MAX : 70);
   const rsiOK = (rsi == null) || (rsi >= RSI_MIN && rsi < RSI_MAX);
+  // ===== RECORDER INDIKATOR TAMBAHAN (untuk uji jendela panjang nanti) =====
+  // EMA9/EMA21 (crossover), MACD (12/26/9), dan pola candle 5m terakhir — semua dari candle 5m yang
+  // SUDAH SELESAI (tanpa lookahead). Direkam ke ledger agar bisa diuji tanpa menunggu 30 hari lagi.
+  let ind = null;
+  try {
+    const cl = (five5m || []).filter((c) => c.time + 300 <= nowSec);
+    if (cl.length >= 30) {
+      const closes = cl.map((c) => c.close);
+      const ema = (arr, p) => { if (!arr.length) return null; let e = arr[0]; const k = 2 / (p + 1); for (let i = 1; i < arr.length; i++) e = arr[i] * k + e * (1 - k); return e; };
+      const seg = closes.slice(-80);
+      const e9 = ema(seg, 9), e21 = ema(seg, 21), e12 = ema(seg, 12), e26 = ema(seg, 26);
+      // MACD line series -> signal line (EMA9 dari MACD)
+      const macdSeries = [];
+      for (let i = 26; i <= seg.length; i++) { const s = seg.slice(0, i); macdSeries.push(ema(s, 12) - ema(s, 26)); }
+      const macd = macdSeries.length ? macdSeries[macdSeries.length - 1] : (e12 - e26);
+      const macdSig = ema(macdSeries.slice(-20), 9);
+      const macdHist = (macd != null && macdSig != null) ? (macd - macdSig) : null;
+      const last = cl[cl.length - 1];
+      const body = last.close - last.open, rng = last.high - last.low;
+      const upper = last.high - Math.max(last.open, last.close), lower = Math.min(last.open, last.close) - last.low;
+      let pattern = "none";
+      if (rng > 0) {
+        if (Math.abs(body) <= 0.1 * rng) pattern = "doji";
+        else if (lower >= 2 * Math.abs(body) && upper <= 0.3 * rng) pattern = "hammer";
+        else if (upper >= 2 * Math.abs(body) && lower <= 0.3 * rng) pattern = "shooting-star";
+        else pattern = body > 0 ? "bull-candle" : "bear-candle";
+      }
+      ind = {
+        ema9: e9 != null ? +e9.toFixed(2) : null, ema21: e21 != null ? +e21.toFixed(2) : null,
+        emaCross: (e9 != null && e21 != null) ? (e9 > e21 ? "up" : "down") : null,
+        emaAgree: (e9 != null && e21 != null) ? ((e9 > e21) === (currentDir === "up") ? 1 : 0) : null,
+        macd: macd != null ? +macd.toFixed(4) : null, macdSig: macdSig != null ? +macdSig.toFixed(4) : null,
+        macdHist: macdHist != null ? +macdHist.toFixed(4) : null,
+        macdDir: macdHist != null ? (macdHist > 0 ? "up" : "down") : null,
+        pattern, lastBody: +body.toFixed(2), lastRange: +rng.toFixed(2),
+      };
+    }
+  } catch (_) {}
   // CATATAN: gate `verdict !== flat` milik app memakai volRel yang bergantung waktu
   // (artefak floor `frac` = 0.05 sebelum detik ke-15), sehingga pada 2 detik app sering
   // melaporkan LOWVOL walau ladder tier lolos. Populasi yang dipakai = ladder tier 2 detik
@@ -243,6 +281,7 @@ function computeSignal(o) {
       skipped: flatReason || null,
       volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5),
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
+      ind,   // RECORDER: EMA9/EMA21 (crossover) + MACD + pola candle 5m — untuk uji jendela panjang
       rewardPct: +rewardPct.toFixed(4), liqRatio: +liqRatio.toFixed(3), liqLow: !!liqLow,
       touchRate, gateKey: `${tf}|${mode}|${currentDir}|rsi:${rsiBucket(rsi)}|str:${strBucket(histTrend.strength)}`,
       micro: {

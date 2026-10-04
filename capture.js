@@ -92,7 +92,11 @@ function computeSignal(o) {
   // dihitung PENUH di bawah, lalu ditandai `flatReason` di akhir (dir=null utk flat-price; dir tetap
   // utk flat-noise) + accepted=false + reject=null. Yang TIDAK disimpan hanya kasus benar-benar tanpa
   // data (bad-tf/no-core/no-session/no-lock/no-1s) di atas.
-  const MIN_MV2_PCT = Number(process.env.MIN_MV2_PCT != null ? process.env.MIN_MV2_PCT : 0.005);
+  // FILTER GERAK-MINIMUM (uji 6 hari): entry hanya bila harga sudah bergerak >= 0,02% dari LOCK pada
+  // momen sinyal (rewardPct == mv2). Terbukti mengubah EV dari negatif (~-$146) → positif (+$20) di
+  // seluruh rentang harga entry (0,55–0,62); WR 56%→62,5%. Di bawah ambang ini -> "flat-noise" (skip).
+  // Bisa dibalik instan via env MIN_MV2_PCT (mis. 0.005). 0 = nonaktif.
+  const MIN_MV2_PCT = Number(process.env.MIN_MV2_PCT != null ? process.env.MIN_MV2_PCT : 0.02);
   const flatReason = (currentDir === "flat") ? "flat-price" : ((MIN_MV2_PCT > 0 && mv2 < MIN_MV2_PCT) ? "flat-noise" : null);
   // rsi dari candle 5m yang SUDAH SELESAI (tanpa lookahead)
   let rsi = null;

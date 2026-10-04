@@ -103,6 +103,13 @@ function computeSignal(o) {
   try {
     if (five5m && five5m.length) rsi = SignalCore.rsiFromSeries(five5m.filter((c) => c.time + 300 <= nowSec).slice(-50), 14);
   } catch (_) {}
+  // ===== FILTER RSI 40–60 (scalper) =====
+  // Uji 6 hari (data nyata): mv>=0.02 + RSI 40-60 menaikkan WR 62,5% → 70,6% dan $ (di entry
+  // realistis 0,59–0,62) dari +$4 → +$23. RSI ekstrem (<40 / >=70) netral/buruk. rsi null (data 5m
+  // kosong) -> filter dilewati (jangan blokir karena data hilang). Reversibel via env RSI_MIN/RSI_MAX.
+  const RSI_MIN = Number(process.env.RSI_MIN != null ? process.env.RSI_MIN : 40);
+  const RSI_MAX = Number(process.env.RSI_MAX != null ? process.env.RSI_MAX : 60);
+  const rsiOK = (rsi == null) || (rsi >= RSI_MIN && rsi < RSI_MAX);
   // CATATAN: gate `verdict !== flat` milik app memakai volRel yang bergantung waktu
   // (artefak floor `frac` = 0.05 sebelum detik ke-15), sehingga pada 2 detik app sering
   // melaporkan LOWVOL walau ladder tier lolos. Populasi yang dipakai = ladder tier 2 detik
@@ -120,7 +127,7 @@ function computeSignal(o) {
   const liqLow = typ5m > 0 && proj < floor;
   const liqRatio = typ5m > 0 ? proj / typ5m : 1;
   const thOK = GATES_DEF.applyThresholds({ volRel2, surprise, liqRatio, gapPct: gateNow, histStrength: histTrend.strength, rsi }, profile.thresholds);
-  const accepted0 = !!grade && !liqLow && thOK;
+  const accepted0 = !!grade && !liqLow && thOK && rsiOK;
   // ===== VETO no-edge: buang cohort WR~50% (reward kecil, RSI 30-40, vol choppy, jam buruk, liqud tipis)
   let veto = null;
   const pv = { reward: false, rsi: false, vol: false, hour: false, liq: false, rewardMin: 0, liqMin: 0, rsiBadRanges: null, volBadRanges: null, offHours: null }; // KOSMETIK: salinan status kriteria utk power bar
@@ -148,7 +155,7 @@ function computeSignal(o) {
     else if ((P.liqMin || 0) > 0 && liqRatio < P.liqMin) veto = "veto-liq";
   }
   let accepted = accepted0 && !veto;
-  let reject = accepted ? null : (veto || (!thOK ? "threshold" : !grade ? "tier" : "liq-low"));
+  let reject = accepted ? null : (veto || (!rsiOK ? "rsi-out" : (!thOK ? "threshold" : !grade ? "tier" : "liq-low")));
 
   const d2 = ((C2 - lock) / lock) * 100;
   const rewardPct = Math.abs(d2);

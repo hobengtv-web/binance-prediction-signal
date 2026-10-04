@@ -832,7 +832,11 @@ http.createServer(async (req, res) => {
       // PENTING: ambil N record ber-ARAH (sig.dir up/down) terakhir — BUKAN N record terakhir apa saja.
       // Di pasar sepi, ratusan record terakhir = flat/noise (dir null) → panel akurasi jadi kehilangan
       // sesi ber-sinyal (data lama seperti hilang). Filter dir dulu, baru slice N terakhir.
-      const arr = [...ledger.values()].filter((r) => r.sig && (r.sig.dir === "up" || r.sig.dir === "down"));
+      // Kirim N sesi yang PUNYA SINYAL ARAH & BUKAN ditolak (accepted !== false) — persis yg ditampilkan
+      // panel akurasi. Rejected/flat/lebih-lama tak dipakai panel, jadi jangan dihitung ke kuota N.
+      const arr = [...ledger.values()].filter((r) => r.sig
+        && (r.sig.dir === "up" || r.sig.dir === "down" || r.sig.verdict === "up" || r.sig.verdict === "down")
+        && r.sig.accepted !== false);
       const trim = (r) => ({ k: r.k, t0: r.t0, asset: r.asset, interval: r.interval,
         sig: r.sig ? { verdict: r.sig.verdict, dir: r.sig.dir, accepted: r.sig.accepted, grade: r.sig.grade } : null,
         res: r.res ? { won: r.res.won, actual: r.res.actual, lock: r.res.lock, close: r.res.close, trade: r.res.trade } : null });

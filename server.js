@@ -829,7 +829,10 @@ http.createServer(async (req, res) => {
       // ENDPOINT RINGAN: N record terakhir, DITRIM ke field yg dipakai panel akurasi saja.
       // (record penuh ~1,7KB berisi micro/ind/learn → 500 record = 0,8MB; trim → ~0,12MB.)
       const n = Math.max(1, Math.min(3000, Number(u.searchParams.get("n")) || 600));
-      const arr = [...ledger.values()];
+      // PENTING: ambil N record ber-ARAH (sig.dir up/down) terakhir — BUKAN N record terakhir apa saja.
+      // Di pasar sepi, ratusan record terakhir = flat/noise (dir null) → panel akurasi jadi kehilangan
+      // sesi ber-sinyal (data lama seperti hilang). Filter dir dulu, baru slice N terakhir.
+      const arr = [...ledger.values()].filter((r) => r.sig && (r.sig.dir === "up" || r.sig.dir === "down"));
       const trim = (r) => ({ k: r.k, t0: r.t0, asset: r.asset, interval: r.interval,
         sig: r.sig ? { verdict: r.sig.verdict, dir: r.sig.dir, accepted: r.sig.accepted, grade: r.sig.grade } : null,
         res: r.res ? { won: r.res.won, actual: r.res.actual, lock: r.res.lock, close: r.res.close, trade: r.res.trade } : null });

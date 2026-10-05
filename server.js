@@ -368,22 +368,31 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     // ===== PER coin × TF (INDEPENDEN, tidak digeneralisir) =====
     const prevGate = readModelPart("gate") || {}, prevTouch = readModelPart("touch") || {};
     const prevGates = readGates() || {}, prevMeta = readModelPart("meta") || {};
-    const gateMap = Object.assign({}, prevGate.byKey || {});
-    const touchMap = Object.assign({}, prevTouch.byKey || {});
-    const gatesMap = Object.assign({}, prevGates.byKey || {});
     const prevApply = readModelPart("apply") || {}, prevLessons = readModelPart("lessons") || {}, prevPnl = readModelPart("pnl") || {};
-    const applyMap = Object.assign({}, prevApply.byKey || {});      // PERTAHANKAN key lain (jangan wipe saat refit per-key)
-    const lessonsMap = Object.assign({}, prevLessons.byKey || {});
-    const pnlMap = Object.assign({}, prevPnl.byKey || {});
-    const metaMap = Object.assign({}, prevMeta.byKey || {});
     const allKeys = [...new Set(rows.map((r) => r.symbol + "_" + r.interval))].sort();
+    // ANTI-SNOWBALL: HAPUS config learner utk key yg SUDAH TIDAK ADA di data terbaru.
+    // Tanpa ini, aturan lama (suppress/threshold/blocker) menumpuk -> makin banyak sinyal diblok.
+    const keySet = new Set(allKeys);
+    const keepOnly = (m) => { for (const k of Object.keys(m)) if (!keySet.has(k)) delete m[k]; return m; };
+    const gateMap = keepOnly(Object.assign({}, prevGate.byKey || {}));
+    const touchMap = keepOnly(Object.assign({}, prevTouch.byKey || {}));
+    const gatesMap = keepOnly(Object.assign({}, prevGates.byKey || {}));
+    const applyMap = keepOnly(Object.assign({}, prevApply.byKey || {}));
+    const lessonsMap = keepOnly(Object.assign({}, prevLessons.byKey || {}));
+    const pnlMap = keepOnly(Object.assign({}, prevPnl.byKey || {}));
+    const metaMap = keepOnly(Object.assign({}, prevMeta.byKey || {}));
     const keys = onlyKey ? [onlyKey] : allKeys;   // per-key trigger -> proses key itu saja
     const minApplyCov = Number(process.env.MIN_APPLY_COV != null ? process.env.MIN_APPLY_COV : 0.35);
     const keyRes = {}; let anyPromote = false, anyGates = false;
     for (const key of keys) {
       const kr = rows.filter((r) => r.symbol + "_" + r.interval === key);
       const cand = LEARNER.buildModel(kr);
-      if (!cand.ok) { keyRes[key] = { n: kr.length, ok: false, why: cand.reason }; continue; }
+      if (!cand.ok) {
+        // data tak cukup -> JANGAN simpan config lama (snowball). Hapus agar key bebas dari blocker usang.
+        keyRes[key] = { n: kr.length, ok: false, why: cand.reason };
+        delete gateMap[key]; delete touchMap[key]; delete applyMap[key]; delete metaMap[key]; delete gatesMap[key];
+        continue;
+      }
       const splitIdxNow = Math.floor(kr.length * 0.7);
       const testNow = kr.slice(splitIdxNow);
       const inc = gateMap[key] ? { gate: { rules: gateMap[key].rules || [] }, touch: { rules: (touchMap[key] && touchMap[key].rules) || [] }, metrics: (metaMap[key] && metaMap[key].metrics) || null } : null;
@@ -400,11 +409,12 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       // TIER LADDER per key (dimining) — menggantikan bootstrap global utk key ini.
       const kt = LEARNER.keyTiers(kr, { minN: Number(process.env.TIER_MIN_N || 20) });
       const gt = (kt.keys[key] && Object.keys(kt.keys[key]).length) ? kt.keys[key] : null;
-      const gEntry = Object.assign({}, gatesMap[key] || {}, {
+      // GANTI SELALU (jangan merge config lama) -> tak ada threshold usang yg menahan sinyal.
+      const gEntry = {
         mode: "perkey", liqFloorMul: Number(process.env.LIQ_FLOOR_MUL != null ? process.env.LIQ_FLOOR_MUL : 0.12),
         lateFrac: Number(process.env.LATE_FRAC != null ? process.env.LATE_FRAC : 0.85),
         generated: new Date().toISOString(), version: ver, rows: kr.length,
-      });
+      };
       if (gt) gEntry.tiers = gt;
       if (gatesPromoted) { gEntry.thresholds = th.thresholds; gEntry.thMetrics = th.test; gEntry.train = th.train; gEntry.baselineTest = th.baselineTest; anyGates = true; }
       gatesMap[key] = gEntry;
@@ -413,13 +423,11 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       // karena tak ada key yang promote, panel "pelajaran" selalu kosong. Lessons = insight konteks,
       // TIDAK bergantung adopsi model.
       if (cand && cand.lessons) lessonsMap[key] = cand.lessons;
-      if (dec.promote) {
-        gateMap[key] = cand.gate; touchMap[key] = cand.touch;
-        metaMap[key] = { version: ver, promotedAt: new Date().toISOString(), n: kr.length, rows: cand.rows, metrics: candEval, why: dec.why, promoted: true };
-        anyPromote = true;
-      } else {
-        metaMap[key] = Object.assign({}, metaMap[key], { n: kr.length, why: dec.why, lastCandidate: candEval });
-      }
+      // GANTI SELALU dengan hasil learner TERBARU (anti-snowball: config lama JANGAN disimpan).
+      // `dec.promote` tetap dicatat untuk audit (apakah kandidat lebih baik dari insiden).
+      gateMap[key] = cand.gate; touchMap[key] = cand.touch;
+      metaMap[key] = { version: ver, promotedAt: new Date().toISOString(), n: kr.length, rows: cand.rows, metrics: candEval, why: dec.why, promoted: !!dec.promote };
+      if (dec.promote) anyPromote = true;
       keyRes[key] = { n: kr.length, promote: dec.promote, why: dec.why, coverage: liveEval ? liveEval.coverage : null, gatesPromoted };
     }
     write("learn_gate.json", { generated: new Date().toISOString(), source: "ledger", version: ver, byKey: gateMap });

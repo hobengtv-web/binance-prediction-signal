@@ -54,11 +54,14 @@ function alignScore(micro, dir) {
 function rowsFrom(records, minT0 = 1700000000, opts = {}) {
   const includeLate = !!opts.includeLate;
   const out = [];
-  const skipped = { noSig: 0, noRes: 0, late: 0, badDir: 0, old: 0 };
+  const skipped = { noSig: 0, noRes: 0, noOutcome: 0, late: 0, badDir: 0, old: 0 };
   for (const r of records || []) {
     if (!r || !r.t0 || r.t0 < minT0) { skipped.old++; continue; }
     if (!r.sig) { skipped.noSig++; continue; }
     if (!r.res) { skipped.noRes++; continue; }
+    // WAJIB ada outcome NYATA (won 0/1). Record flat (res.won=null) BUKAN kerugian — sebelumnya
+    // ikut dihitung `won:0` (20% data!) -> WR tertekan -> learner memveto berlebihan (snowball).
+    if (r.res.won !== 1 && r.res.won !== 0) { skipped.noOutcome++; continue; }
     const s = r.sig, dir = s.dir;
     if (dir !== "up" && dir !== "down") { skipped.badDir++; continue; }
     // kanonik: capOffsetMs ada -> wajib <= 6s; record lama (tanpa capOffsetMs) -> pakai minuteIn
@@ -254,7 +257,7 @@ function hourVetoes(rows, opts = {}) {
     const key = r.symbol + "_" + r.interval;
     const h = new Date((r.t0 + 7 * 3600) * 1000).getUTCHours();
     const g = acc[key] = acc[key] || {};
-    (g[h] = g[h] || []).push({ t0: r.t0, w: r.won ? 1 : 0 });
+    (g[h] = g[h] || []).push({ t0: r.t0, w: r.won ? 1 : 0, p: r.pnlUse != null ? r.pnlUse : null });
   }
   const keys = {};
   for (const key of Object.keys(acc)) {
@@ -265,11 +268,13 @@ function hourVetoes(rows, opts = {}) {
       const wr = all.reduce((s, x) => s + x.w, 0) / all.length;
       const rec = all.slice(0, recentN); const recWins = rec.reduce((s, x) => s + x.w, 0);
       const improving = rec.length >= recentN && recWins >= recentWin;
-      stats.push({ h, n: all.length, wr: +wr.toFixed(4), recWins, recN: rec.length, improving });
+      const ps = all.filter((x) => x.p != null); const pm = ps.length ? ps.reduce((a, x) => a + x.p, 0) / ps.length : null;
+      stats.push({ h, n: all.length, wr: +wr.toFixed(4), recWins, recN: rec.length, improving, pnlN: ps.length, pnl: pm != null ? +pm.toFixed(3) : null });
     }
     // FAIL-OPEN: jam OFF = jam TERBURUK saja, dibatasi offCap (default <=50% jam yg bisa diputuskan).
-    // Cegah "OFF 20/24 jam" (over-block) yang membuat key nyaris tanpa sinyal.
-    const cand = stats.filter((s) => s.wr < thr && !s.improving).sort((a, b) => a.wr - b.wr);
+    // Cegah "OFF 20/24 jam" (over-block) yang membuat key nyaris tanpa sinyal. OBJEKTIF $: jam dgn
+    // data $ positif JANGAN di-OFF-kan.
+    const cand = stats.filter((s) => s.wr < thr && !s.improving && !(s.pnlN >= 5 && s.pnl > 0)).sort((a, b) => a.wr - b.wr);
     const maxOff = Math.floor(offCap * stats.length);
     const hours = cand.slice(0, maxOff).map((s) => s.h);
     keys[key] = { hours, stats };
@@ -349,7 +354,12 @@ function pickBadRanges(bins, valOf, thr, minN, opts, allRows) {
   const cand = [];
   for (const [lo, hi] of bins) {
     const s = withFeat.filter((r) => { const v = valOf(r); return v >= lo && v < hi; });
-    if (s.length >= minN) { const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0) / s.length; if (w < thr) cand.push({ lo, hi, n: s.length, wr: w }); }
+    if (s.length < minN) continue;
+    const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0) / s.length;
+    const ps = s.filter((r) => r.pnlUse != null);
+    const pm = ps.length ? mean(ps.map((r) => r.pnlUse)) : null;
+    // OBJEKTIF $: bin dianggap "buruk" hanya bila WR<thr DAN (tak ada data $ / rata-rata $ <= 0).
+    if (w < thr && !(ps.length >= 5 && pm > 0)) cand.push({ lo, hi, n: s.length, wr: w });
   }
   if (!cand.length) return { ranges: [], cov: 0, allowedN: total, failOpen: false };
   cand.sort((x, y) => x.wr - y.wr);                                // bin terburuk dulu
@@ -388,7 +398,17 @@ function keyReclaim(rows, opts = {}) {
   const out = {};
   for (const k of Object.keys(groups)) {
     const a = groups[k]; const cands = [];
-    const add = (ctx, s) => { if (s.length < minN) return; const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0); const lb = wilson(w, s.length).lo; if (lb >= wlb) cands.push(Object.assign({ n: s.length, wr: +(w / s.length).toFixed(4), lb: +lb.toFixed(4) }, ctx)); };
+    const add = (ctx, s) => {
+      if (s.length < minN) return;
+      const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0);
+      const lb = wilson(w, s.length).lo;
+      if (lb < wlb) return;
+      // OBJEKTIF $: bila konteks punya cukup data $ dan rata-ratanya NEGATIF -> JANGAN di-reclaim.
+      const ps = s.filter((r) => r.pnlUse != null);
+      const pm = ps.length ? mean(ps.map((r) => r.pnlUse)) : null;
+      if (ps.length >= 5 && !(pm > 0)) return;
+      cands.push(Object.assign({ n: s.length, wr: +(w / s.length).toFixed(4), lb: +lb.toFixed(4), pnlN: ps.length, pnl: pm != null ? +pm.toFixed(3) : null }, ctx));
+    };
     for (const { f, bins } of RECLAIM_FEATS) for (const [lo, hi] of bins) add({ f, lo, hi }, a.filter((r) => r[f] != null && r[f] >= lo && r[f] < hi));
     for (const [lo, hi] of RECLAIM_HOURS) add({ f: "hourWIB", lo, hi }, a.filter((r) => { const h = Math.floor(((r.t0 + 7 * 3600) % 86400) / 3600); return h >= lo && h < hi; }));
     for (const f of ["dir", "grade"]) { const vals = {}; for (const r of a) { const v = r[f]; if (v == null) continue; (vals[v] = vals[v] || []).push(r); } for (const v of Object.keys(vals)) add({ f, v }, vals[v]); }
@@ -628,25 +648,28 @@ function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.35) {   //
   if (!c) return { promote: false, why: "kandidat tidak valid" };
   if (c.taken < minTake) return { promote: false, why: `sinyal diambil hanya ${c.taken} (< ${minTake}) — bukti belum cukup` };
   if ((c.coverage || 0) < minCov) return { promote: false, why: `cakupan ${((c.coverage || 0) * 100).toFixed(0)}% < ${(minCov * 100).toFixed(0)}% — terlalu selektif` };
-  if (!i) return { promote: true, why: "belum ada model berjalan → pakai kandidat" };
+  const cp = c.pnl, ip = i && i.pnl;
+  const pnlReady = !!(cp && cp.n >= 30);
+  // ===== OBJEKTIF UTAMA: $ (PnL). Dipakai lebih dulu bila datanya memadai — bukan sekadar WR. =====
+  // PnL mencerminkan trailing TP / close mandiri BOT (uang nyata), beda dari WR arah.
+  if (pnlReady) {
+    if (!ip || ip.n < 30) return { promote: true, why: `$: kandidat meanPnl ${cp.meanPnl}% (n ${cp.n}); insiden data $ kurang -> adopsi kandidat` };
+    const dPnl = cp.meanPnl - ip.meanPnl;
+    if (dPnl >= 0.02) return { promote: true, why: `$ membaik: ${cp.meanPnl}% vs ${ip.meanPnl}% (+${dPnl.toFixed(3)}pp) n ${cp.n}/${ip.n} · WR ${(c.takenWinrate * 100).toFixed(1)}% cov ${((c.coverage || 0) * 100).toFixed(0)}%` };
+    const dWr = c.takenWinrate - i.takenWinrate;
+    if (dWr >= 0.03 && dPnl >= 0) return { promote: true, why: `$ datar (${cp.meanPnl}% vs ${ip.meanPnl}%) tapi WR +${(dWr * 100).toFixed(1)}pp tanpa turunkan $` };
+    return { promote: false, why: `$ tidak membaik: ${cp.meanPnl}% vs insiden ${ip.meanPnl}% (n ${cp.n}/${ip.n})` };
+  }
+  // ===== Fallback: data $ belum cukup (<30) -> pakai WR, tetap dijaga guard $ bila ada. =====
+  if (!i) return { promote: true, why: `belum ada model berjalan (data $ <30) → pakai kandidat (objektif WR ${(c.takenWinrate * 100).toFixed(1)}%)` };
   const cMin = (c.parts && c.parts.length) ? Math.min(...c.parts.map((p) => p.takenWinrate)) : c.takenWinrate;
   const iMin = (i.parts && i.parts.length) ? Math.min(...i.parts.map((p) => p.takenWinrate)) : i.takenWinrate;
   const dWr = c.takenWinrate - i.takenWinrate;
-  // ===== JALUR PROMOSI PnL-TRADE: profit naik jelas (>=0.02pp/trade) walau WR tak naik 2pp =====
-  const cp0 = c.pnl, ip0 = i.pnl;
-  if (cp0 && ip0 && cp0.n >= 30 && ip0.n >= 30 && (cp0.meanPnl - ip0.meanPnl) >= 0.02) {
-    return { promote: true, why: `PnL ${cp0.meanPnl}% (+${(cp0.meanPnl - ip0.meanPnl).toFixed(3)}pp) n ${cp0.n} vs insiden ${ip0.meanPnl}% (n ${ip0.n}) · WR ${(c.takenWinrate * 100).toFixed(1)}% cakupan ${((c.coverage || 0) * 100).toFixed(0)}%` };
-  }
   if (dWr >= 0.02 && cMin >= iMin) {
-    // GUARD PnL-TRADE: bila data PnL memadai, kandidat TIDAK boleh menurunkan profit.
-    const cp = c.pnl, ip = i.pnl;
-    if (cp && ip && cp.n >= 30 && ip.n >= 30 && cp.meanPnl < ip.meanPnl - 0.02) {
-      return { promote: false, why: `WR naik tapi PnL kandidat ${cp.meanPnl}% < insiden ${ip.meanPnl}% (profit turun) — ditolak` };
-    }
-    const pnlTxt = (cp && ip) ? ` · PnL ${cp.meanPnl}% vs ${ip.meanPnl}% (n ${cp.n}/${ip.n})` : "";
-    return { promote: true, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (+${(dWr * 100).toFixed(1)}pp) cakupan ${((c.coverage || 0) * 100).toFixed(0)}% · min-fold ${(cMin * 100).toFixed(1)}% vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)${pnlTxt}` };
+    if (cp && ip && cp.n >= 30 && ip.n >= 30 && cp.meanPnl < ip.meanPnl - 0.02) return { promote: false, why: `WR naik tapi $ turun (${cp.meanPnl}% < ${ip.meanPnl}%) — ditolak` };
+    return { promote: true, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (+${(dWr * 100).toFixed(1)}pp) cov ${((c.coverage || 0) * 100).toFixed(0)}% (data $ <30 -> fallback WR)` };
   }
-  return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (min-fold ${(cMin * 100).toFixed(1)}%) tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}% (min-fold ${(iMin * 100).toFixed(1)}%)` };
+  return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}%` };
 }
 
 module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, APPLY_KEYS, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

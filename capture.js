@@ -206,11 +206,9 @@ function computeSignal(o) {
   let inverted = null;
   if (!flatReason && (currentDir === "up" || currentDir === "down") && !liqLow && Array.isArray(P.invert) && P.invert.length) {
     const _vi = { rsi, volRel2, gapPct: gateNow, surprise, histStrength: histTrend.strength, hourWIB: wibH };
-    for (const c of P.invert) {
-      const ok = c.f === "dir" ? (currentDir === c.v) : c.f === "grade" ? (grade === c.v)
-        : c.f === "hourWIB" ? (wibH >= c.lo && wibH < c.hi) : (_vi[c.f] != null && _vi[c.f] >= c.lo && _vi[c.f] < c.hi);
-      if (ok) { inverted = c; break; }
-    }
+    const partOK = (p) => p.f === "dir" ? (currentDir === p.v) : p.f === "grade" ? (grade === p.v)
+      : p.f === "hourWIB" ? (wibH >= p.lo && wibH < p.hi) : (_vi[p.f] != null && _vi[p.f] >= p.lo && _vi[p.f] < p.hi);
+    for (const c of P.invert) { if ((c.and || []).every(partOK)) { inverted = c; break; } }
     if (inverted) currentDir = (currentDir === "up") ? "down" : "up";
   }
   let accepted = accepted0 && !veto;
@@ -314,7 +312,7 @@ function computeSignal(o) {
       dir: (flatReason === "flat-price") ? null : currentDir, mode, conf,
       grade: grade || null, accepted: flatReason ? false : accepted, reject: flatReason ? null : reject, thresholdsOK: !!thOK,
       reclaim: (reclaim && !flatReason) ? { f: reclaim.f, v: reclaim.v, lo: reclaim.lo, hi: reclaim.hi, n: reclaim.n, lb: reclaim.lb } : null,
-      invert: (inverted && !flatReason) ? { f: inverted.f, v: inverted.v, lo: inverted.lo, hi: inverted.hi, n: inverted.n, flipWR: inverted.flipWR, lbFlip: inverted.lbFlip } : null,
+      invert: (inverted && !flatReason) ? { and: inverted.and, n: inverted.n, flipWR: inverted.flipWR, lbFlip: inverted.lbFlip } : null,
       skipped: flatReason || null,
       volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5),
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,

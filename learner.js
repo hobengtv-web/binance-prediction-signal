@@ -266,7 +266,7 @@ function hourVetoes(rows, opts = {}) {
     const key = r.symbol + "_" + r.interval;
     const h = new Date((r.t0 + 7 * 3600) * 1000).getUTCHours();
     const g = acc[key] = acc[key] || {};
-    (g[h] = g[h] || []).push({ t0: r.t0, w: r.won ? 1 : 0, p: r.pnlUse != null ? r.pnlUse : null });
+    (g[h] = g[h] || []).push({ t0: r.t0, w: r.won ? 1 : 0, p: r.botRoi != null ? r.botRoi : null });  // $ HANYA akun nyata
   }
   const keys = {};
   for (const key of Object.keys(acc)) {
@@ -368,8 +368,8 @@ function pickBadRanges(bins, valOf, thr, minN, opts, allRows) {
     const s = withFeat.filter((r) => { const v = valOf(r); return v >= lo && v < hi; });
     if (s.length < minN) continue;
     const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0) / s.length;
-    const ps = s.filter((r) => r.pnlUse != null);
-    const pm = ps.length ? mean(ps.map((r) => r.pnlUse)) : null;
+    const ps = s.filter((r) => r.botRoi != null);           // $ HANYA dari PnL akun nyata (bukan proksi)
+    const pm = ps.length ? mean(ps.map((r) => r.botRoi)) : null;
     // OBJEKTIF $ (utama): bin BURUK bila (a) WR<thr & $ tidak positif, ATAU (b) $ JELAS NEGATIF
     // walau WR-nya bagus (mis. BNB_5m pasar ramai: WR 0,53 tapi $ -44%). Simpan $ demi compounding.
     const pnlBadThr = opts.pnlBad != null ? opts.pnlBad : -2;
@@ -423,9 +423,9 @@ function keyReclaim(rows, opts = {}) {
       const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0);
       const lb = wilson(w, s.length).lo;
       if (lb < wlb) return;
-      // OBJEKTIF $: bila konteks punya cukup data $ dan rata-ratanya NEGATIF -> JANGAN di-reclaim.
-      const ps = s.filter((r) => r.pnlUse != null);
-      const pm = ps.length ? mean(ps.map((r) => r.pnlUse)) : null;
+      // OBJEKTIF $: bila konteks punya cukup data $ AKUN dan rata-ratanya NEGATIF -> JANGAN di-reclaim.
+      const ps = s.filter((r) => r.botRoi != null);          // $ HANYA akun nyata
+      const pm = ps.length ? mean(ps.map((r) => r.botRoi)) : null;
       if (ps.length >= 5 && !(pm > 0)) return;
       cands.push(Object.assign({ n: s.length, wr: +(w / s.length).toFixed(4), lb: +lb.toFixed(4), pnlN: ps.length, pnl: pm != null ? +pm.toFixed(3) : null }, ctx));
     };
@@ -614,31 +614,32 @@ function liveHourGate(rows, opts = {}, nowMs = Date.now()) {
   return { h, wr: wr != null ? +wr.toFixed(4) : null, n, off, thr, k, minN };
 }
 
-/* ---------- OBJEKTIF PnL-TRADE (pakai res.trade -> pnlPct) ----------
-   Mengukur rata-rata PnL per trade dari sinyal yang DIAMBIL, agar promosi mengejar PROFIT,
-   bukan hanya winrate. Hanya baris yang punya pnlPct (TA benar-benar masuk & keluar). */
+/* ---------- OBJEKTIF PnL-TRADE (HANYA $ AKUN NYATA: bot.roiPct) ----------
+   Mengukur rata-rata PnL per trade dari sinyal yang DIAMBIL, agar promosi mengejar PROFIT akun,
+   bukan hanya winrate. Hanya baris dgn `botRoi` (uang nyata dari akun Binance) yang dihitung —
+   proksi spot (pnlPct) TIDAK dipakai untuk keputusan $. */
 function evalModelPnl(rows, gateRules, touchRules) {
   const gb = blockersOf(gateRules.map((r) => ({ ...r, metric: "won" })), "won");
   const tb = blockersOf(touchRules.map((r) => ({ ...r, metric: "touch" })), "touch");
-  const taken = rows.filter((r) => r.pnlUse != null && decide(r, gb) && decide(r, tb));
+  const taken = rows.filter((r) => r.botRoi != null && decide(r, gb) && decide(r, tb));
   const n = taken.length;
   return {
     n,
-    meanPnl: n ? +mean(taken.map((r) => r.pnlUse)).toFixed(4) : 0,
-    winRate: n ? +mean(taken.map((r) => (r.pnlUse > 0 ? 1 : 0))).toFixed(4) : 0,
+    meanPnl: n ? +mean(taken.map((r) => r.botRoi)).toFixed(4) : 0,
+    winRate: n ? +mean(taken.map((r) => (r.botRoi > 0 ? 1 : 0))).toFixed(4) : 0,
   };
 }
-// Konteks TA_FEATS dengan PnL terburuk/terbaik (lessons + kandidat aturan PnL).
+// Konteks TA_FEATS dengan PnL terburuk/terbaik (lessons + kandidat aturan PnL) — HANYA $ akun nyata.
 function pnlContexts(rows, FEATS) {
-  const base = rows.filter((r) => r.pnlUse != null);
+  const base = rows.filter((r) => r.botRoi != null);
   if (!base.length) return { all: 0, n: 0, contexts: [] };
-  const all = mean(base.map((r) => r.pnlUse));
+  const all = mean(base.map((r) => r.botRoi));
   const out = [];
   for (const name of Object.keys(FEATS)) {
     const g = groupBy(base, FEATS[name]);
     for (const [k, arr] of g) {
       if (arr.length < 15) continue;
-      const m = mean(arr.map((r) => r.pnlUse));
+      const m = mean(arr.map((r) => r.botRoi));
       out.push({ f: name, k, n: arr.length, meanPnl: +m.toFixed(4), delta: +(m - all).toFixed(4),
         verdict: m < all - 0.02 ? "suppress" : m > all + 0.02 ? "boost" : "neutral" });
     }

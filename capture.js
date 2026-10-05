@@ -163,7 +163,7 @@ function computeSignal(o) {
   // Tanpa guard ini -> "Cannot read properties of undefined (reading 'volRel2')" mematikan capture
   // key tsb (terbukti: ETH 5m error tiap sesi). Tier yang hilang = fallback ke tier lebih rendah.
   const gS = T.STRONG || {}, gG = T.GOOD || gS, gF = T.FAIR || gG;
-  const grade = (gS.volRel2 != null && volRel2 >= gS.volRel2 && surprise >= (gS.surprise || 0)) ? "STRONG"
+  let grade = (gS.volRel2 != null && volRel2 >= gS.volRel2 && surprise >= (gS.surprise || 0)) ? "STRONG"
     : (gG.volRel2 != null && volRel2 >= gG.volRel2 && surprise >= (gG.surprise || 0)) ? "GOOD"
       : (gF.volRel2 != null && volRel2 >= gF.volRel2 && surprise >= (gF.surprise || 0)) ? "FAIR" : null;
   const typ5m = (VOL_TYPICAL[sym] || 0) * 60;
@@ -173,7 +173,7 @@ function computeSignal(o) {
   const liqLow = typ5m > 0 && proj < floor;
   const liqRatio = typ5m > 0 ? proj / typ5m : 1;
   const thOK = GATES_DEF.applyThresholds({ volRel2, surprise, liqRatio, gapPct: gateNow, histStrength: histTrend.strength, rsi }, profile.thresholds);
-  const accepted0 = !!grade && !liqLow && thOK && rsiOK;
+  let accepted0 = !!grade && !liqLow && thOK && rsiOK;
   // ===== VETO no-edge: buang cohort WR~50% (reward kecil, RSI 30-40, vol choppy, jam buruk, liqud tipis)
   let veto = null;
   const pv = { reward: false, rsi: false, vol: false, hour: false, liq: false, rewardMin: 0, liqMin: 0, rsiBadRanges: null, volBadRanges: null, offHours: null }; // KOSMETIK: salinan status kriteria utk power bar
@@ -210,6 +210,24 @@ function computeSignal(o) {
       : p.f === "hourWIB" ? (wibH >= p.lo && wibH < p.hi) : (_vi[p.f] != null && _vi[p.f] >= p.lo && _vi[p.f] < p.hi);
     for (const c of P.invert) { if ((c.and || []).every(partOK)) { inverted = c; break; } }
     if (inverted) currentDir = (currentDir === "up") ? "down" : "up";
+  }
+  // ===== CONFIRM: BOOST GRADE 1 LEVEL bila konteks terkonfirmasi (tren multi-TF/OFI) PER-KEY =====
+  // Learner per-coin memvalidasi konteks ini (Wilson-LB + OOS). Hanya MENAIKKAN grade (memperkuat
+  // produksi sinyal), BUKAN flip & BUKAN override veto. Kosong bila key belum punya bukti.
+  let confirmed = null;
+  if (!flatReason && (currentDir === "up" || currentDir === "down") && Array.isArray(P.confirm) && P.confirm.length) {
+    const _of = (typeof FLOW !== "undefined" && FLOW.sessionOFI) ? FLOW.sessionOFI(sym, t0, nowSec) : null;
+    const _al = align || {};
+    const _mAlign = ["5m", "15m", "1h"].filter((t) => _al[t] === currentDir).length;
+    const _mOfi = (_of != null) ? (((currentDir === "up" && _of > 0.05) || (currentDir === "down" && _of < -0.05)) ? 1 : 0) : null;
+    const _vc = { mAlign: _mAlign, mOfiAgree: _mOfi };
+    for (const c of P.confirm) { if ((c.and || []).every((p) => _vc[p.f] != null && _vc[p.f] >= p.lo && _vc[p.f] < p.hi)) { confirmed = c; break; } }
+    if (confirmed) {
+      const _prev = grade;
+      grade = grade === "STRONG" ? "STRONG" : grade === "GOOD" ? "STRONG" : grade === "FAIR" ? "GOOD" : "FAIR";
+      accepted0 = !!grade && !liqLow && thOK && rsiOK;
+      if (grade !== _prev) confirmed = Object.assign({}, confirmed, { from: _prev || null, to: grade });
+    }
   }
   let accepted = accepted0 && !veto;
   let reject = accepted ? null : (veto || (!rsiOK ? "rsi-out" : (!thOK ? "threshold" : !grade ? "tier" : "liq-low")));
@@ -313,6 +331,7 @@ function computeSignal(o) {
       grade: grade || null, accepted: flatReason ? false : accepted, reject: flatReason ? null : reject, thresholdsOK: !!thOK,
       reclaim: (reclaim && !flatReason) ? { f: reclaim.f, v: reclaim.v, lo: reclaim.lo, hi: reclaim.hi, n: reclaim.n, lb: reclaim.lb } : null,
       invert: (inverted && !flatReason) ? { and: inverted.and, n: inverted.n, flipWR: inverted.flipWR, lbFlip: inverted.lbFlip } : null,
+      confirm: (confirmed && !flatReason) ? { and: confirmed.and, n: confirmed.n, wr: confirmed.wr, lb: confirmed.lb, from: confirmed.from || null, to: confirmed.to || grade } : null,
       skipped: flatReason || null,
       volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5),
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
@@ -385,7 +404,7 @@ function createCapture(deps) {
         capOffsetMs: 2000, capturedAt: nowSec, prov: "server", minuteIn: 1, ofi: (sig.ofi != null ? sig.ofi : null), gateWr: null,
       }),
       // Keputusan gate saat perekaman: untuk membandingkan populasi diterima vs ditolak.
-      gate: { grade: sig.grade, liqLow: sig.liqLow, liqRatio: sig.liqRatio, thresholdsOK: sig.thresholdsOK, accepted: sig.accepted, reject: sig.reject, reclaim: sig.reclaim || null, invert: sig.invert || null, profile: profile.mode },
+      gate: { grade: sig.grade, liqLow: sig.liqLow, liqRatio: sig.liqRatio, thresholdsOK: sig.thresholdsOK, accepted: sig.accepted, reject: sig.reject, reclaim: sig.reclaim || null, invert: sig.invert || null, confirm: sig.confirm || null, profile: profile.mode },
     };
     save(rec, "server");
     stats.captured++; stats.lastAt = Date.now(); stats.lastKey = rec.k;

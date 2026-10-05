@@ -88,6 +88,11 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       hist: bHist(s.histStrength),
       trend: (s.learn && s.learn.trend && s.learn.trend !== "na") ? s.learn.trend : "na",
       dir, gap: gapRaw,
+      // ===== KONFIRMASI ARAH (backtest 2026-10): tren multi-TF + OFI memperkuat arah mentah =====
+      // mAlign = berapa TF (5m/15m/1h) yg trend-nya SEARAH dir. mOfiAgree = OFI mendukung dir.
+      mAlign: (s.micro && s.micro.align) ? (["5m", "15m", "1h"].filter((t) => s.micro.align[t] === dir).length) : null,
+      mOfiAgree: (typeof s.ofi === "number") ? (((dir === "up" && s.ofi > 0.05) || (dir === "down" && s.ofi < -0.05)) ? 1 : 0) : null,
+      macdDir: (s.ind && s.ind.macdDir) ? s.ind.macdDir : null,
       // fitur numerik mentah — dibutuhkan untuk BELAJAR THRESHOLD (bukan hanya bucket)
       volRel2: typeof s.volRel2 === "number" ? s.volRel2 : (typeof s.volRel === "number" ? s.volRel : null),
       surprise: typeof s.surprise === "number" ? s.surprise : null,
@@ -391,6 +396,8 @@ const RECLAIM_FEATS = [
   { f: "gapPct", bins: [[0, 0.005], [0.005, 0.01], [0.01, 0.02], [0.02, 0.035], [0.035, 9]] },
   { f: "surprise", bins: [[0, 1], [1, 5], [5, 10], [10, 30], [30, 999]] },
   { f: "histStrength", bins: [[0, 10], [10, 20], [20, 999]] },
+  { f: "mAlign", bins: [[0, 2], [2, 3], [3, 4]] },          // keselarasan tren multi-TF (konfirmasi arah)
+  { f: "mOfiAgree", bins: [[0, 1], [1, 2]] },               // OFI searah arah mentah
 ];
 const RECLAIM_HOURS = [[0, 4], [4, 8], [8, 12], [12, 16], [16, 20], [20, 24]];
 function keyReclaim(rows, opts = {}) {
@@ -498,6 +505,52 @@ function keyInvert(rows, opts = {}) {
   return out;
 }
 
+/* ---------- CONFIRM: konteks yg MEMPERKUAT arah mentah (tren multi-TF/OFI) -> boost grade ----------
+   PER KEY (coin×TF), bukan global. Hasil backtest: arah mentah yg selaras tren multi-TF (mAlign tinggi)
+   atau OFI searah punya WR & $ lebih baik. Konteks ini MENAIKKAN grade 1 level di capture (bukan flip,
+   bukan override veto). Syarat: Wilson-LB(won)>=confirmWlb, n>=confirmMinN, OOS 2 paruh, cakupan<=cap. */
+const CONFIRM_FEATS = [
+  { f: "mAlign", bins: [[0, 2], [2, 3], [3, 4]] },
+  { f: "mOfiAgree", bins: [[0, 1], [1, 2]] },
+];
+function keyConfirm(rows, opts = {}) {
+  const minN = opts.confirmMinN || 40, wlb = opts.confirmWlb != null ? opts.confirmWlb : 0.56;
+  const maxCtx = opts.confirmMax || 3;
+  const covCap = opts.confirmCovCap != null ? opts.confirmCovCap : 0.5;
+  const groups = {};
+  for (const r of rows) { if (r.won == null || !r.symbol || !r.interval) continue; const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r); }
+  const partMatch = (p, r) => (r[p.f] != null && r[p.f] >= p.lo && r[p.f] < p.hi);
+  const ctxMatch = (c, r) => (c.and || []).every((p) => partMatch(p, r));
+  const out = {};
+  for (const k of Object.keys(groups)) {
+    const a = groups[k].slice().sort((x, y) => (x.t0 || 0) - (y.t0 || 0));
+    const parts = [];
+    for (const { f, bins } of CONFIRM_FEATS) for (const [lo, hi] of bins) parts.push({ p: { f, lo, hi }, rows: a.filter((r) => r[f] != null && r[f] >= lo && r[f] < hi) });
+    const cands = [];
+    const consider = (plist, s) => {
+      if (s.length < minN) return;
+      const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0);
+      const lb = wilson(w, s.length).lo;
+      if (lb < wlb) return;
+      const h = Math.floor(s.length / 2);
+      if (h > 0) { const older = s.slice(0, h), newer = s.slice(s.length - h); const wrO = older.reduce((t, r) => t + r.won, 0) / older.length, wrN = newer.reduce((t, r) => t + r.won, 0) / newer.length; if (wrO < 0.5 || wrN < 0.5) return; }
+      cands.push({ and: plist, n: s.length, wr: +(w / s.length).toFixed(4), lb: +lb.toFixed(4) });
+    };
+    for (const A of parts) consider([A.p], A.rows);
+    for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
+      const A = parts[i], B = parts[j];
+      if (A.p.f === B.p.f || !A.rows.length || !B.rows.length) continue;
+      const setB = new Set(B.rows); const inter = A.rows.filter((r) => setB.has(r));
+      if (inter.length >= minN) consider([A.p, B.p], inter);
+    }
+    cands.sort((x, y) => y.lb - x.lb);
+    const sel = [];
+    for (const c of cands) { if (sel.length >= maxCtx) break; const trial = a.filter((r) => sel.some((s) => ctxMatch(s, r)) || ctxMatch(c, r)); if (a.length && trial.length / a.length > covCap) continue; sel.push(c); }
+    out[k] = sel;
+  }
+  return out;
+}
+
 /* ---------- VETO THRESHOLD PER coin×TF (dari data per key, bukan global) ----------
    Cari ambang "no-edge" utk key ini: rewardMin/liqMin (monoton) + rentang rsi/vol yg buruk.
    Tujuannya: filter ditentukan PER coin & durasi, tidak digeneralisir. */
@@ -510,6 +563,7 @@ function keyVetoes(rows, opts = {}) {
   const minAllowedCov = opts.minAllowedCov != null ? opts.minAllowedCov : 0.3;   // "lamin produksi" per key
   const reclaimMap = keyReclaim(rows, opts);
   const invertMap = keyInvert(rows, opts);
+  const confirmMap = keyConfirm(rows, opts);
   const inRanges = (v, ranges) => v != null && (ranges || []).some(([lo, hi]) => v >= lo && v < hi);
   const allowFrac = (a, rmin, lmin, rb, vb) => {
     const A = a.filter((r) => !inRanges(r.rsi, rb) && !inRanges(r.volRel2, vb) && (rmin <= 0 || (r.gapPct != null && r.gapPct >= rmin)) && (lmin <= 0 || (r.liqRatio != null && r.liqRatio >= lmin)));
@@ -534,7 +588,7 @@ function keyVetoes(rows, opts = {}) {
     out[k] = { n: a.length, rewardMin, liqMin, rsiBad: rsiR.ranges, volBad: volR.ranges,
       rsiFailOpen: rsiR.failOpen, volFailOpen: volR.failOpen,
       rsiCov: +rsiR.cov.toFixed(3), volCov: +volR.cov.toFixed(3),
-      allowFrac: +frac.toFixed(3), snowball, reclaim: reclaimMap[k] || [], invert: invertMap[k] || [] };
+      allowFrac: +frac.toFixed(3), snowball, reclaim: reclaimMap[k] || [], invert: invertMap[k] || [], confirm: confirmMap[k] || [] };
   }
   return { keys: out, thr, minN, minAllowedCov };
 }

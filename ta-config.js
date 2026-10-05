@@ -19,6 +19,7 @@ const CFG = {
   STOP_LOSS_ENTRY_PCT: num(process.env.TA_STOP_LOSS_ENTRY_PCT, 0),   // STOP LOSS TA: 0=OFF (uji share real: stop merugikan)
   EARLYCLOSE_MIN_CAPTURED_PCT: num(process.env.TA_EARLYCLOSE_MIN_CAPTURED_PCT, 70), // early close min % potensi
   ENTRY_MIN_REMAIN_SEC: num(process.env.TA_ENTRY_MIN_REMAIN_SEC, 120), // entry butuh sisa sesi >= ini
+  ENTRY_MIN_ELAPSED_SEC: num(process.env.TA_ENTRY_MIN_ELAPSED_SEC, 0),  // entry baru setelah sesi berjalan >= ini (detik); 0 = off. Per-TF override.
   SIMPLE: num(process.env.TA_SIMPLE, 0),                             // 1 = pakai logika TEST (entry depth+retrace, exit trailing saja)
   TRAIL_ARM_ON_LOCK: num(process.env.TA_TRAIL_ARM_ON_LOCK, 0),       // 0 = JANGAN arm hanya karena menyentuh lock (hindari exit premature)
   HYBRID: num(process.env.TA_HYBRID, 0),                             // 1 = HYBRID: boleh exit < min-hold bila capture tinggi / retrace besar
@@ -49,11 +50,24 @@ CFG.PER_TF = {
   "5m":  { ENTRY_MIN_REMAIN_SEC: CFG.ENTRY_MIN_REMAIN_SEC, TRAIL_MIN_HOLD_MS: CFG.TRAIL_MIN_HOLD_MS,
            TRAIL_CB_PCT: num(process.env.TA_5M_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT),
            TRAIL_GAP_PP: num(process.env.TA_5M_TRAIL_GAP_PP, 0) },    // 5m: mode gap OFF (harness: gap merugikan di 5m)
+  // 15m: JANGAN entry terburu-buru. Sesi 900s -> tunggu >=300s (1/3 sesi) + kedalaman/retrace lebih besar +
+  // konfirmasi lebih lama. (Kasus nyata ETH 15m: entry ~3 mnt dgn ekstrem cuma 0,044% -> terlalu dini.)
   "15m": { ENTRY_MIN_REMAIN_SEC: num(process.env.TA_15M_ENTRY_MIN_REMAIN_SEC, 180), TRAIL_MIN_HOLD_MS: num(process.env.TA_15M_TRAIL_MIN_HOLD_MS, 20000),
            TRAIL_CB_PCT: num(process.env.TA_15M_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT),
-           TRAIL_GAP_PP: num(process.env.TA_15M_TRAIL_GAP_PP, 15) }, // 15m: gap 15pp ON (harness: $166->$211, DD 25->21%)
+           TRAIL_GAP_PP: num(process.env.TA_15M_TRAIL_GAP_PP, 15), // 15m: gap 15pp ON (harness: $166->$211, DD 25->21%)
+           ENTRY_MIN_ELAPSED_SEC: num(process.env.TA_15M_ENTRY_MIN_ELAPSED_SEC, 300),
+           ENTRY_MIN_EXTREME_PCT: num(process.env.TA_15M_ENTRY_MIN_EXTREME_PCT, 0.06),
+           ENTRY_RETRACE_PCT: num(process.env.TA_15M_ENTRY_RETRACE_PCT, 0.035),
+           ENTRY_MIN_NOW_PCT: num(process.env.TA_15M_ENTRY_MIN_NOW_PCT, 0.04),
+           DWELL_ENTRY_MS: num(process.env.TA_15M_DWELL_ENTRY_MS, 3500) },
+  // 1h: lebih ketat lagi (sesi 3600s -> tunggu >=600s).
   "1h":  { ENTRY_MIN_REMAIN_SEC: num(process.env.TA_1H_ENTRY_MIN_REMAIN_SEC, 300), TRAIL_MIN_HOLD_MS: num(process.env.TA_1H_TRAIL_MIN_HOLD_MS, CFG.TRAIL_MIN_HOLD_MS),
-           TRAIL_CB_PCT: num(process.env.TA_1H_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT) },
+           TRAIL_CB_PCT: num(process.env.TA_1H_TRAIL_CB_PCT, CFG.TRAIL_CB_PCT),
+           ENTRY_MIN_ELAPSED_SEC: num(process.env.TA_1H_ENTRY_MIN_ELAPSED_SEC, 600),
+           ENTRY_MIN_EXTREME_PCT: num(process.env.TA_1H_ENTRY_MIN_EXTREME_PCT, 0.10),
+           ENTRY_RETRACE_PCT: num(process.env.TA_1H_ENTRY_RETRACE_PCT, 0.05),
+           ENTRY_MIN_NOW_PCT: num(process.env.TA_1H_ENTRY_MIN_NOW_PCT, 0.06),
+           DWELL_ENTRY_MS: num(process.env.TA_1H_DWELL_ENTRY_MS, 4000) },
 };
 
 // Versi ringkas (hash) — berubah otomatis bila salah satu nilai berubah.

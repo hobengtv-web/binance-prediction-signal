@@ -195,6 +195,17 @@ function computeTradePlan(bias, ctx) {
   const ofiTowardStrong = ctx.ofiShort != null && (isUp ? ctx.ofiShort > 0.25 : ctx.ofiShort < -0.25);
   const extremeReversal = turn.count >= 3 && ofiTowardStrong;
   const timeTooShort = remainSecNow != null && remainSecNow < minRemainSec;
+  // ===== ENTRY PER-TF (permintaan user): sesi panjang (15m/1h) JANGAN entry terburu-buru =====
+  // Resolusi ambang entry khusus TF (fallback ke default global). Tambah gate "belum cukup lama".
+  const _tfE = (TA.PER_TF && TA.PER_TF[ctx.tf]) || {};
+  const ENTRY_RETRACE_T = (_tfE.ENTRY_RETRACE_PCT != null) ? _tfE.ENTRY_RETRACE_PCT : ENTRY_RETRACE_PCT;
+  const ENTRY_EXTREME_T = (_tfE.ENTRY_MIN_EXTREME_PCT != null) ? _tfE.ENTRY_MIN_EXTREME_PCT : ENTRY_MIN_EXTREME_PCT;
+  const ENTRY_NOW_T = (_tfE.ENTRY_MIN_NOW_PCT != null) ? _tfE.ENTRY_MIN_NOW_PCT : TA.ENTRY_MIN_NOW_PCT;
+  const DWELL_ENTRY_T = (_tfE.DWELL_ENTRY_MS != null) ? _tfE.DWELL_ENTRY_MS : DWELL_ENTRY_MS;
+  const ENTRY_MIN_ELAPSED_SEC = (_tfE.ENTRY_MIN_ELAPSED_SEC != null) ? _tfE.ENTRY_MIN_ELAPSED_SEC : (TA.ENTRY_MIN_ELAPSED_SEC || 0);
+  const elapsedSecNow = (remainSecNow != null) ? (durSecNow - remainSecNow) : null;
+  const tooEarly = ENTRY_MIN_ELAPSED_SEC > 0 && elapsedSecNow != null && elapsedSecNow < ENTRY_MIN_ELAPSED_SEC
+    && !(extremeReversal && turn.count >= 4);   // pengecualian: reversal SANGAT ekstrem boleh lebih awal
 
   // ===== KELAYAKAN JARAK KE TARGET (LOCK) vs SISA WAKTU =====
   // Sebelumnya "reversal ekstrem" boleh menembus gate waktu TANPA memeriksa jarak: TA bisa
@@ -296,24 +307,29 @@ function computeTradePlan(bias, ctx) {
       action = `TUNGGU — sisa sesi ${Math.round(remainSecNow)}s (minimal ${Math.round(minRemainSec)}s untuk capai lock ${fmtPrice(ctx.lock)}), jarak ${distToLockPct.toFixed(2)}%`
         + (extremeReversal && !feasibleLate ? ` · TIDAK FEASIBLE: butuh ${needSigmaLate.toFixed(1)}σ, sisa waktu hanya cukup ${lateSigmaLimit.toFixed(1)}σ` : "")
         + `; entry hanya bila reversal EKSTREM terdeteksi`;
-    } else if (!_simple && levels.rNow < Math.max(RLV[0], TA.ENTRY_MIN_NOW_PCT)) {
-      // Kedalaman contra belum mencapai L1 (0,01%) -> entry terlalu dini: harga baru bergerak
-      // sangat sedikit, sehingga potensi profitnya pun sangat kecil (kasus nyata ETH: entry hanya
-      // ~0,002% dari lock -> close hanya untung 0,002%). Tunggu harga turun/naik minimal ke L1.
+    } else if (tooEarly) {
+      // PER-TF: sesi baru berjalan < ENTRY_MIN_ELAPSED_SEC -> tahan (mis. 15m: jangan entry <5 mnt pertama).
       state = "WAIT"; cls = "wait";
-      action = `TUNGGU PEAK — kedalaman contra baru ${rNowTxt} (minimal ${Math.max(RLV[0], TA.ENTRY_MIN_NOW_PCT)}% untuk entry)`
-        + `; konfirmasi pembalikan ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_MS / 1000}s`;
-    } else if ((_simple && extremeDepthPct != null && extremeDepthPct >= ENTRY_MIN_EXTREME_PCT && retraceFromPeakPct != null && retraceFromPeakPct >= ENTRY_RETRACE_PCT)
-      || (!_simple && extremeDepthPct != null && extremeDepthPct >= ENTRY_MIN_EXTREME_PCT
-        && ((retraceFromPeakPct != null && retraceFromPeakPct >= ENTRY_RETRACE_PCT && turn.count >= 1)
-          || (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_MS && hasStructPeak)))) {
+      action = `TUNGGU — sesi baru ${Math.round(elapsedSecNow)}s (minimal ${Math.round(ENTRY_MIN_ELAPSED_SEC)}s dulu untuk ${ctx.tf}); biar gerak contra berkembang, belum entry`
+        + ` · kedalaman ${rNowTxt}`;
+    } else if (!_simple && levels.rNow < Math.max(RLV[0], ENTRY_NOW_T)) {
+      // Kedalaman contra belum mencapai ambang -> entry terlalu dini: potensi profitnya kecil.
+      state = "WAIT"; cls = "wait";
+      action = `TUNGGU PEAK — kedalaman contra baru ${rNowTxt} (minimal ${Math.max(RLV[0], ENTRY_NOW_T)}% untuk entry)`
+        + `; konfirmasi pembalikan ${turn.count}/4 · ${Math.round(dwellTurn / 1000)}s/${DWELL_ENTRY_T / 1000}s`;
+    } else if ((_simple && extremeDepthPct != null && extremeDepthPct >= ENTRY_EXTREME_T && retraceFromPeakPct != null && retraceFromPeakPct >= ENTRY_RETRACE_T)
+      || (!_simple && extremeDepthPct != null && extremeDepthPct >= ENTRY_EXTREME_T
+        && ((retraceFromPeakPct != null && retraceFromPeakPct >= ENTRY_RETRACE_T && turn.count >= 1)
+          || (turn.count >= 2 && dwellTurn >= DWELL_ENTRY_T && hasStructPeak)))) {
       state = "ENTRY"; cls = "entry";
       nowEntered = true;
       action = `ENTRY SEKARANG ${bias.toUpperCase()} — peak contra terkonfirmasi (${rNowTxt}, ${partList(turn.parts)})`
+        + ` [${ctx.tf}: ${Math.round(elapsedSecNow != null ? elapsedSecNow : 0)}s/${Math.round(ENTRY_MIN_ELAPSED_SEC)}s min, ekstrem ${ENTRY_EXTREME_T}%]`
         + (timeTooShort ? ` [reversal ekstrem; sisa sesi ${Math.round(remainSecNow)}s · butuh ${needSigmaLate.toFixed(1)}σ ≤ ${lateSigmaLimit.toFixed(1)}σ]` : "");
     } else {
       state = "WAIT"; cls = "wait";
-      action = `TUNGGU PEAK — harga contra ${rNowTxt}; ekstrem ${extremeDepthPct != null ? extremeDepthPct.toFixed(3) : "-"}%/${ENTRY_MIN_EXTREME_PCT}% · retrace ${retraceFromPeakPct != null ? retraceFromPeakPct.toFixed(3) : "-"}%/${ENTRY_RETRACE_PCT}%`;
+      action = `TUNGGU PEAK — harga contra ${rNowTxt}; ekstrem ${extremeDepthPct != null ? extremeDepthPct.toFixed(3) : "-"}%/${ENTRY_EXTREME_T}% · retrace ${retraceFromPeakPct != null ? retraceFromPeakPct.toFixed(3) : "-"}%/${ENTRY_RETRACE_T}%`
+        + ` · sesi ${Math.round(elapsedSecNow != null ? elapsedSecNow : 0)}s/${Math.round(ENTRY_MIN_ELAPSED_SEC)}s`;
     }
   } else {
     // ---------------- PHASE 2: position open ----------------
@@ -627,10 +643,16 @@ function buildPlan(input) {
       }
     } else {
       next = "ENTRY";
-      const ed = (extremeDepthPct != null && ENTRY_MIN_EXTREME_PCT > 0) ? extremeDepthPct / ENTRY_MIN_EXTREME_PCT : 0;
-      const rt = (retraceFromPeakPct != null && ENTRY_RETRACE_PCT > 0) ? retraceFromPeakPct / ENTRY_RETRACE_PCT : 0;
-      parts.push({ label: "kedalaman " + (extremeDepthPct || 0).toFixed(3) + "/" + ENTRY_MIN_EXTREME_PCT + "%", ratio: cl(ed), met: ed >= 1 });
-      parts.push({ label: "retrace " + (retraceFromPeakPct || 0).toFixed(3) + "/" + ENTRY_RETRACE_PCT + "%", ratio: cl(rt), met: rt >= 1 });
+      const _eT = (TA.PER_TF && TA.PER_TF[input.tf]) || {};
+      const EXT_T = (_eT.ENTRY_MIN_EXTREME_PCT != null) ? _eT.ENTRY_MIN_EXTREME_PCT : ENTRY_MIN_EXTREME_PCT;
+      const RET_T = (_eT.ENTRY_RETRACE_PCT != null) ? _eT.ENTRY_RETRACE_PCT : ENTRY_RETRACE_PCT;
+      const ELAPSED_T = (_eT.ENTRY_MIN_ELAPSED_SEC != null) ? _eT.ENTRY_MIN_ELAPSED_SEC : (TA.ENTRY_MIN_ELAPSED_SEC || 0);
+      const elapsedNow = (input.remainMs != null && input.durMs != null) ? (input.durMs - input.remainMs) / 1000 : null;
+      const ed = (extremeDepthPct != null && EXT_T > 0) ? extremeDepthPct / EXT_T : 0;
+      const rt = (retraceFromPeakPct != null && RET_T > 0) ? retraceFromPeakPct / RET_T : 0;
+      parts.push({ label: "kedalaman " + (extremeDepthPct || 0).toFixed(3) + "/" + EXT_T + "%", ratio: cl(ed), met: ed >= 1 });
+      parts.push({ label: "retrace " + (retraceFromPeakPct || 0).toFixed(3) + "/" + RET_T + "%", ratio: cl(rt), met: rt >= 1 });
+      if (ELAPSED_T > 0 && elapsedNow != null) parts.push({ label: "waktu " + Math.round(elapsedNow) + "/" + ELAPSED_T + "s", ratio: cl(elapsedNow / ELAPSED_T), met: elapsedNow >= ELAPSED_T });
     }
     const avg = parts.length ? parts.reduce((a, x) => a + x.ratio, 0) / parts.length : 1;
     plan.power = { pct: Math.round(100 * Math.max(0, Math.min(1, avg))), state: plan.state, next, parts };

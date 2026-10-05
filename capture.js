@@ -98,6 +98,20 @@ function computeSignal(o) {
   // Bisa dibalik instan via env MIN_MV2_PCT (mis. 0.005). 0 = nonaktif.
   const MIN_MV2_PCT = Number(process.env.MIN_MV2_PCT != null ? process.env.MIN_MV2_PCT : 0.015);
   const flatReason = (currentDir === "flat") ? "flat-price" : ((MIN_MV2_PCT > 0 && mv2 < MIN_MV2_PCT) ? "flat-noise" : null);
+  // ===== ARAH "SILENT" (permintaan user): SETIAP sesi tetap punya arah utk direkam & DIPELAJARI — 
+  // walau tidak layak entry (flat). Tujuannya learner bisa belajar MANANG/KALAH di tiap sesi.
+  // Ini TIDAK mengubah accepted (flat tetap accepted=false) & TIDAK ditampilkan sebagai rekomendasi.
+  let silentDir = false;
+  if (flatReason === "flat-price") {
+    let sd = null;
+    if (o1BodyS !== 0) sd = o1BodyS > 0 ? "up" : "down";
+    else if (o2BodyS !== 0) sd = o2BodyS > 0 ? "up" : "down";
+    else if (ranPos != null) sd = ranPos >= 0.5 ? "up" : "down";
+    else if (histTrend && histTrend.predictDir === "up") sd = "up";
+    else if (histTrend && histTrend.predictDir === "down") sd = "down";
+    else if (align && align["5m"]) sd = align["5m"];
+    if (sd === "up" || sd === "down") { currentDir = sd; silentDir = true; }
+  }
   // rsi dari candle 5m yang SUDAH SELESAI (tanpa lookahead)
   let rsi = null;
   try {
@@ -331,7 +345,7 @@ function computeSignal(o) {
     signal: {
       asset: sym, interval: tf, t0, lock,
       power,
-      dir: (flatReason === "flat-price") ? null : currentDir, mode, conf,
+      dir: currentDir, silent: silentDir || undefined, mode, conf,
       grade: grade || null, accepted: flatReason ? false : accepted, reject: flatReason ? null : reject, thresholdsOK: !!thOK,
       reclaim: (reclaim && !flatReason) ? { f: reclaim.f, v: reclaim.v, lo: reclaim.lo, hi: reclaim.hi, n: reclaim.n, lb: reclaim.lb } : null,
       invert: (inverted && !flatReason) ? { and: inverted.and, n: inverted.n, flipWR: inverted.flipWR, lbFlip: inverted.lbFlip } : null,

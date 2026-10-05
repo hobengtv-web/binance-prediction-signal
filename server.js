@@ -111,7 +111,10 @@ async function resolveMissing() {
     // ===== PASS 1 (PRIORITAS): sesi yang BELUM punya hasil =====
     // Dijalankan lebih dulu supaya hasil sesi baru tidak pernah tertunda oleh pekerjaan backfill.
     for (const r of all) {
-      if (r.res || !r.sig || !r.t0) continue;
+      if (!r.sig || !r.t0) continue;
+      // Resolve record baru ATAU re-resolve FLAT lama yg belum punya skor arah (backfill "arah silent").
+      const needScore = !r.res || (r.res.flat === true && r.res.won == null && (r.sig.dir === "up" || r.sig.dir === "down"));
+      if (!needScore) continue;
       const dir = r.sig.dir;
       const flatSig = (r.sig.skipped === "flat-price" || r.sig.skipped === "flat-noise");
       const isFlat = flatSig || (dir !== "up" && dir !== "down");
@@ -126,8 +129,11 @@ async function resolveMissing() {
         if (sess.length < 2) continue;
         const lock = sess[0].open, close = sess[sess.length - 1].close;
         if (isFlat) {
-          // Record FLAT: cukup lock/close/actual (tanpa won, tanpa trade) — untuk analisis konteks flat.
-          const merged = Object.assign({}, r, { res: { lock: +lock, close: +close, actual: (close >= lock ? "up" : "down"), won: null, flat: true, bars: sess.length - 1, src: "server-1m" }, upd: Date.now() });
+          // Record FLAT: lock/close/actual + SKOR arah (permintaan user: tiap sesi direkam & DIPELAJARI,
+          // termasuk flat). won diisi bila ada arah (flat-noise / arah "silent" flat-price), else null.
+          const factual = (close >= lock ? "up" : "down");
+          const fdir = (dir === "up" || dir === "down") ? dir : null;
+          const merged = Object.assign({}, r, { res: { lock: +lock, close: +close, actual: factual, dir: fdir, won: fdir ? (fdir === factual ? 1 : 0) : null, flat: true, silent: !!(r.sig && r.sig.silent), bars: sess.length - 1, src: "server-1m" }, upd: Date.now() });
           ledger.set(r.k, merged); appendLedger(merged); ledgerDirty++; done++;
           continue;
         }

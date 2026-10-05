@@ -88,6 +88,8 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       hist: bHist(s.histStrength),
       trend: (s.learn && s.learn.trend && s.learn.trend !== "na") ? s.learn.trend : "na",
       dir, gap: gapRaw,
+      flat: !!(s.skipped),                    // sesi flat (flat-price/flat-noise) — direkam & DIPELAJARI
+      silent: !!s.silent,                     // arah "silent" (ditebak utk sesi flat)
       // ===== KONFIRMASI ARAH (backtest 2026-10): tren multi-TF + OFI memperkuat arah mentah =====
       // mAlign = berapa TF (5m/15m/1h) yg trend-nya SEARAH dir. mOfiAgree = OFI mendukung dir.
       mAlign: (s.micro && s.micro.align) ? (["5m", "15m", "1h"].filter((t) => s.micro.align[t] === dir).length) : null,
@@ -256,6 +258,7 @@ function hourVetoes(rows, opts = {}) {
   const recentN = opts.recentN || 3, recentWin = opts.recentWin != null ? opts.recentWin : 2;
   const offCap = opts.offCap != null ? opts.offCap : 0.5;   // maks fraksi jam OFF (fail-open): sisakan >=50% jam ON
   const pnlBadThr = opts.pnlBad != null ? opts.pnlBad : -2;   // jam dgn $ < ini -> OFF walau WR ok
+  rows = rows.filter((r) => !r.flat);   // KEPUTUSAN TRADE hanya dari sesi tradeable (flat hny utk model arah)
   // PER coin × TF (objektif, tidak digeneralisir): WR tiap jam dihitung utk tiap key sendiri.
   const acc = {};
   for (const r of rows) {
@@ -556,6 +559,7 @@ function keyConfirm(rows, opts = {}) {
    Tujuannya: filter ditentukan PER coin & durasi, tidak digeneralisir. */
 function keyVetoes(rows, opts = {}) {
   const thr = opts.thr != null ? opts.thr : 0.50, minN = opts.minN || 25;
+  rows = rows.filter((r) => !r.flat);   // veto/reclaim/invert/confirm = keputusan trade -> hanya sesi tradeable
   const groups = {};
   for (const r of rows) { if (r.won == null || !r.symbol || !r.interval) continue; const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r); }
   const wr = (a) => (a.length ? a.reduce((s, r) => s + (r.won ? 1 : 0), 0) / a.length : null);

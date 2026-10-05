@@ -243,8 +243,9 @@ function evalModelRolling(rows, gateRules, touchRules, k = 3) {
 /* ---------- JAM OFF ADAPTIF ----------
    Hitung WR per jam WIB dari data; jam dgn WR < thr & n cukup dijadikan OFF (diperbarui tiap refit). */
 function hourVetoes(rows, opts = {}) {
-  const minN = opts.minN || 8, thr = opts.thr != null ? opts.thr : 0.50;
+  const minN = opts.minN || 25, thr = opts.thr != null ? opts.thr : 0.50;
   const recentN = opts.recentN || 3, recentWin = opts.recentWin != null ? opts.recentWin : 2;
+  const offCap = opts.offCap != null ? opts.offCap : 0.5;   // maks fraksi jam OFF (fail-open): sisakan >=50% jam ON
   // PER coin × TF (objektif, tidak digeneralisir): WR tiap jam dihitung utk tiap key sendiri.
   const acc = {};
   for (const r of rows) {
@@ -256,7 +257,7 @@ function hourVetoes(rows, opts = {}) {
   }
   const keys = {};
   for (const key of Object.keys(acc)) {
-    const hours = [], stats = [];
+    const stats = [];
     for (let h = 0; h < 24; h++) {
       const all = (acc[key][h] || []).sort((a, b) => b.t0 - a.t0);
       if (all.length < minN) continue;                              // sampel kurang -> jangan putuskan
@@ -264,11 +265,15 @@ function hourVetoes(rows, opts = {}) {
       const rec = all.slice(0, recentN); const recWins = rec.reduce((s, x) => s + x.w, 0);
       const improving = rec.length >= recentN && recWins >= recentWin;
       stats.push({ h, n: all.length, wr: +wr.toFixed(4), recWins, recN: rec.length, improving });
-      if (wr < thr && !improving) hours.push(h);
     }
+    // FAIL-OPEN: jam OFF = jam TERBURUK saja, dibatasi offCap (default <=50% jam yg bisa diputuskan).
+    // Cegah "OFF 20/24 jam" (over-block) yang membuat key nyaris tanpa sinyal.
+    const cand = stats.filter((s) => s.wr < thr && !s.improving).sort((a, b) => a.wr - b.wr);
+    const maxOff = Math.floor(offCap * stats.length);
+    const hours = cand.slice(0, maxOff).map((s) => s.h);
     keys[key] = { hours, stats };
   }
-  return { keys, thr, minN, recentN, recentWin };
+  return { keys, thr, minN, recentN, recentWin, offCap };
 }
 
 /* ---------- ANALISIS KONTEKS FLAT per coin×TF ----------
@@ -330,11 +335,35 @@ function keyTiers(rows, opts = {}) {
   return { keys: out, targets };
 }
 
+/* Fail-open coverage guard: pilih bin "buruk" (WR<thr, n>=minN) TERBURUK dulu, TAPI
+   (a) cakupan sampel yang diblok <= covCap (default 0,60), dan (b) sisanya ("allowed") tetap
+   punya >= minAllowedN sampel. Bila aturan jadi terlalu luas (memblok hampir semua) -> kembalikan
+   [] (fail-open: JANGAN veto) supaya key TIDAK macet tanpa sinyal. Ini mencegah bug "union bin
+   menutup seluruh domain" (mis. rsiBad=[0,200) -> mustahil sinyal). */
+function pickBadRanges(bins, valOf, thr, minN, opts, allRows) {
+  const covCap = opts.covCap != null ? opts.covCap : 0.6;
+  const minAllowedN = (opts.minAllowedN != null && opts.minAllowedN > 0) ? opts.minAllowedN : minN;
+  const withFeat = allRows.filter((r) => valOf(r) != null);
+  const total = withFeat.length || 1;
+  const cand = [];
+  for (const [lo, hi] of bins) {
+    const s = withFeat.filter((r) => { const v = valOf(r); return v >= lo && v < hi; });
+    if (s.length >= minN) { const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0) / s.length; if (w < thr) cand.push({ lo, hi, n: s.length, wr: w }); }
+  }
+  if (!cand.length) return { ranges: [], cov: 0, allowedN: total, failOpen: false };
+  cand.sort((x, y) => x.wr - y.wr);                                // bin terburuk dulu
+  const sel = []; let coveredN = 0;
+  for (const c of cand) { if ((coveredN + c.n) / total > covCap) continue; sel.push([c.lo, c.hi]); coveredN += c.n; }
+  const allowedN = total - coveredN;
+  if (!sel.length || allowedN < minAllowedN) return { ranges: [], cov: 0, allowedN: total, failOpen: true };
+  return { ranges: sel, cov: coveredN / total, allowedN, failOpen: false };
+}
+
 /* ---------- VETO THRESHOLD PER coin×TF (dari data per key, bukan global) ----------
    Cari ambang "no-edge" utk key ini: rewardMin/liqMin (monoton) + rentang rsi/vol yg buruk.
    Tujuannya: filter ditentukan PER coin & durasi, tidak digeneralisir. */
 function keyVetoes(rows, opts = {}) {
-  const thr = opts.thr != null ? opts.thr : 0.50, minN = opts.minN || 8;
+  const thr = opts.thr != null ? opts.thr : 0.50, minN = opts.minN || 25;
   const groups = {};
   for (const r of rows) { if (r.won == null || !r.symbol || !r.interval) continue; const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r); }
   const wr = (a) => (a.length ? a.reduce((s, r) => s + (r.won ? 1 : 0), 0) / a.length : null);
@@ -346,10 +375,12 @@ function keyVetoes(rows, opts = {}) {
     let liqMin = 0;
     for (const e of [0, 1, 1.5, 2, 3, 5]) { const s = a.filter((r) => r.liqRatio != null && r.liqRatio >= e); if (s.length >= minN && wr(s) >= thr) { liqMin = e; break; } }
     const rsiB = [[0, 30], [30, 40], [40, 60], [60, 70], [70, 200]];
-    const rsiBad = rsiB.filter(([lo, hi]) => { const s = a.filter((r) => r.rsi != null && r.rsi >= lo && r.rsi < hi); return s.length >= minN && wr(s) < thr; });
     const volB = [[0, 0.7], [0.7, 1], [1, 1.3], [1.3, 1.8], [1.8, 2.5], [2.5, 99]];
-    const volBad = volB.filter(([lo, hi]) => { const s = a.filter((r) => r.volRel2 != null && r.volRel2 >= lo && r.volRel2 < hi); return s.length >= minN && wr(s) < thr; });
-    out[k] = { n: a.length, rewardMin, liqMin, rsiBad, volBad };
+    const rsiPick = pickBadRanges(rsiB, (r) => r.rsi, thr, minN, opts, a);
+    const volPick = pickBadRanges(volB, (r) => r.volRel2, thr, minN, opts, a);
+    out[k] = { n: a.length, rewardMin, liqMin, rsiBad: rsiPick.ranges, volBad: volPick.ranges,
+      rsiFailOpen: rsiPick.failOpen, volFailOpen: volPick.failOpen,
+      rsiCov: +rsiPick.cov.toFixed(3), volCov: +volPick.cov.toFixed(3) };
   }
   return { keys: out, thr, minN };
 }

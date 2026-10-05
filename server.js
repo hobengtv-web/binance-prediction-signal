@@ -430,8 +430,8 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     write("learn_pnl.json", { generated: new Date().toISOString(), version: ver, byKey: pnlMap });
     write("meta.json", { version: ver, promotedAt: new Date().toISOString(), trigger, byKey: metaMap });
     try {
-      const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 8), thr: Number(process.env.VETO_WR_THR || 0.50), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2) });
-      const kv = LEARNER.keyVetoes(rows, { thr: Number(process.env.VETO_WR_THR || 0.50), minN: Number(process.env.VETO_MIN_N || 8) });
+      const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 25), thr: Number(process.env.VETO_WR_THR || 0.50), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2), offCap: Number(process.env.VETO_HOUR_OFF_CAP || 0.5) });
+      const kv = LEARNER.keyVetoes(rows, { thr: Number(process.env.VETO_WR_THR || 0.50), minN: Number(process.env.VETO_MIN_N || 25), covCap: Number(process.env.VETO_COV_CAP || 0.6), minAllowedN: Number(process.env.VETO_MIN_ALLOWED_N || 0) });
       write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv, { prof: kv }));
     } catch (_) {}
     // ===== ANALISIS KONTEKS FLAT per coin×TF (dari record flat informasional) =====
@@ -505,11 +505,12 @@ let lastVetoKey = null;
 function computeVetoNow() {
   const rows = LEARNER.rowsFrom([...ledger.values()]);
   const hv = LEARNER.hourVetoes(rows, {
-    minN: Number(process.env.VETO_MIN_N || 8), thr: Number(process.env.VETO_WR_THR || 0.50),
+    minN: Number(process.env.VETO_MIN_N || 25), thr: Number(process.env.VETO_WR_THR || 0.50),
     recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2),
+    offCap: Number(process.env.VETO_HOUR_OFF_CAP || 0.5),
   });
   // VETO THRESHOLD per key (reward/rsi/vol/liq) — dari data per coin×TF (bukan global).
-  const kv = LEARNER.keyVetoes(rows, { thr: Number(process.env.VETO_WR_THR || 0.50), minN: Number(process.env.VETO_MIN_N || 8) });
+  const kv = LEARNER.keyVetoes(rows, { thr: Number(process.env.VETO_WR_THR || 0.50), minN: Number(process.env.VETO_MIN_N || 25), covCap: Number(process.env.VETO_COV_CAP || 0.6), minAllowedN: Number(process.env.VETO_MIN_ALLOWED_N || 0) });
   return Object.assign({}, hv, { prof: kv });
 }
 function refreshVeto(tag) {

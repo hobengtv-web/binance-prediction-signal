@@ -250,6 +250,7 @@ function hourVetoes(rows, opts = {}) {
   const minN = opts.minN || 25, thr = opts.thr != null ? opts.thr : 0.50;
   const recentN = opts.recentN || 3, recentWin = opts.recentWin != null ? opts.recentWin : 2;
   const offCap = opts.offCap != null ? opts.offCap : 0.5;   // maks fraksi jam OFF (fail-open): sisakan >=50% jam ON
+  const pnlBadThr = opts.pnlBad != null ? opts.pnlBad : -2;   // jam dgn $ < ini -> OFF walau WR ok
   // PER coin × TF (objektif, tidak digeneralisir): WR tiap jam dihitung utk tiap key sendiri.
   const acc = {};
   for (const r of rows) {
@@ -274,7 +275,10 @@ function hourVetoes(rows, opts = {}) {
     // FAIL-OPEN: jam OFF = jam TERBURUK saja, dibatasi offCap (default <=50% jam yg bisa diputuskan).
     // Cegah "OFF 20/24 jam" (over-block) yang membuat key nyaris tanpa sinyal. OBJEKTIF $: jam dgn
     // data $ positif JANGAN di-OFF-kan.
-    const cand = stats.filter((s) => s.wr < thr && !s.improving && !(s.pnlN >= 5 && s.pnl > 0)).sort((a, b) => a.wr - b.wr);
+    const cand = stats.filter((s) => (s.wr < thr && !s.improving && !(s.pnlN >= 5 && s.pnl > 0)) || (s.pnlN >= 5 && s.pnl != null && s.pnl < pnlBadThr)).sort((a, b) => {
+      const pa = a.pnl == null ? Infinity : a.pnl, pb = b.pnl == null ? Infinity : b.pnl;
+      return pa !== pb ? pa - pb : a.wr - b.wr;
+    });
     const maxOff = Math.floor(offCap * stats.length);
     const hours = cand.slice(0, maxOff).map((s) => s.h);
     keys[key] = { hours, stats };
@@ -358,11 +362,17 @@ function pickBadRanges(bins, valOf, thr, minN, opts, allRows) {
     const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0) / s.length;
     const ps = s.filter((r) => r.pnlUse != null);
     const pm = ps.length ? mean(ps.map((r) => r.pnlUse)) : null;
-    // OBJEKTIF $: bin dianggap "buruk" hanya bila WR<thr DAN (tak ada data $ / rata-rata $ <= 0).
-    if (w < thr && !(ps.length >= 5 && pm > 0)) cand.push({ lo, hi, n: s.length, wr: w });
+    // OBJEKTIF $ (utama): bin BURUK bila (a) WR<thr & $ tidak positif, ATAU (b) $ JELAS NEGATIF
+    // walau WR-nya bagus (mis. BNB_5m pasar ramai: WR 0,53 tapi $ -44%). Simpan $ demi compounding.
+    const pnlBadThr = opts.pnlBad != null ? opts.pnlBad : -2;
+    const pnlBad = ps.length >= 5 && pm != null && pm < pnlBadThr;
+    if ((w < thr && !(ps.length >= 5 && pm > 0)) || pnlBad) cand.push({ lo, hi, n: s.length, wr: w, pnl: pm != null ? +pm.toFixed(2) : null });
   }
   if (!cand.length) return { ranges: [], cov: 0, allowedN: total, failOpen: false };
-  cand.sort((x, y) => x.wr - y.wr);                                // bin terburuk dulu
+  cand.sort((x, y) => {                                            // $-terburuk dulu, lalu WR-terburuk
+    const px = x.pnl == null ? Infinity : x.pnl, py = y.pnl == null ? Infinity : y.pnl;
+    return px !== py ? px - py : x.wr - y.wr;
+  });
   const sel = []; let coveredN = 0;
   for (const c of cand) { if ((coveredN + c.n) / total > covCap) continue; sel.push([c.lo, c.hi]); coveredN += c.n; }
   const allowedN = total - coveredN;

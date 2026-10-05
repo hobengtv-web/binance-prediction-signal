@@ -653,7 +653,9 @@ function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.35) {   //
   // ===== OBJEKTIF UTAMA: $ (PnL). Dipakai lebih dulu bila datanya memadai — bukan sekadar WR. =====
   // PnL mencerminkan trailing TP / close mandiri BOT (uang nyata), beda dari WR arah.
   if (pnlReady) {
-    if (!ip || ip.n < 30) return { promote: true, why: `$: kandidat meanPnl ${cp.meanPnl}% (n ${cp.n}); insiden data $ kurang -> adopsi kandidat` };
+    if (!ip || ip.n < 30) return (cp.meanPnl > 0)
+      ? { promote: true, why: `$: kandidat meanPnl ${cp.meanPnl}% (n ${cp.n}) > 0; insiden data $ kurang -> adopsi kandidat` }
+      : { promote: false, why: `$ kandidat NEGATIF (${cp.meanPnl}%, n ${cp.n}) -> tidak diadopsi` };
     const dPnl = cp.meanPnl - ip.meanPnl;
     if (dPnl >= 0.02) return { promote: true, why: `$ membaik: ${cp.meanPnl}% vs ${ip.meanPnl}% (+${dPnl.toFixed(3)}pp) n ${cp.n}/${ip.n} · WR ${(c.takenWinrate * 100).toFixed(1)}% cov ${((c.coverage || 0) * 100).toFixed(0)}%` };
     const dWr = c.takenWinrate - i.takenWinrate;

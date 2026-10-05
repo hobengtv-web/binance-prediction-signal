@@ -177,8 +177,9 @@ function computeSignal(o) {
   // ===== VETO no-edge: buang cohort WR~50% (reward kecil, RSI 30-40, vol choppy, jam buruk, liqud tipis)
   let veto = null;
   const pv = { reward: false, rsi: false, vol: false, hour: false, liq: false, rewardMin: 0, liqMin: 0, rsiBadRanges: null, volBadRanges: null, offHours: null }; // KOSMETIK: salinan status kriteria utk power bar
+  const wibH = Math.floor(((t0 + 7 * 3600) % 86400) / 3600);                     // jam WIB (dipakai veto & reclaim)
+  let P = { rewardMin: 0, liqMin: 0, rsiBad: [], volBad: [], reclaim: [] };      // profil veto key (diisi bila TA_VETO on)
   if (TA_VETO.on) {
-    const wibH = new Date((t0 + 7 * 3600) * 1000).getUTCHours();
     // Jam OFF ADAPTIF dari learner (bila ada); fallback ke default kode.
     const vetoM = (() => { try { return (typeof getModel === "function" ? getModel("veto") : null); } catch (_) { return null; } })();
     // Jam OFF PER coin×TF (objektif). Bila file ada tapi key ini belum punya cukup sampel -> [] (jangan blokir).
@@ -186,7 +187,7 @@ function computeSignal(o) {
     const vetoHours = vetoM ? ((km && Array.isArray(km.hours)) ? km.hours : []) : TA_VETO.hours;
     // VETO THRESHOLD PER coin×TF (dari data key ini). Fallback global hanya bila key belum punya profil.
     const kp = vetoM && vetoM.prof && vetoM.prof.keys && vetoM.prof.keys[`${sym}_${tf}`];
-    const P = kp || { rewardMin: TA_VETO.rewardMin, liqMin: TA_VETO.liqMin, rsiBad: [[TA_VETO.rsiLo, TA_VETO.rsiHi]], volBad: [[TA_VETO.volLo, TA_VETO.volHi]] };
+    P = kp || { rewardMin: TA_VETO.rewardMin, liqMin: TA_VETO.liqMin, rsiBad: [[TA_VETO.rsiLo, TA_VETO.rsiHi]], volBad: [[TA_VETO.volLo, TA_VETO.volHi]], reclaim: [] };
     // KOSMETIK: salin status kriteria (kondisi SAMA, tidak mengubah rantai veto di bawah)
     pv.rewardMin = P.rewardMin || 0; pv.liqMin = P.liqMin || 0; pv.rsiBadRanges = P.rsiBad; pv.volBadRanges = P.volBad; pv.offHours = vetoHours;
     pv.reward = (P.rewardMin || 0) > 0 && gateNow < P.rewardMin;
@@ -253,6 +254,20 @@ function computeSignal(o) {
   // menandai konteks ini (mis. gap<0.005) -> tolak sinyal, supaya pembelajaran benar-benar menajamkan.
   if (learn && learn.blocking && accepted) { accepted = false; reject = reject || "learn-block"; }
 
+  // ===== RECLAIM: konteks "tanpa sinyal" yang NYATA WIN (validasi Wilson-LB learner) -> ON-kan kembali.
+  // Meng-override veto/tier HANYA bila arah ada & bukan liqLow. Menyeimbangkan veto agar produksi tak menutup.
+  let reclaim = null;
+  if (!accepted && currentDir && !liqLow && Array.isArray(P.reclaim) && P.reclaim.length) {
+    const _v = { rsi, volRel2, gapPct: gateNow, surprise, histStrength: histTrend.strength, hourWIB: wibH };
+    for (const c of P.reclaim) {
+      if (c.f === "dir") { if (currentDir === c.v) reclaim = c; }
+      else if (c.f === "grade") { if (grade === c.v) reclaim = c; }
+      else { const x = _v[c.f]; if (x != null && x >= c.lo && x < c.hi) reclaim = c; }
+      if (reclaim) break;
+    }
+    if (reclaim) { accepted = true; reject = null; }
+  }
+
   // ===== POWER SINYAL U/D (KOSMETIK — tidak mengubah accepted/reject) =====
   // 100% = tepat di ambang minimum utk menghasilkan sinyal; >100% = melampaui; <100% = ada kriteria belum terpenuhi.
   let power = null;
@@ -286,6 +301,7 @@ function computeSignal(o) {
       power,
       dir: (flatReason === "flat-price") ? null : currentDir, mode, conf,
       grade: grade || null, accepted: flatReason ? false : accepted, reject: flatReason ? null : reject, thresholdsOK: !!thOK,
+      reclaim: (reclaim && !flatReason) ? { f: reclaim.f, v: reclaim.v, lo: reclaim.lo, hi: reclaim.hi, n: reclaim.n, lb: reclaim.lb } : null,
       skipped: flatReason || null,
       volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5),
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
@@ -358,7 +374,7 @@ function createCapture(deps) {
         capOffsetMs: 2000, capturedAt: nowSec, prov: "server", minuteIn: 1, ofi: (sig.ofi != null ? sig.ofi : null), gateWr: null,
       }),
       // Keputusan gate saat perekaman: untuk membandingkan populasi diterima vs ditolak.
-      gate: { grade: sig.grade, liqLow: sig.liqLow, liqRatio: sig.liqRatio, thresholdsOK: sig.thresholdsOK, accepted: sig.accepted, reject: sig.reject, profile: profile.mode },
+      gate: { grade: sig.grade, liqLow: sig.liqLow, liqRatio: sig.liqRatio, thresholdsOK: sig.thresholdsOK, accepted: sig.accepted, reject: sig.reject, reclaim: sig.reclaim || null, profile: profile.mode },
     };
     save(rec, "server");
     stats.captured++; stats.lastAt = Date.now(); stats.lastKey = rec.k;

@@ -78,6 +78,7 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
     out.push({
       t0: r.t0, asset: r.asset, interval: r.interval,
       symbol: r.asset, mode: s.mode || "na",
+      grade: (s.grade || null),
       minute: bMinute(s.minuteIn != null ? s.minuteIn : 1),
       rsi: bRsi(s.rsi), vol: bVol(s.volRel2 != null ? s.volRel2 : s.volRel),
       hour: bHour(new Date(r.t0 * 1000).getUTCHours()),
@@ -359,6 +360,52 @@ function pickBadRanges(bins, valOf, thr, minN, opts, allRows) {
   return { ranges: sel, cov: coveredN / total, allowedN, failOpen: false };
 }
 
+/* ---------- RECLAIM: sesi "tanpa sinyal" yang NYATA WIN -> ON-kan kembali ----------
+   Untuk tiap key, cari KONTEKS fitur-tunggal yang menang kuat (Wilson-LB >= reclaimWlb, n >= reclaimMinN),
+   TERMASUK konteks yang saat ini ditolak. Konteks ini di-ON-kan di capture (override veto/tier).
+   Tujuan: (1) jangan menutup sesi yang sebenarnya profitable; (2) mengimbangi veto agar tak "snowball"
+   makin menutup produksi signal. Berbasis OUTCOME nyata (res.won), bukan asumsi. */
+const RECLAIM_FEATS = [
+  { f: "rsi", bins: [[0, 30], [30, 40], [40, 60], [60, 70], [70, 100]] },
+  { f: "volRel2", bins: [[0, 0.7], [0.7, 1], [1, 1.5], [1.5, 2.5], [2.5, 99]] },
+  { f: "gapPct", bins: [[0, 0.005], [0.005, 0.01], [0.01, 0.02], [0.02, 0.035], [0.035, 9]] },
+  { f: "surprise", bins: [[0, 1], [1, 5], [5, 10], [10, 30], [30, 999]] },
+  { f: "histStrength", bins: [[0, 10], [10, 20], [20, 999]] },
+];
+const RECLAIM_HOURS = [[0, 4], [4, 8], [8, 12], [12, 16], [16, 20], [20, 24]];
+function keyReclaim(rows, opts = {}) {
+  const minN = opts.reclaimMinN || 30, wlb = opts.reclaimWlb != null ? opts.reclaimWlb : 0.52;
+  const maxCtx = opts.reclaimMax || 4;
+  const covCap = opts.reclaimCovCap != null ? opts.reclaimCovCap : 0.4;   // maks cakupan union reclaim (anti-balik-snowball)
+  const groups = {};
+  for (const r of rows) { if (r.won == null || !r.symbol || !r.interval) continue; const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r); }
+  const matchCtx = (c, r) => {
+    if (c.f === "dir") return r.dir === c.v;
+    if (c.f === "grade") return r.grade === c.v;
+    if (c.f === "hourWIB") { const h = Math.floor(((r.t0 + 7 * 3600) % 86400) / 3600); return h >= c.lo && h < c.hi; }
+    const x = r[c.f]; return x != null && x >= c.lo && x < c.hi;
+  };
+  const out = {};
+  for (const k of Object.keys(groups)) {
+    const a = groups[k]; const cands = [];
+    const add = (ctx, s) => { if (s.length < minN) return; const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0); const lb = wilson(w, s.length).lo; if (lb >= wlb) cands.push(Object.assign({ n: s.length, wr: +(w / s.length).toFixed(4), lb: +lb.toFixed(4) }, ctx)); };
+    for (const { f, bins } of RECLAIM_FEATS) for (const [lo, hi] of bins) add({ f, lo, hi }, a.filter((r) => r[f] != null && r[f] >= lo && r[f] < hi));
+    for (const [lo, hi] of RECLAIM_HOURS) add({ f: "hourWIB", lo, hi }, a.filter((r) => { const h = Math.floor(((r.t0 + 7 * 3600) % 86400) / 3600); return h >= lo && h < hi; }));
+    for (const f of ["dir", "grade"]) { const vals = {}; for (const r of a) { const v = r[f]; if (v == null) continue; (vals[v] = vals[v] || []).push(r); } for (const v of Object.keys(vals)) add({ f, v }, vals[v]); }
+    cands.sort((x, y) => y.lb - x.lb);
+    // Pilih terkuat dulu, TAPI batasi cakupan UNION <= covCap agar reclaim tak jadi "ON-kan semua".
+    const sel = [];
+    for (const c of cands) {
+      if (sel.length >= maxCtx) break;
+      const trial = a.filter((r) => sel.some((s) => matchCtx(s, r)) || matchCtx(c, r));
+      if (a.length && trial.length / a.length > covCap) continue;
+      sel.push(c);
+    }
+    out[k] = sel;
+  }
+  return out;
+}
+
 /* ---------- VETO THRESHOLD PER coin×TF (dari data per key, bukan global) ----------
    Cari ambang "no-edge" utk key ini: rewardMin/liqMin (monoton) + rentang rsi/vol yg buruk.
    Tujuannya: filter ditentukan PER coin & durasi, tidak digeneralisir. */
@@ -368,6 +415,13 @@ function keyVetoes(rows, opts = {}) {
   for (const r of rows) { if (r.won == null || !r.symbol || !r.interval) continue; const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r); }
   const wr = (a) => (a.length ? a.reduce((s, r) => s + (r.won ? 1 : 0), 0) / a.length : null);
   const out = {};
+  const minAllowedCov = opts.minAllowedCov != null ? opts.minAllowedCov : 0.3;   // "lamin produksi" per key
+  const reclaimMap = keyReclaim(rows, opts);
+  const inRanges = (v, ranges) => v != null && (ranges || []).some(([lo, hi]) => v >= lo && v < hi);
+  const allowFrac = (a, rmin, lmin, rb, vb) => {
+    const A = a.filter((r) => !inRanges(r.rsi, rb) && !inRanges(r.volRel2, vb) && (rmin <= 0 || (r.gapPct != null && r.gapPct >= rmin)) && (lmin <= 0 || (r.liqRatio != null && r.liqRatio >= lmin)));
+    return a.length ? A.length / a.length : 1;
+  };
   for (const k of Object.keys(groups)) {
     const a = groups[k];
     let rewardMin = 0;
@@ -376,13 +430,20 @@ function keyVetoes(rows, opts = {}) {
     for (const e of [0, 1, 1.5, 2, 3, 5]) { const s = a.filter((r) => r.liqRatio != null && r.liqRatio >= e); if (s.length >= minN && wr(s) >= thr) { liqMin = e; break; } }
     const rsiB = [[0, 30], [30, 40], [40, 60], [60, 70], [70, 200]];
     const volB = [[0, 0.7], [0.7, 1], [1, 1.3], [1.3, 1.8], [1.8, 2.5], [2.5, 99]];
-    const rsiPick = pickBadRanges(rsiB, (r) => r.rsi, thr, minN, opts, a);
-    const volPick = pickBadRanges(volB, (r) => r.volRel2, thr, minN, opts, a);
-    out[k] = { n: a.length, rewardMin, liqMin, rsiBad: rsiPick.ranges, volBad: volPick.ranges,
-      rsiFailOpen: rsiPick.failOpen, volFailOpen: volPick.failOpen,
-      rsiCov: +rsiPick.cov.toFixed(3), volCov: +volPick.cov.toFixed(3) };
+    let rsiR = pickBadRanges(rsiB, (r) => r.rsi, thr, minN, opts, a);
+    let volR = pickBadRanges(volB, (r) => r.volRel2, thr, minN, opts, a);
+    // ===== ANTI-SNOWBALL: jamin "lamin produksi" — fraksi sesi yg TETAP allowed >= minAllowedCov.
+    // Bila veto (rsi/vol/reward/liq) menekan produksi di bawah lamin -> lepas yg paling luas dulu.
+    let snowball = false;
+    let frac = allowFrac(a, rewardMin, liqMin, rsiR.ranges, volR.ranges);
+    if (frac < minAllowedCov) { rsiR = { ranges: [], cov: 0, failOpen: true }; volR = { ranges: [], cov: 0, failOpen: true }; snowball = true; frac = allowFrac(a, rewardMin, liqMin, [], []); }
+    if (frac < minAllowedCov) { rewardMin = 0; liqMin = 0; frac = allowFrac(a, 0, 0, [], []); }
+    out[k] = { n: a.length, rewardMin, liqMin, rsiBad: rsiR.ranges, volBad: volR.ranges,
+      rsiFailOpen: rsiR.failOpen, volFailOpen: volR.failOpen,
+      rsiCov: +rsiR.cov.toFixed(3), volCov: +volR.cov.toFixed(3),
+      allowFrac: +frac.toFixed(3), snowball, reclaim: reclaimMap[k] || [] };
   }
-  return { keys: out, thr, minN };
+  return { keys: out, thr, minN, minAllowedCov };
 }
 
 /* ---------- GATE WR PER JAM (jalur responsif utk jam SEKARANG) ----------

@@ -96,7 +96,7 @@ function computeSignal(o) {
   // momen sinyal (rewardPct == mv2). Terbukti mengubah EV dari negatif (~-$146) → positif (+$20) di
   // seluruh rentang harga entry (0,55–0,62); WR 56%→62,5%. Di bawah ambang ini -> "flat-noise" (skip).
   // Bisa dibalik instan via env MIN_MV2_PCT (mis. 0.005). 0 = nonaktif.
-  const MIN_MV2_PCT = Number(process.env.MIN_MV2_PCT != null ? process.env.MIN_MV2_PCT : 0.02);
+  const MIN_MV2_PCT = Number(process.env.MIN_MV2_PCT != null ? process.env.MIN_MV2_PCT : 0.015);
   const flatReason = (currentDir === "flat") ? "flat-price" : ((MIN_MV2_PCT > 0 && mv2 < MIN_MV2_PCT) ? "flat-noise" : null);
   // rsi dari candle 5m yang SUDAH SELESAI (tanpa lookahead)
   let rsi = null;

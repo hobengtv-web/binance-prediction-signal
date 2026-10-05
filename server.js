@@ -133,7 +133,8 @@ async function resolveMissing() {
           // termasuk flat). won diisi bila ada arah (flat-noise / arah "silent" flat-price), else null.
           const factual = (close >= lock ? "up" : "down");
           const fdir = (dir === "up" || dir === "down") ? dir : null;
-          const merged = Object.assign({}, r, { res: { lock: +lock, close: +close, actual: factual, dir: fdir, won: fdir ? (fdir === factual ? 1 : 0) : null, flat: true, silent: !!(r.sig && r.sig.silent), bars: sess.length - 1, src: "server-1m" }, upd: Date.now() });
+          const sroi = fdir ? settleRoiPct(fdir, factual, r.odds) : null;
+          const merged = Object.assign({}, r, { res: { lock: +lock, close: +close, actual: factual, dir: fdir, won: fdir ? (fdir === factual ? 1 : 0) : null, flat: true, silent: !!(r.sig && r.sig.silent), settleRoi: sroi, settleSrc: sroi != null ? "binance-quote" : null, bars: sess.length - 1, src: "server-1m" }, upd: Date.now() });
           ledger.set(r.k, merged); appendLedger(merged); ledgerDirty++; done++;
           continue;
         }
@@ -154,6 +155,7 @@ async function resolveMissing() {
           const t1 = await entryTouch1s(r.asset, r.t0, dur, trade.entryAt, lock, dir);
           if (t1) { trade.entryTouch = t1.touch; trade.entryTouchAt = t1.at; trade.touchSrc = "1s"; }
         }
+        const sroi = settleRoiPct(dir, actual, r.odds);   // $ "jika di-entry" dari HARGA TOKEN Binance nyata + outcome nyata
         const merged = Object.assign({}, r, {
           res: {
             lock: +lock, close: +close, actual, won: dir === actual ? 1 : 0,
@@ -161,6 +163,7 @@ async function resolveMissing() {
             mfeFav: isFinite(mfe) ? +mfe.toFixed(4) : null,
             maeFav: isFinite(mae) ? +mae.toFixed(4) : null,
             endFav: +v(close).toFixed(4), bars: path.length, src: "server-1m",
+            settleRoi: sroi, settleSrc: sroi != null ? "binance-quote" : null,
             trade,
           },
           upd: Date.now(),
@@ -282,6 +285,16 @@ setInterval(() => resolveMissing().catch(() => {}), 15 * 1000);
      BUKAN yang ter-upload lebih dulu; snapshot lain disimpan di `alts` (audit).
    - `res` tidak pernah ditimpa oleh record tanpa res; hasil yang lebih baru boleh menggantikan
      (mis. perkiraan 1m server -> jalur 1s klien yang lebih presisi). */
+/* $ "JIKA SESI DI-ENTRY" dari HARGA TOKEN prediksi Binance NYATA + outcome NYATA (bukan perkiraan).
+   Token prediksi settle biner (menang=1, kalah=0). p = harga token sisi rekomendasi (saat t0, dari BOT).
+   ROI% hold-to-settle = menang ? (1-p)/p*100 : -100. p berasal dari BOT (harga Binance nyata). */
+function settleRoiPct(dir, actual, odds) {
+  if (!odds || (dir !== "up" && dir !== "down")) return null;
+  const p = dir === "up" ? odds.up : odds.down;
+  if (typeof p !== "number" || !(p > 0) || !(p < 1)) return null;
+  return dir === actual ? +(((1 - p) / p) * 100).toFixed(4) : -100;
+}
+
 function mergeRecord(r) {
   if (!r || typeof r.k !== "string") return false;
   const prev = ledger.get(r.k) || { k: r.k };
@@ -309,6 +322,8 @@ function mergeRecord(r) {
   if (r.res && prev.res && prev.res.trade && !r.res.trade) {
     merged.res = Object.assign({}, r.res, { trade: prev.res.trade });
   }
+  // ODDS harga token prediksi NYATA (dikirim BOT) — field TERPISAH dari `bot` (PnL) agar tidak saling timpa.
+  if (r.odds) merged.odds = Object.assign({}, prev.odds, r.odds);
   merged.upd = Date.now();
   ledger.set(r.k, merged);
   appendLedger(merged);

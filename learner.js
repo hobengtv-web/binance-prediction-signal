@@ -121,7 +121,12 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       pnlPct: pnlPct != null ? +pnlPct.toFixed(4) : null,
       botRoi: botRoi,
       botPnl: (r.bot && typeof r.bot.pnl === "number") ? +r.bot.pnl.toFixed(4) : null,
-      pnlUse: (botRoi != null ? botRoi : (pnlPct != null ? +pnlPct.toFixed(4) : null)),   // ROI $ BOT bila ada, else proksi spot
+      pnlUse: (botRoi != null ? botRoi : (pnlPct != null ? +pnlPct.toFixed(4) : null)),   // DISPLAY saja (akun, else proksi spot)
+      // ===== $ NYATA = uang akun (botRoi) ATAU harga-token Binance nyata (settleRoi, hold-to-settle) =====
+      settleRoi: (r.res && typeof r.res.settleRoi === "number") ? +r.res.settleRoi.toFixed(4) : null,
+      settleSrc: (r.res && r.res.settleSrc) || null,
+      pnlReal: (botRoi != null ? botRoi : ((r.res && typeof r.res.settleRoi === "number") ? +r.res.settleRoi.toFixed(4) : null)),
+      pnlRealSrc: (botRoi != null ? "account" : ((r.res && typeof r.res.settleRoi === "number") ? (r.res.settleSrc || "binance-quote") : null)),
       taWin: (pnlPct != null) ? (pnlPct > 0 ? 1 : 0) : null,
       taCapWin: (capturePct != null) ? (capturePct >= 50 ? 1 : 0) : null,
       // ===== MIKRO-STRUKTUR (fitur baru untuk mempertajam arah U/D) =====
@@ -266,7 +271,7 @@ function hourVetoes(rows, opts = {}) {
     const key = r.symbol + "_" + r.interval;
     const h = new Date((r.t0 + 7 * 3600) * 1000).getUTCHours();
     const g = acc[key] = acc[key] || {};
-    (g[h] = g[h] || []).push({ t0: r.t0, w: r.won ? 1 : 0, p: r.botRoi != null ? r.botRoi : null });  // $ HANYA akun nyata
+    (g[h] = g[h] || []).push({ t0: r.t0, w: r.won ? 1 : 0, p: r.pnlReal != null ? r.pnlReal : null });  // $ NYATA (akun / harga-token Binance)
   }
   const keys = {};
   for (const key of Object.keys(acc)) {
@@ -368,8 +373,8 @@ function pickBadRanges(bins, valOf, thr, minN, opts, allRows) {
     const s = withFeat.filter((r) => { const v = valOf(r); return v >= lo && v < hi; });
     if (s.length < minN) continue;
     const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0) / s.length;
-    const ps = s.filter((r) => r.botRoi != null);           // $ HANYA dari PnL akun nyata (bukan proksi)
-    const pm = ps.length ? mean(ps.map((r) => r.botRoi)) : null;
+    const ps = s.filter((r) => r.pnlReal != null);          // $ NYATA (akun / harga-token Binance), bukan proksi spot
+    const pm = ps.length ? mean(ps.map((r) => r.pnlReal)) : null;
     // OBJEKTIF $ (utama): bin BURUK bila (a) WR<thr & $ tidak positif, ATAU (b) $ JELAS NEGATIF
     // walau WR-nya bagus (mis. BNB_5m pasar ramai: WR 0,53 tapi $ -44%). Simpan $ demi compounding.
     const pnlBadThr = opts.pnlBad != null ? opts.pnlBad : -2;
@@ -424,8 +429,8 @@ function keyReclaim(rows, opts = {}) {
       const lb = wilson(w, s.length).lo;
       if (lb < wlb) return;
       // OBJEKTIF $: bila konteks punya cukup data $ AKUN dan rata-ratanya NEGATIF -> JANGAN di-reclaim.
-      const ps = s.filter((r) => r.botRoi != null);          // $ HANYA akun nyata
-      const pm = ps.length ? mean(ps.map((r) => r.botRoi)) : null;
+      const ps = s.filter((r) => r.pnlReal != null);         // $ NYATA (akun / harga-token Binance)
+      const pm = ps.length ? mean(ps.map((r) => r.pnlReal)) : null;
       if (ps.length >= 5 && !(pm > 0)) return;
       cands.push(Object.assign({ n: s.length, wr: +(w / s.length).toFixed(4), lb: +lb.toFixed(4), pnlN: ps.length, pnl: pm != null ? +pm.toFixed(3) : null }, ctx));
     };
@@ -621,25 +626,25 @@ function liveHourGate(rows, opts = {}, nowMs = Date.now()) {
 function evalModelPnl(rows, gateRules, touchRules) {
   const gb = blockersOf(gateRules.map((r) => ({ ...r, metric: "won" })), "won");
   const tb = blockersOf(touchRules.map((r) => ({ ...r, metric: "touch" })), "touch");
-  const taken = rows.filter((r) => r.botRoi != null && decide(r, gb) && decide(r, tb));
+  const taken = rows.filter((r) => r.pnlReal != null && decide(r, gb) && decide(r, tb));
   const n = taken.length;
   return {
     n,
-    meanPnl: n ? +mean(taken.map((r) => r.botRoi)).toFixed(4) : 0,
-    winRate: n ? +mean(taken.map((r) => (r.botRoi > 0 ? 1 : 0))).toFixed(4) : 0,
+    meanPnl: n ? +mean(taken.map((r) => r.pnlReal)).toFixed(4) : 0,
+    winRate: n ? +mean(taken.map((r) => (r.pnlReal > 0 ? 1 : 0))).toFixed(4) : 0,
   };
 }
-// Konteks TA_FEATS dengan PnL terburuk/terbaik (lessons + kandidat aturan PnL) — HANYA $ akun nyata.
+// Konteks TA_FEATS dengan PnL terburuk/terbaik (lessons + kandidat aturan PnL) — $ NYATA (akun/harga-token).
 function pnlContexts(rows, FEATS) {
-  const base = rows.filter((r) => r.botRoi != null);
+  const base = rows.filter((r) => r.pnlReal != null);
   if (!base.length) return { all: 0, n: 0, contexts: [] };
-  const all = mean(base.map((r) => r.botRoi));
+  const all = mean(base.map((r) => r.pnlReal));
   const out = [];
   for (const name of Object.keys(FEATS)) {
     const g = groupBy(base, FEATS[name]);
     for (const [k, arr] of g) {
       if (arr.length < 15) continue;
-      const m = mean(arr.map((r) => r.botRoi));
+      const m = mean(arr.map((r) => r.pnlReal));
       out.push({ f: name, k, n: arr.length, meanPnl: +m.toFixed(4), delta: +(m - all).toFixed(4),
         verdict: m < all - 0.02 ? "suppress" : m > all + 0.02 ? "boost" : "neutral" });
     }

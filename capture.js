@@ -84,7 +84,7 @@ function computeSignal(o) {
   const moveAbs = Math.abs(C2 - lock);
   const mv2 = lock > 0 ? (moveAbs / lock) * 100 : 0;
   const surprise = sigma1s > 0 ? moveAbs / sigma1s : 0;
-  const currentDir = C2 > lock ? "up" : C2 < lock ? "down" : "flat";
+  let currentDir = C2 > lock ? "up" : C2 < lock ? "down" : "flat";
   // ===== FLAT / NOISE (guard C: gerak minim) =====
   // PENTING: JANGAN return objek ringkas di sini. Dulu flat-price/flat-noise return objek minimal ->
   // seluruh detail (rsi, micro, liqRatio, rewardPct, gate, power, ofi) HILANG, sehingga sesi TANPA
@@ -201,6 +201,18 @@ function computeSignal(o) {
     else if (vetoHours.indexOf(wibH) >= 0) veto = "veto-hour";
     else if ((P.liqMin || 0) > 0 && liqRatio < P.liqMin) veto = "veto-liq";
   }
+  // ===== INVERT: konteks yg arah mentahnya TERBUKTI biasanya SALAH -> BALIK arah (up<->down) =====
+  // Diterapkan SEBELUM gate, hanya bila konteks tervalidasi ketat (Wilson-LB flipped >=0.55, 2 paruh, n>=40).
+  let inverted = null;
+  if (!flatReason && (currentDir === "up" || currentDir === "down") && !liqLow && Array.isArray(P.invert) && P.invert.length) {
+    const _vi = { rsi, volRel2, gapPct: gateNow, surprise, histStrength: histTrend.strength, hourWIB: wibH };
+    for (const c of P.invert) {
+      const ok = c.f === "dir" ? (currentDir === c.v) : c.f === "grade" ? (grade === c.v)
+        : c.f === "hourWIB" ? (wibH >= c.lo && wibH < c.hi) : (_vi[c.f] != null && _vi[c.f] >= c.lo && _vi[c.f] < c.hi);
+      if (ok) { inverted = c; break; }
+    }
+    if (inverted) currentDir = (currentDir === "up") ? "down" : "up";
+  }
   let accepted = accepted0 && !veto;
   let reject = accepted ? null : (veto || (!rsiOK ? "rsi-out" : (!thOK ? "threshold" : !grade ? "tier" : "liq-low")));
 
@@ -302,6 +314,7 @@ function computeSignal(o) {
       dir: (flatReason === "flat-price") ? null : currentDir, mode, conf,
       grade: grade || null, accepted: flatReason ? false : accepted, reject: flatReason ? null : reject, thresholdsOK: !!thOK,
       reclaim: (reclaim && !flatReason) ? { f: reclaim.f, v: reclaim.v, lo: reclaim.lo, hi: reclaim.hi, n: reclaim.n, lb: reclaim.lb } : null,
+      invert: (inverted && !flatReason) ? { f: inverted.f, v: inverted.v, lo: inverted.lo, hi: inverted.hi, n: inverted.n, flipWR: inverted.flipWR, lbFlip: inverted.lbFlip } : null,
       skipped: flatReason || null,
       volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5),
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
@@ -374,7 +387,7 @@ function createCapture(deps) {
         capOffsetMs: 2000, capturedAt: nowSec, prov: "server", minuteIn: 1, ofi: (sig.ofi != null ? sig.ofi : null), gateWr: null,
       }),
       // Keputusan gate saat perekaman: untuk membandingkan populasi diterima vs ditolak.
-      gate: { grade: sig.grade, liqLow: sig.liqLow, liqRatio: sig.liqRatio, thresholdsOK: sig.thresholdsOK, accepted: sig.accepted, reject: sig.reject, reclaim: sig.reclaim || null, profile: profile.mode },
+      gate: { grade: sig.grade, liqLow: sig.liqLow, liqRatio: sig.liqRatio, thresholdsOK: sig.thresholdsOK, accepted: sig.accepted, reject: sig.reject, reclaim: sig.reclaim || null, invert: sig.invert || null, profile: profile.mode },
     };
     save(rec, "server");
     stats.captured++; stats.lastAt = Date.now(); stats.lastKey = rec.k;

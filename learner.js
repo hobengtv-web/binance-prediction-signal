@@ -436,6 +436,56 @@ function keyReclaim(rows, opts = {}) {
   return out;
 }
 
+/* ---------- INVERT: konteks yg arah mentahnya TERBUKTI biasanya SALAH -> balik rekomendasi ----------
+   Berbeda dari veto (block) & reclaim (ON-kan): ini MEMBALIK arah (up<->down) SEBELUM gate.
+   Syarat KETAT (anti-overfit, cegah flip sembarangan):
+     (1) n >= invertMinN (default 40)
+     (2) Wilson-LB(aarah TERBALIK) >= invertWlb (default 0.55)  [arah mentah SIGNIFIKAN salah]
+     (3) terkonfirmasi di DUA paruh waktu (kedua paruh: flipped-WR >= 0.5)
+     (4) cakupan union <= invertCovCap (default 0.4)
+   Default: kosong bila tak ada bukti -> TIDAK membalik apa pun. */
+function keyInvert(rows, opts = {}) {
+  const minN = opts.invertMinN || 40, wlb = opts.invertWlb != null ? opts.invertWlb : 0.55;
+  const maxCtx = opts.invertMax || 3;
+  const covCap = opts.invertCovCap != null ? opts.invertCovCap : 0.4;
+  const groups = {};
+  for (const r of rows) { if (r.won == null || !r.symbol || !r.interval) continue; const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r); }
+  const flipWR = (a) => a.length ? 1 - (a.reduce((t, r) => t + r.won, 0) / a.length) : 0;
+  const matchCtx = (c, r) => {
+    if (c.f === "dir") return r.dir === c.v;
+    if (c.f === "grade") return r.grade === c.v;
+    if (c.f === "hourWIB") { const h = Math.floor(((r.t0 + 7 * 3600) % 86400) / 3600); return h >= c.lo && h < c.hi; }
+    const x = r[c.f]; return x != null && x >= c.lo && x < c.hi;
+  };
+  const out = {};
+  for (const k of Object.keys(groups)) {
+    const a = groups[k].slice().sort((x, y) => (x.t0 || 0) - (y.t0 || 0));
+    const cands = [];
+    const add = (ctx, s) => {
+      if (s.length < minN) return;
+      const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0);
+      const lbFlip = wilson(s.length - w, s.length).lo;      // LB utk arah TERBALIK
+      if (lbFlip < wlb) return;
+      const h = Math.floor(s.length / 2);
+      if (h > 0) { const older = s.slice(0, h), newer = s.slice(s.length - h); if (flipWR(older) < 0.5 || flipWR(newer) < 0.5) return; }
+      cands.push(Object.assign({ n: s.length, wr: +(w / s.length).toFixed(4), flipWR: +flipWR(s).toFixed(4), lbFlip: +lbFlip.toFixed(4) }, ctx));
+    };
+    for (const { f, bins } of RECLAIM_FEATS) for (const [lo, hi] of bins) add({ f, lo, hi }, a.filter((r) => r[f] != null && r[f] >= lo && r[f] < hi));
+    for (const [lo, hi] of RECLAIM_HOURS) add({ f: "hourWIB", lo, hi }, a.filter((r) => { const h = Math.floor(((r.t0 + 7 * 3600) % 86400) / 3600); return h >= lo && h < hi; }));
+    for (const f of ["dir", "grade"]) { const vals = {}; for (const r of a) { const v = r[f]; if (v == null) continue; (vals[v] = vals[v] || []).push(r); } for (const v of Object.keys(vals)) add({ f, v }, vals[v]); }
+    cands.sort((x, y) => y.lbFlip - x.lbFlip);
+    const sel = [];
+    for (const c of cands) {
+      if (sel.length >= maxCtx) break;
+      const trial = a.filter((r) => sel.some((s) => matchCtx(s, r)) || matchCtx(c, r));
+      if (a.length && trial.length / a.length > covCap) continue;
+      sel.push(c);
+    }
+    out[k] = sel;
+  }
+  return out;
+}
+
 /* ---------- VETO THRESHOLD PER coin×TF (dari data per key, bukan global) ----------
    Cari ambang "no-edge" utk key ini: rewardMin/liqMin (monoton) + rentang rsi/vol yg buruk.
    Tujuannya: filter ditentukan PER coin & durasi, tidak digeneralisir. */
@@ -447,6 +497,7 @@ function keyVetoes(rows, opts = {}) {
   const out = {};
   const minAllowedCov = opts.minAllowedCov != null ? opts.minAllowedCov : 0.3;   // "lamin produksi" per key
   const reclaimMap = keyReclaim(rows, opts);
+  const invertMap = keyInvert(rows, opts);
   const inRanges = (v, ranges) => v != null && (ranges || []).some(([lo, hi]) => v >= lo && v < hi);
   const allowFrac = (a, rmin, lmin, rb, vb) => {
     const A = a.filter((r) => !inRanges(r.rsi, rb) && !inRanges(r.volRel2, vb) && (rmin <= 0 || (r.gapPct != null && r.gapPct >= rmin)) && (lmin <= 0 || (r.liqRatio != null && r.liqRatio >= lmin)));
@@ -471,7 +522,7 @@ function keyVetoes(rows, opts = {}) {
     out[k] = { n: a.length, rewardMin, liqMin, rsiBad: rsiR.ranges, volBad: volR.ranges,
       rsiFailOpen: rsiR.failOpen, volFailOpen: volR.failOpen,
       rsiCov: +rsiR.cov.toFixed(3), volCov: +volR.cov.toFixed(3),
-      allowFrac: +frac.toFixed(3), snowball, reclaim: reclaimMap[k] || [] };
+      allowFrac: +frac.toFixed(3), snowball, reclaim: reclaimMap[k] || [], invert: invertMap[k] || [] };
   }
   return { keys: out, thr, minN, minAllowedCov };
 }

@@ -215,7 +215,9 @@ function computeSignal(o) {
   // Learner per-coin memvalidasi konteks ini (Wilson-LB + OOS). Hanya MENAIKKAN grade (memperkuat
   // produksi sinyal), BUKAN flip & BUKAN override veto. Kosong bila key belum punya bukti.
   let confirmed = null;
-  if (!flatReason && (currentDir === "up" || currentDir === "down") && Array.isArray(P.confirm) && P.confirm.length) {
+  // GUARD ANTI-KONFLIK: jangan terapkan confirm bila arah sudah di-INVERT (konteks confirm dilatih
+  // pada arah MENTAH; mengaplikasikannya ke arah terbalik akan salah arti).
+  if (!flatReason && !inverted && (currentDir === "up" || currentDir === "down") && Array.isArray(P.confirm) && P.confirm.length) {
     const _of = (typeof FLOW !== "undefined" && FLOW.sessionOFI) ? FLOW.sessionOFI(sym, t0, nowSec) : null;
     const _al = align || {};
     const _mAlign = ["5m", "15m", "1h"].filter((t) => _al[t] === currentDir).length;
@@ -285,7 +287,9 @@ function computeSignal(o) {
   // ===== RECLAIM: konteks "tanpa sinyal" yang NYATA WIN (validasi Wilson-LB learner) -> ON-kan kembali.
   // Meng-override veto/tier HANYA bila arah ada & bukan liqLow. Menyeimbangkan veto agar produksi tak menutup.
   let reclaim = null;
-  if (!accepted && currentDir && !liqLow && Array.isArray(P.reclaim) && P.reclaim.length) {
+  // GUARD ANTI-KONFLIK: reclaim (termasuk part `dir`) juga dilatih pada arah MENTAH -> jangan
+  // terapkan saat arah sudah di-INVERT.
+  if (!accepted && !inverted && currentDir && !liqLow && Array.isArray(P.reclaim) && P.reclaim.length) {
     const _v = { rsi, volRel2, gapPct: gateNow, surprise, histStrength: histTrend.strength, hourWIB: wibH };
     for (const c of P.reclaim) {
       if (c.f === "dir") { if (currentDir === c.v) reclaim = c; }

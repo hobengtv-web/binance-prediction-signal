@@ -107,9 +107,13 @@ function computeSignal(o) {
   // Uji ketat (data nyata, 6 hari): binning -> RSI <40 / >=70 = 51–57% (buruk); RSI 40–70 = 67–80%
   // (60–70 justru 80%). Uji statistik z=2,18 (≈95% signifikan), konsisten di dua paruh waktu.
   // rsi null (data 5m kosong) -> filter dilewati (jangan blokir karena data hilang). Env RSI_MIN/RSI_MAX.
+  // DIMATIKAN (Opsi 1, uji 6-hari): filter rsiOK 40-70 ternyata OVERFIT (n kecil) & BERTENTANGAN
+  // dengan veto-rsi learner. Data penuh: aturan learner (mis. ETH_5m RSI>=70, WR 55,1%) mengalahkan
+  // rsiOK 40-70 (WR 47,6%). RSI kini sepenuhnya diatur veto-rsi learner (per-koin). Konstanta disimpan
+  // hanya utk referensi/observabilitas.
   const RSI_MIN = Number(process.env.RSI_MIN != null ? process.env.RSI_MIN : 40);
   const RSI_MAX = Number(process.env.RSI_MAX != null ? process.env.RSI_MAX : 70);
-  const rsiOK = (rsi == null) || (rsi >= RSI_MIN && rsi < RSI_MAX);
+  const rsiOK = true;   // NONAKTIF (jangan blokir) — lihat catatan di atas.
   // ===== RECORDER INDIKATOR TAMBAHAN (untuk uji jendela panjang nanti) =====
   // EMA9/EMA21 (crossover), MACD (12/26/9), dan pola candle 5m terakhir — semua dari candle 5m yang
   // SUDAH SELESAI (tanpa lookahead). Direkam ke ledger agar bisa diuji tanpa menunggu 30 hari lagi.

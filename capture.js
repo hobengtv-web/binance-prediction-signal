@@ -348,7 +348,7 @@ function computeSignal(o) {
   // Backtest OOS: flat-noise & rsi<40 -> +42%/trade. Hanya bila env FLAT_ENTRY=1 dan key lolos gate flat ($).
   let flatEntry = false;
   if (process.env.FLAT_ENTRY === "1" && flatReason === "flat-noise" && (currentDir === "up" || currentDir === "down")
-      && !liqLow && rsi != null && rsi < Number(process.env.FLAT_ENTRY_RSI || 40) && (P.flatOk !== false)) {
+      && !liqLow && rsi != null && rsi < Number(process.env.FLAT_ENTRY_RSI || 40) && P.flatOk === true) {
     flatEntry = true; accepted = true;
   }
   return {

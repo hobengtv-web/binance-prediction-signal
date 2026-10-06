@@ -632,6 +632,14 @@ function keyVetoes(rows, opts = {}) {
       flatEv: (function () { const f = flatEvByKey[k] || []; return f.length ? { n: f.length, meanPnl: +mean(f).toFixed(2) } : { n: 0, meanPnl: null }; })(),
       flatOk: (function () { const f = flatEvByKey[k] || []; return f.length >= (opts.flatEvN || 20) && mean(f) > 0; })() };
   }
+  // REKAM SEMUA KEY: sertakan key yg HANYA punya baris flat (tanpa baris tradeable) agar gate flat-nya
+  // tetap dipelajari/di-update (key berpotensi flat-entry meski belum ada sinyal U/D).
+  for (const k of Object.keys(flatEvByKey)) {
+    if (out[k]) continue;
+    const f = flatEvByKey[k];
+    out[k] = { n: 0, flatOnly: true, rewardMin: 0, liqMin: 0, rsiBad: [], volBad: [], reclaim: [], invert: [], confirm: [],
+      flatEv: { n: f.length, meanPnl: +mean(f).toFixed(2) }, flatOk: f.length >= (opts.flatEvN || 20) && mean(f) > 0 };
+  }
   return { keys: out, thr, minN, minAllowedCov };
 }
 

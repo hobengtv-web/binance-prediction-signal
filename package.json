@@ -4,6 +4,8 @@
   "private": true,
   "description": "Binance prediction signal (BTC/ETH) with candle projection + TradingView-style chart",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "exp": "node backtest/exp_gate.js",
+    "exp:remote": "node backtest/exp_gate.js --remote --save"
   }
 }

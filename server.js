@@ -338,7 +338,8 @@ const MODEL_CUR = path.join(MODEL_DIR, "current");
 const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
 const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
 const GATES_DEF = require("./gates.js");
-const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json" };
+const EXP_GATE = require("./exp-gate.js");
+const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json", exp: "exp.json" };
 let gatesMeta = { mode: GATES_DEF.BOOTSTRAP.mode, promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
 
@@ -458,6 +459,8 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     write("lessons.json", { generated: new Date().toISOString(), version: ver, byKey: lessonsMap });
     write("learn_pnl.json", { generated: new Date().toISOString(), version: ver, byKey: pnlMap });
     write("meta.json", { version: ver, promotedAt: new Date().toISOString(), trigger, byKey: metaMap });
+    // ===== GATE EKSPERIMENTAL (OBSERVASIONAL) — tidak mengubah accepted/reject produksi =====
+    try { write("exp.json", EXP_GATE.evaluate(records)); } catch (e) { console.log("[EXP] gagal evaluasi:", e.message); }
     try {
       const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 25), thr: Number(process.env.VETO_WR_THR || 0.50), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2), offCap: Number(process.env.VETO_HOUR_OFF_CAP || 0.5), pnlBad: Number(process.env.VETO_PNL_BAD != null ? process.env.VETO_PNL_BAD : -2) });
       const kv = LEARNER.keyVetoes(rows, { thr: Number(process.env.VETO_WR_THR || 0.50), minN: Number(process.env.VETO_MIN_N || 25), covCap: Number(process.env.VETO_COV_CAP || 0.6), minAllowedN: Number(process.env.VETO_MIN_ALLOWED_N || 0), minAllowedCov: Number(process.env.VETO_MIN_ALLOWED_COV || 0.3), reclaimMinN: Number(process.env.VETO_RECLAIM_MIN_N || 30), reclaimWlb: Number(process.env.VETO_RECLAIM_WLB || 0.52), reclaimMax: Number(process.env.VETO_RECLAIM_MAX || 4), reclaimCovCap: Number(process.env.VETO_RECLAIM_COV || 0.4), pnlBad: Number(process.env.VETO_PNL_BAD != null ? process.env.VETO_PNL_BAD : -2), invertMinN: Number(process.env.INVERT_MIN_N || 25), invertWlb: Number(process.env.INVERT_WLB || 0.52), invertMax: Number(process.env.INVERT_MAX || 3), invertCovCap: Number(process.env.INVERT_COV || 0.4), confirmMinN: Number(process.env.CONFIRM_MIN_N || 40), confirmWlb: Number(process.env.CONFIRM_WLB || 0.52), confirmMax: Number(process.env.CONFIRM_MAX || 3), confirmCovCap: Number(process.env.CONFIRM_COV || 0.6), keyEvGate: process.env.KEY_EV_GATE === "1", keyEvN: Number(process.env.KEY_EV_N || 20), keyEvMin: Number(process.env.KEY_EV_MIN || 0), keyEvWin: Number(process.env.KEY_EV_WIN || 40), flatEvN: Number(process.env.FLAT_EV_N || 20) });
@@ -819,6 +822,12 @@ http.createServer(async (req, res) => {
   if (u.pathname === "/api/engine") {
     res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
     res.end(JSON.stringify(engine.status()));
+    return;
+  }
+  // Gate eksperimental (observasional): perbandingan cohort vs gate produksi. Diperbarui tiap refit.
+  if (u.pathname === "/api/exp") {
+    res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+    res.end(JSON.stringify(readModelPart("exp") || { note: "belum ada; jalankan /api/model/refit" }));
     return;
   }
 

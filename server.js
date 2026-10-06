@@ -339,6 +339,7 @@ const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
 const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
 const GATES_DEF = require("./gates.js");
 const EXP_GATE = require("./exp-gate.js");
+const EXT = require("./ext-features.js");   // sumber data eksternal (Batch 1) — observasional
 const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json", exp: "exp.json" };
 let gatesMeta = { mode: GATES_DEF.BOOTSTRAP.mode, promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
@@ -569,6 +570,11 @@ function refreshVeto(tag) {
 }
 setTimeout(() => refreshVeto("awal"), 15000);
 setInterval(() => refreshVeto("periodik"), VETO_CHECK_MIN * 60 * 1000);
+// Sumber data EKSTERNAL (Batch 1): refresh berkala ke cache (dipakai recorder sig.ext + /api/ext-probe).
+const EXT_REFRESH_MS = Number(process.env.EXT_REFRESH_MS || 20000);
+setTimeout(() => { EXT.refreshAll().then(() => console.log(`[EXT] refresh awal ${EXT.probe().lastMs}ms`)).catch(() => {}); }, 8000);
+setInterval(() => { EXT.refreshAll().catch(() => {}); }, EXT_REFRESH_MS);
+console.log(`[EXT] refresh data eksternal tiap ${EXT_REFRESH_MS / 1000}s`);
 console.log(`[VETO] cek jam OFF tiap ${VETO_CHECK_MIN} menit (buka cepat bila jam membaik >=${Number(process.env.VETO_RECENT_WIN || 2)}/${Number(process.env.VETO_RECENT_N || 3)} sesi terakhir)`);
 setTimeout(() => { try { const l = lastRefitTime(); if (l) console.log(`[REFIT] re-fit terakhir: ${new Date(l).toISOString()}`); } catch (_) {} }, 3000);
 
@@ -836,6 +842,12 @@ http.createServer(async (req, res) => {
   if (u.pathname === "/api/exp") {
     res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
     res.end(JSON.stringify(readModelPart("exp") || { note: "belum ada; jalankan /api/model/refit" }));
+    return;
+  }
+  // Sumber data EKSTERNAL (Batch 1): status reachability + nilai terkini (untuk uji kelayakan & lift).
+  if (u.pathname === "/api/ext-probe") {
+    res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+    res.end(JSON.stringify(EXT.probe()));
     return;
   }
 

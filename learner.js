@@ -89,6 +89,7 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       trend: (s.learn && s.learn.trend && s.learn.trend !== "na") ? s.learn.trend : "na",
       dir, gap: gapRaw,
       flat: !!(s.skipped),                    // sesi flat (flat-price/flat-noise) — direkam & DIPELAJARI
+      skipped: (s.skipped || null),           // 'flat-noise'/'flat-price'/null (utk filter flat-entry)
       silent: !!s.silent,                     // arah "silent" (ditebak utk sesi flat)
       // ===== KONFIRMASI ARAH (backtest 2026-10): tren multi-TF + OFI memperkuat arah mentah =====
       // mAlign = berapa TF (5m/15m/1h) yg trend-nya SEARAH dir. mOfiAgree = OFI mendukung dir.
@@ -582,6 +583,9 @@ function keyConfirm(rows, opts = {}) {
    Tujuannya: filter ditentukan PER coin & durasi, tidak digeneralisir. */
 function keyVetoes(rows, opts = {}) {
   const thr = opts.thr != null ? opts.thr : 0.50, minN = opts.minN || 25;
+  // per-key EV sesi FLAT-NOISE (utk FLAT_ENTRY gate) — dihitung dari baris flat-noise ber-$.
+  const flatEvByKey = {};
+  for (const r of rows) { if (r.skipped !== "flat-noise" || r.pnlReal == null) continue; const k = r.symbol + "_" + r.interval; (flatEvByKey[k] = flatEvByKey[k] || []).push(r.pnlReal); }
   rows = rows.filter((r) => !r.flat);   // veto/reclaim/invert/confirm = keputusan trade -> hanya sesi tradeable
   const groups = {};
   for (const r of rows) { if (r.won == null || !r.symbol || !r.interval) continue; const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r); }
@@ -624,7 +628,9 @@ function keyVetoes(rows, opts = {}) {
       rsiFailOpen: rsiR.failOpen, volFailOpen: volR.failOpen,
       rsiCov: +rsiR.cov.toFixed(3), volCov: +volR.cov.toFixed(3),
       allowFrac: +frac.toFixed(3), snowball, reclaim: reclaimMap[k] || [], invert: invertMap[k] || [], confirm: confirmMap[k] || [],
-      keyEv: keyEvInfo, keyEvGated: keyEvGated };
+      keyEv: keyEvInfo, keyEvGated: keyEvGated,
+      flatEv: (function () { const f = flatEvByKey[k] || []; return f.length ? { n: f.length, meanPnl: +mean(f).toFixed(2) } : { n: 0, meanPnl: null }; })(),
+      flatOk: (function () { const f = flatEvByKey[k] || []; return f.length >= (opts.flatEvN || 20) && mean(f) > 0; })() };
   }
   return { keys: out, thr, minN, minAllowedCov };
 }

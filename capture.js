@@ -344,18 +344,25 @@ function computeSignal(o) {
     power = { pct: Math.round(pct), parts, accepted: !!accepted, allMet: metN === parts.length };
   } catch (_) {}
 
+  // ===== FLAT_ENTRY: entry utk sesi TANPA signal U/D (flat-noise) dgn filter rsi =====
+  // Backtest OOS: flat-noise & rsi<40 -> +42%/trade. Hanya bila env FLAT_ENTRY=1 dan key lolos gate flat ($).
+  let flatEntry = false;
+  if (process.env.FLAT_ENTRY === "1" && flatReason === "flat-noise" && (currentDir === "up" || currentDir === "down")
+      && !liqLow && rsi != null && rsi < Number(process.env.FLAT_ENTRY_RSI || 40) && (P.flatOk !== false)) {
+    flatEntry = true; accepted = true;
+  }
   return {
     ok: true,
-    skipped: flatReason || undefined,
+    skipped: (flatReason && !flatEntry) ? flatReason : undefined,
     signal: {
       asset: sym, interval: tf, t0, lock,
       power,
-      dir: currentDir, silent: silentDir || undefined, mode, conf,
-      grade: grade || null, accepted: flatReason ? false : accepted, reject: flatReason ? null : reject, thresholdsOK: !!thOK,
+      dir: currentDir, silent: silentDir || undefined, mode, conf, flatEntry: flatEntry || undefined,
+      grade: grade || null, accepted: (flatReason && !flatEntry) ? false : accepted, reject: (flatReason && !flatEntry) ? null : reject, thresholdsOK: !!thOK,
       reclaim: (reclaim && !flatReason) ? { f: reclaim.f, v: reclaim.v, lo: reclaim.lo, hi: reclaim.hi, n: reclaim.n, lb: reclaim.lb } : null,
       invert: (inverted && !flatReason) ? { and: inverted.and, n: inverted.n, flipWR: inverted.flipWR, lbFlip: inverted.lbFlip } : null,
       confirm: (confirmed && !flatReason) ? { and: confirmed.and, n: confirmed.n, wr: confirmed.wr, lb: confirmed.lb, from: confirmed.from || null, to: confirmed.to || grade } : null,
-      skipped: flatReason || null,
+      skipped: (flatReason && !flatEntry) ? flatReason : null,
       volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5),
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
       ind,   // RECORDER: EMA9/EMA21 (crossover) + MACD + pola candle 5m — untuk uji jendela panjang

@@ -187,7 +187,10 @@ function computeSignal(o) {
   const liqLow = typ5m > 0 && proj < floor;
   const liqRatio = typ5m > 0 ? proj / typ5m : 1;
   const thOK = GATES_DEF.applyThresholds({ volRel2, surprise, liqRatio, gapPct: gateNow, histStrength: histTrend.strength, rsi }, profile.thresholds);
-  let accepted0 = !!grade && !liqLow && thOK && rsiOK;
+  // MODE AGRESIF (env GATE_REQUIRE_GRADE=0): buang syarat grade -> terima bila tidak $-diveto.
+  // Backtest (hold-to-settle): "veto-saja" compound paling tinggi (bal 382 vs 238 selektif).
+  const REQUIRE_GRADE = process.env.GATE_REQUIRE_GRADE !== "0";
+  let accepted0 = (REQUIRE_GRADE ? !!grade : true) && !liqLow && thOK && rsiOK;
   // ===== VETO no-edge: buang cohort WR~50% (reward kecil, RSI 30-40, vol choppy, jam buruk, liqud tipis)
   let veto = null;
   const pv = { reward: false, rsi: false, vol: false, hour: false, liq: false, rewardMin: 0, liqMin: 0, rsiBadRanges: null, volBadRanges: null, offHours: null }; // KOSMETIK: salinan status kriteria utk power bar
@@ -241,7 +244,7 @@ function computeSignal(o) {
     if (confirmed) {
       const _prev = grade;
       grade = grade === "STRONG" ? "STRONG" : grade === "GOOD" ? "STRONG" : grade === "FAIR" ? "GOOD" : "FAIR";
-      accepted0 = !!grade && !liqLow && thOK && rsiOK;
+      accepted0 = (REQUIRE_GRADE ? !!grade : true) && !liqLow && thOK && rsiOK;
       if (grade !== _prev) confirmed = Object.assign({}, confirmed, { from: _prev || null, to: grade });
     }
   }

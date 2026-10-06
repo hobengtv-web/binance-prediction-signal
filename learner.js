@@ -288,7 +288,7 @@ function hourVetoes(rows, opts = {}) {
     // FAIL-OPEN: jam OFF = jam TERBURUK saja, dibatasi offCap (default <=50% jam yg bisa diputuskan).
     // Cegah "OFF 20/24 jam" (over-block) yang membuat key nyaris tanpa sinyal. OBJEKTIF $: jam dgn
     // data $ positif JANGAN di-OFF-kan.
-    const cand = stats.filter((s) => (s.wr < thr && !s.improving && !(s.pnlN >= 5 && s.pnl > 0)) || (s.pnlN >= 5 && s.pnl != null && s.pnl < pnlBadThr)).sort((a, b) => {
+    const cand = stats.filter((s) => (s.wr < thr && !s.improving && !(s.pnlN >= 4 && s.pnl > 0)) || (s.pnlN >= 4 && s.pnl != null && s.pnl < pnlBadThr)).sort((a, b) => {
       const pa = a.pnl == null ? Infinity : a.pnl, pb = b.pnl == null ? Infinity : b.pnl;
       return pa !== pb ? pa - pb : a.wr - b.wr;
     });
@@ -378,8 +378,8 @@ function pickBadRanges(bins, valOf, thr, minN, opts, allRows) {
     // OBJEKTIF $ (utama): bin BURUK bila (a) WR<thr & $ tidak positif, ATAU (b) $ JELAS NEGATIF
     // walau WR-nya bagus (mis. BNB_5m pasar ramai: WR 0,53 tapi $ -44%). Simpan $ demi compounding.
     const pnlBadThr = opts.pnlBad != null ? opts.pnlBad : -2;
-    const pnlBad = ps.length >= 5 && pm != null && pm < pnlBadThr;
-    if ((w < thr && !(ps.length >= 5 && pm > 0)) || pnlBad) cand.push({ lo, hi, n: s.length, wr: w, pnl: pm != null ? +pm.toFixed(2) : null });
+    const pnlBad = ps.length >= 4 && pm != null && pm < pnlBadThr;
+    if ((w < thr && !(ps.length >= 4 && pm > 0)) || pnlBad) cand.push({ lo, hi, n: s.length, wr: w, pnl: pm != null ? +pm.toFixed(2) : null });
   }
   if (!cand.length) return { ranges: [], cov: 0, allowedN: total, failOpen: false };
   cand.sort((x, y) => {                                            // $-terburuk dulu, lalu WR-terburuk
@@ -542,7 +542,12 @@ function keyConfirm(rows, opts = {}) {
       if (lb < wlb) return;
       const h = Math.floor(s.length / 2);
       if (h > 0) { const older = s.slice(0, h), newer = s.slice(s.length - h); const wrO = older.reduce((t, r) => t + r.won, 0) / older.length, wrN = newer.reduce((t, r) => t + r.won, 0) / newer.length; if (wrO < 0.5 || wrN < 0.5) return; }
-      cands.push({ and: plist, n: s.length, wr: +(w / s.length).toFixed(4), lb: +lb.toFixed(4) });
+      // OBJEKTIF $ (WAJIB): jangan CONFIRM konteks yg $-NYATA negatif walau WR bagus (mis. ETH_15m OFI
+      // setuju: WR 53% tapi mean $ -1.8%; vol>=1.5: -14.7%). Boost grade hanya bila $ tidak merugi.
+      const ps = s.filter((r) => r.pnlReal != null);
+      const pm = ps.length ? mean(ps.map((r) => r.pnlReal)) : null;
+      if (ps.length >= 15 && !(pm > 0)) return;
+      cands.push({ and: plist, n: s.length, wr: +(w / s.length).toFixed(4), lb: +lb.toFixed(4), pnlN: ps.length, pnl: pm != null ? +pm.toFixed(3) : null });
     };
     for (const A of parts) consider([A.p], A.rows);
     for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {

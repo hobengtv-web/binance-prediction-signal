@@ -612,10 +612,19 @@ function keyVetoes(rows, opts = {}) {
     let frac = allowFrac(a, rewardMin, liqMin, rsiR.ranges, volR.ranges);
     if (frac < minAllowedCov) { rsiR = { ranges: [], cov: 0, failOpen: true }; volR = { ranges: [], cov: 0, failOpen: true }; snowball = true; frac = allowFrac(a, rewardMin, liqMin, [], []); }
     if (frac < minAllowedCov) { rewardMin = 0; liqMin = 0; frac = allowFrac(a, 0, 0, [], []); }
+    // ===== PER-KEY $ EV GATE (rolling): blokir SELURUH key bila EV $ nyata-nya negatif.
+    // OOS-validated: fokus hanya key ber-edge (mis. BNB_5m/BTC_5m) menaikkan compounding ~2x.
+    const psKey = a.filter((r) => r.pnlReal != null);
+    const evN = opts.keyEvN != null ? opts.keyEvN : 20;
+    const evMin = opts.keyEvMin != null ? opts.keyEvMin : 0;
+    const evRows = psKey.slice(-(opts.keyEvWin || 40));   // jendela bergulir (default 40 sesi $ terakhir)
+    const keyEvInfo = evRows.length ? { n: evRows.length, meanPnl: +mean(evRows.map((r) => r.pnlReal)).toFixed(2) } : { n: 0, meanPnl: null };
+    const keyEvGated = !!opts.keyEvGate && evRows.length >= evN && keyEvInfo.meanPnl != null && keyEvInfo.meanPnl < evMin;
     out[k] = { n: a.length, rewardMin, liqMin, rsiBad: rsiR.ranges, volBad: volR.ranges,
       rsiFailOpen: rsiR.failOpen, volFailOpen: volR.failOpen,
       rsiCov: +rsiR.cov.toFixed(3), volCov: +volR.cov.toFixed(3),
-      allowFrac: +frac.toFixed(3), snowball, reclaim: reclaimMap[k] || [], invert: invertMap[k] || [], confirm: confirmMap[k] || [] };
+      allowFrac: +frac.toFixed(3), snowball, reclaim: reclaimMap[k] || [], invert: invertMap[k] || [], confirm: confirmMap[k] || [],
+      keyEv: keyEvInfo, keyEvGated: keyEvGated };
   }
   return { keys: out, thr, minN, minAllowedCov };
 }

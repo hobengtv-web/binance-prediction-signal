@@ -218,6 +218,8 @@ function computeSignal(o) {
     else if (vetoHours.indexOf(wibH) >= 0) veto = "veto-hour";
     else if ((P.liqMin || 0) > 0 && liqRatio < P.liqMin) veto = "veto-liq";
   }
+  // ===== PER-KEY $ EV GATE (rolling): blokir SELURUH key bila EV $ nyata-nya negatif =====
+  if (P.keyEvGated) veto = veto || "key-ev";
   // ===== INVERT: konteks yg arah mentahnya TERBUKTI biasanya SALAH -> BALIK arah (up<->down) =====
   // Diterapkan SEBELUM gate, hanya bila konteks tervalidasi ketat (Wilson-LB flipped >=0.55, 2 paruh, n>=40).
   let inverted = null;

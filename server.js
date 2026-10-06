@@ -869,7 +869,7 @@ http.createServer(async (req, res) => {
         && (r.sig.dir === "up" || r.sig.dir === "down" || r.sig.verdict === "up" || r.sig.verdict === "down")
         && r.sig.accepted !== false);
       const trim = (r) => ({ k: r.k, t0: r.t0, asset: r.asset, interval: r.interval,
-        sig: r.sig ? { verdict: r.sig.verdict, dir: r.sig.dir, accepted: r.sig.accepted, grade: r.sig.grade } : null,
+        sig: r.sig ? { verdict: r.sig.verdict, dir: r.sig.dir, accepted: r.sig.accepted, grade: r.sig.grade, flatEntry: r.sig.flatEntry || null } : null,
         res: r.res ? { won: r.res.won, actual: r.res.actual, lock: r.res.lock, close: r.res.close, trade: r.res.trade } : null });
       res.end(JSON.stringify({ stats: st, records: arr.slice(-n).map(trim) }));
     } else {

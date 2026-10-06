@@ -883,7 +883,7 @@ function applyType() {
         rec.className = "signal-rec flat";
       } else {
         const dirWord = o.verdict === "up" ? "UP" : "DOWN";
-        rec.textContent = `Recommendation: ${dirWord}`;
+        rec.textContent = `Recommendation: ${dirWord}` + (o.flatEntry ? " · FLAT-ENTRY" : "");
         rec.className = "signal-rec " + (o.verdict === "up" ? "up" : o.verdict === "down" ? "down" : "flat");
       }
     }

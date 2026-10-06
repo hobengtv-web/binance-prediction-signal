@@ -424,8 +424,16 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       const incPnl = inc ? LEARNER.evalModelPnl(testNow, inc.gate.rules, inc.touch.rules) : null;
       const dec = LEARNER.shouldPromote({ metrics: Object.assign({}, candEval, { pnl: candPnl }) }, incEval ? { metrics: Object.assign({}, incEval, { pnl: incPnl }) } : null);
       const liveEval = dec.promote ? candEval : (incEval || candEval);
-      const applyBlockers = !!liveEval && (liveEval.coverage || 1) >= minApplyCov;
-      applyMap[key] = { apply: applyBlockers, coverage: liveEval ? liveEval.coverage : null, minApplyCov, note: applyBlockers ? "blocker diterapkan" : `cakupan ${(100 * (liveEval ? liveEval.coverage : 0)).toFixed(0)}% < ${(minApplyCov * 100).toFixed(0)}% -> blocker TIDAK diterapkan` };
+      // FIX inkonsistensi: apply HANYA bermakna bila memang ADA aturan blocker (gate/touch).
+      // Dulu apply=true walau suppress kosong -> panel mengklaim "blocker diterapkan" padahal no-op.
+      const gateRules = (cand.gate && cand.gate.suppress) || [];
+      const touchRules = (cand.touch && cand.touch.suppress) || [];
+      const hasBlockers = (gateRules.length + touchRules.length) > 0;
+      const applyBlockers = hasBlockers && !!liveEval && (liveEval.coverage || 1) >= minApplyCov;
+      applyMap[key] = { apply: applyBlockers, hasBlockers, nRules: gateRules.length + touchRules.length, coverage: liveEval ? liveEval.coverage : null, minApplyCov,
+        note: !hasBlockers ? "tak ada aturan blocker (model ambil-semua) -> blocker TIDAK diterapkan"
+          : applyBlockers ? "blocker diterapkan"
+          : `cakupan ${(100 * (liveEval ? liveEval.coverage : 0)).toFixed(0)}% < ${(minApplyCov * 100).toFixed(0)}% -> blocker TIDAK diterapkan` };
       const th = LEARNER.learnThresholds(kr);
       const gatesPromoted = !!(th.ok && th.beatsBaseline);
       // TIER LADDER per key (dimining) — menggantikan bootstrap global utk key ini.

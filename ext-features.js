@@ -69,14 +69,15 @@ async function fetchSym(k) {
   const lsr = await first([
     ["bnc-fapi", async () => { const g = await jget(FUT, `/futures/data/globalLongShortAccountRatio?symbol=${s}&period=5m&limit=1`); const t = await jget(FUT, `/futures/data/topLongShortPositionRatio?symbol=${s}&period=5m&limit=1`); return { lsrGlobal: Array.isArray(g) && g[0] ? num(g[0].longShortRatio) : null, lsrTop: Array.isArray(t) && t[0] ? num(t[0].longShortRatio) : null }; }],
     ["bybit", async () => { const d = await jget(BYBIT, `/v5/market/account-ratio?category=linear&symbol=${bs}&period=5min&limit=1`); const r = d.result && d.result.list && d.result.list[0]; return r ? { lsrGlobal: num(r.buyRatio) != null ? +(num(r.buyRatio) / (num(r.sellRatio) || 1)).toFixed(4) : null, lsrTop: null } : null; }],
-    ["okx", async () => { const d = await jget(OKX, `/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy=${k}&period=5m`); const r = d.data && d.data[0]; return r ? { lsrGlobal: num(r[1]), lsrTop: null } : null; }],
+    ["okx", async () => { const [g, t] = await Promise.all([jget(OKX, `/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy=${k}&period=5m`).catch(() => null), jget(OKX, `/api/v5/rubik/stat/contracts/top-trader-long-short-account-ratio?ccy=${k}&period=5m`).catch(() => null)]); const gr = g && g.data && g.data[0], tr = t && t.data && t.data[0]; if (!gr && !tr) return null; return { lsrGlobal: gr ? num(gr[1]) : null, lsrTop: tr ? num(tr[1]) : null }; }],
   ]);
   if (lsr.v) { out.lsrGlobal = lsr.v.lsrGlobal ?? null; out.lsrTop = lsr.v.lsrTop ?? null; }
   out.src.lsr = lsr.src;
 
   const tk = await first([
     ["bnc-fapi", async () => { const d = await jget(FUT, `/futures/data/takerlongshortRatio?symbol=${s}&period=5m&limit=1`); return Array.isArray(d) && d[0] ? num(d[0].buySellRatio) : null; }],
-    ["okx", async () => { const d = await jget(OKX, `/api/v5/rubik/stat/taker-volume?ccy=${k}&period=5m`); const r = d.data && d.data[0]; if (!r) return null; const sell = num(r[1]), buy = num(r[2]); return sell ? +(buy / sell).toFixed(4) : null; }],
+    ["okx-c", async () => { const d = await jget(OKX, `/api/v5/rubik/stat/taker-volume-contract?ccy=${k}&period=5m`); const r = d.data && d.data[0]; if (!r) return null; const sell = num(r[1]), buy = num(r[2]); return sell ? +(buy / sell).toFixed(4) : null; }],
+    ["okx-s", async () => { const d = await jget(OKX, `/api/v5/rubik/stat/taker-volume?ccy=${k}&period=5m`); const r = d.data && d.data[0]; if (!r) return null; const sell = num(r[1]), buy = num(r[2]); return sell ? +(buy / sell).toFixed(4) : null; }],
   ]);
   out.takerLS = tk.v; out.src.takerLS = tk.src;
 

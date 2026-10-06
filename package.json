@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "exp": "node backtest/exp_gate.js",
-    "exp:remote": "node backtest/exp_gate.js --remote --save"
+    "exp:remote": "node backtest/exp_gate.js --remote --save",
+    "ext:lift": "node backtest/ext_lift.js --remote"
   }
 }

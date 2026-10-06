@@ -15,6 +15,7 @@
    ============================================================================ */
 const LEARNER_BUCKETS = require("./learner.js").BUCKETS;
 const GATES_DEF = require("./gates.js");
+const EXP_GATE = require("./exp-gate.js");
 
 const VOL_TYPICAL = { BTC: 0.515, ETH: 8.22, BNB: 3.0 };
 const DUR_S = { "5m": 300, "15m": 900, "1h": 3600 };   // 1h ikut diproses server
@@ -377,6 +378,9 @@ function computeSignal(o) {
       // menampilkan angka yang SAMA, dan ikut terekam ke ledger/learner.
       ofi: FLOW.sessionOFI(sym, t0, nowSec),
       learn,
+      // Label gate EKSPERIMENTAL (observasional; tidak memengaruhi accepted/reject). Spec: EXPERIMENT.md
+      exp: (!flatReason && (currentDir === "up" || currentDir === "down"))
+        ? EXP_GATE.cohortOfSignal({ dir: currentDir, mv2, ind }, t0) : [],
     },
   };
 }

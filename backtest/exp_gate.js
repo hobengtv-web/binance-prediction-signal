@@ -37,10 +37,10 @@ async function load() {
   console.log(`record berarah+hasil: ${ev.rows}  (${(ev.range || {}).from || "-"} .. ${(ev.range || {}).to || "-"})`);
   if (!ev.rows) return;
 
-  console.log(`\n${"cohort".padEnd(22)} ${pad("n", 5)} ${pad("WR", 6)} ${pad("LB", 6)} ${pad("nOdds", 6)} ${pad("avgPx", 6)} ${pad("EVraw", 7)} ${pad("EV-5%", 7)} ${pad("eq5%", 8)}`);
+  console.log(`\n${"cohort".padEnd(22)} ${pad("n", 5)} ${pad("WR", 6)} ${pad("LB", 6)} ${pad("nOdds", 6)} ${pad("avgPx", 6)} ${pad("EVraw", 7)} ${pad("EVnet", 7)} ${pad("eqGross", 8)} ${pad("eqNet", 7)} ${pad("ddNet", 6)}`);
   for (const [name, s] of Object.entries(ev.cohorts)) {
     if (!s) { console.log(`${name.padEnd(22)} (kosong)`); continue; }
-    console.log(`${name.padEnd(22)} ${pad(s.n, 5)} ${pad(s.wr.toFixed(1) + "%", 6)} ${pad(s.lb.toFixed(1) + "%", 6)} ${pad(s.nOd, 6)} ${pad(fmt(s.avgPx), 6)} ${pad(fmt(s.ev, 3, true), 7)} ${pad(fmt(s.evNet5, 3, true), 7)} ${pad(fmt(s.eq, 1), 8)}`);
+    console.log(`${name.padEnd(22)} ${pad(s.n, 5)} ${pad(s.wr.toFixed(1) + "%", 6)} ${pad(s.lb.toFixed(1) + "%", 6)} ${pad(s.nOd, 6)} ${pad(fmt(s.avgPx), 6)} ${pad(fmt(s.ev, 3, true), 7)} ${pad(fmt(s.evNet, 3, true), 7)} ${pad(fmt(s.eq, 1), 8)} ${pad(fmt(s.netEq, 1), 7)} ${pad(fmt(s.netMaxDD, 1), 6)}`);
   }
 
   console.log(`\nwalk-forward WR 70/30 & EV ODDS 60/40:`);

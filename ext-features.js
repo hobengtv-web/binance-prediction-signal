@@ -111,14 +111,16 @@ function probe() { return { lastRefresh, lastMs, at: new Date().toISOString(), c
 
 // DEBUG: coba beberapa kandidat endpoint OKX rubik, kembalikan status + body mentah (untuk kalibrasi).
 async function debugOkx(ccy = "BTC") {
+  const os = OKX_SWAP[ccy] || "BTC-USDT-SWAP";
   const cands = [
-    `/api/v5/rubik/stat/taker-volume?ccy=${ccy}&period=5m`,
-    `/api/v5/rubik/stat/taker-volume-contract?ccy=${ccy}&period=5m`,
-    `/api/v5/rubik/stat/contracts/taker-volume?ccy=${ccy}&period=5m`,
-    `/api/v5/rubik/stat/contracts/top-trader-long-short-account-ratio?ccy=${ccy}&period=5m`,
-    `/api/v5/rubik/stat/contracts/top-trader-long-short-position-ratio?ccy=${ccy}&period=5m`,
+    `/api/v5/rubik/stat/taker-volume?ccy=${ccy}&period=5m&instType=SPOT`,
+    `/api/v5/rubik/stat/taker-volume?ccy=${ccy}&period=5m&instType=SWAP`,
+    `/api/v5/rubik/stat/taker-volume-contract?ccy=${ccy}&period=5m&instId=${os}`,
+    `/api/v5/rubik/stat/contracts/top-trader-long-short-account-ratio?ccy=${ccy}&period=5m&instType=SWAP`,
+    `/api/v5/rubik/stat/contracts/top-long-short-account-ratio?ccy=${ccy}&period=5m`,
     `/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy=${ccy}&period=5m`,
-    `/api/v5/rubik/stat/taker-volume?ccy=${ccy}&period=1H`,
+    `/api/v5/rubik/stat/contracts/position-ratio?ccy=${ccy}&period=5m`,
+    `/api/v5/rubik/stat/contracts/top-trader-long-short-position-ratio?ccy=${ccy}&period=5m&instType=SWAP`,
   ];
   const out = [];
   for (const p of cands) {

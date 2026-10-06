@@ -850,6 +850,14 @@ http.createServer(async (req, res) => {
     res.end(JSON.stringify(EXT.probe()));
     return;
   }
+  // DEBUG kalibrasi endpoint OKX (respons mentah) — dipakai untuk memperbaiki takerLS/lsrTop.
+  if (u.pathname === "/api/ext-debug") {
+    EXT.debugOkx(u.searchParams.get("ccy") || "BTC").then((r) => {
+      res.writeHead(200, Object.assign({ "Content-Type": "application/json" }, CORS));
+      res.end(JSON.stringify(r, null, 1));
+    }).catch((e) => { res.writeHead(500, CORS); res.end(JSON.stringify({ error: String(e) })); });
+    return;
+  }
 
   // favicon: sebagian browser masih meminta /favicon.ico secara otomatis. Layani dengan SVG
   // (Chrome/Safari menerima SVG di jalur ini) supaya console tidak penuh 404.

@@ -109,4 +109,23 @@ function get(sym) {
 }
 function probe() { return { lastRefresh, lastMs, at: new Date().toISOString(), cache }; }
 
-module.exports = { refreshAll, get, probe, fetchSym, SYMS };
+// DEBUG: coba beberapa kandidat endpoint OKX rubik, kembalikan status + body mentah (untuk kalibrasi).
+async function debugOkx(ccy = "BTC") {
+  const cands = [
+    `/api/v5/rubik/stat/taker-volume?ccy=${ccy}&period=5m`,
+    `/api/v5/rubik/stat/taker-volume-contract?ccy=${ccy}&period=5m`,
+    `/api/v5/rubik/stat/contracts/taker-volume?ccy=${ccy}&period=5m`,
+    `/api/v5/rubik/stat/contracts/top-trader-long-short-account-ratio?ccy=${ccy}&period=5m`,
+    `/api/v5/rubik/stat/contracts/top-trader-long-short-position-ratio?ccy=${ccy}&period=5m`,
+    `/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy=${ccy}&period=5m`,
+    `/api/v5/rubik/stat/taker-volume?ccy=${ccy}&period=1H`,
+  ];
+  const out = [];
+  for (const p of cands) {
+    try { const r = await fetch("https://www.okx.com" + p, { signal: AbortSignal.timeout(6000) }); const t = await r.text(); out.push({ p, status: r.status, body: t.slice(0, 260) }); }
+    catch (e) { out.push({ p, status: 0, err: String((e && e.message) || e) }); }
+  }
+  return out;
+}
+
+module.exports = { refreshAll, get, probe, fetchSym, debugOkx, SYMS };

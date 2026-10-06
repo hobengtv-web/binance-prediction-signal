@@ -1,94 +1,109 @@
 /* ============================================================================
    ext-features.js — Sumber data EKSTERNAL (Batch 1) untuk mempertajam/memperbanyak sinyal.
-   OBSERVASIONAL dulu: hanya di-REKAM ke ledger (sig.ext) + diprobe via /api/ext-probe.
-   Tidak mengubah accepted/reject sampai ada bukti lift (pola recorder -> backtest -> gate).
+   OBSERVASIONAL dulu: direkam ke ledger (sig.ext) + diprobe via /api/ext-probe.
+   Tidak mengubah accepted/reject sampai ada bukti lift.
 
-   Fitur (per simbol BTC/ETH/BNB):
-     - funding      : lastFundingRate (fapi premiumIndex)
-     - basisPct     : (markPrice-indexPrice)/indexPrice*100  (perp vs index)
-     - oi           : openInterest (kontrak)
-     - oiDelta5m    : (OI_now - OI_5m_lalu)/OI_5m_lalu*100   (openInterestHist)
-     - lsrGlobal    : globalLongShortAccountRatio (retail)
-     - lsrTop       : topLongShortPositionRatio  (top trader)
-     - takerLS      : takerlongshortRatio.buySellRatio
-     - depthImb     : (ΣbidNotional-ΣaskNotional)/(Σbid+Σask)  depth spot 20 level
-   Endpoint FAIL-OPEN: field null bila sumber tidak dapat diakses (mis. fapi geo-block).
+   MULTI-SUMBER (fallback berurutan) karena fapi.binance.com ter-geo-block (HTTP 451) di Railway:
+     funding/basis : Binance fapi premiumIndex -> Bybit tickers -> OKX (funding-rate+mark-price)
+     OI            : Binance openInterest -> Bybit open-interest -> OKX open-interest
+     oiDelta5m     : Binance openInterestHist -> Bybit open-interest(limit2,5min)
+     LSR           : Binance global/top -> Bybit account-ratio -> OKX rubik long-short
+     takerLS       : Binance takerlongshortRatio -> OKX taker-volume
+     depthImb      : Binance spot depth -> Bybit orderbook -> OKX books
+   Fail-open: nilai null bila semua sumber gagal; menyimpan `src` per fitur.
    ============================================================================ */
+const SPOT = ["https://data-api.binance.vision", "https://api.binance.com", "https://api1.binance.com"];
 const FUT = ["https://fapi.binance.com"];
-const SPOT = ["https://data-api.binance.vision", "https://api.binance.com", "https://api.binance.com", "https://api1.binance.com", "https://api2.binance.com"];
+const BYBIT = ["https://api.bybit.com"];
+const OKX = ["https://www.okx.com"];
 const SYMS = { BTC: "BTCUSDT", ETH: "ETHUSDT", BNB: "BNBUSDT" };
+const OKX_SWAP = { BTC: "BTC-USDT-SWAP", ETH: "ETH-USDT-SWAP", BNB: "BNB-USDT-SWAP" };
+const OKX_SPOT = { BTC: "BTC-USDT", ETH: "ETH-USDT", BNB: "BNB-USDT" };
+const BY_SYM = { BTC: "BTCUSDT", ETH: "ETHUSDT", BNB: "BNBUSDT" };
 
 async function jget(hosts, path, ms = 6000) {
   let last;
   for (const h of hosts) {
-    const t0 = Date.now();
-    try {
-      const r = await fetch(h + path, { signal: AbortSignal.timeout(ms) });
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return { data: await r.json(), ms: Date.now() - t0, host: h };
-    } catch (e) { last = e; }
+    try { const r = await fetch(h + path, { signal: AbortSignal.timeout(ms) }); if (!r.ok) throw new Error("HTTP " + r.status); return await r.json(); }
+    catch (e) { last = e; }
   }
   throw last || new Error("fetch failed");
 }
 const num = (x) => (x != null && isFinite(Number(x)) ? Number(x) : null);
+// coba serangkaian sumber, kembalikan hasil pertama yang non-null
+async function first(srcs) {
+  const errs = [];
+  for (const [name, fn] of srcs) {
+    try { const v = await fn(); if (v != null && v !== undefined) return { v, src: name }; }
+    catch (e) { errs.push(name + ":" + String((e && e.message) || e).slice(0, 24)); }
+  }
+  return { v: null, src: null, errs };
+}
 
 async function fetchSym(k) {
-  const s = SYMS[k];
-  const out = { sym: k, ok: true, errors: [], t: Date.now() };
-  // premiumIndex: funding + basis
-  try {
-    const { data } = await jget(FUT, `/fapi/v1/premiumIndex?symbol=${s}`);
-    out.funding = num(data.lastFundingRate);
-    const mk = num(data.markPrice), ix = num(data.indexPrice);
-    out.basisPct = (mk != null && ix) ? +(((mk - ix) / ix) * 100).toFixed(5) : null;
-  } catch (e) { out.errors.push("premium:" + (e && e.message)); }
-  // openInterest now + hist 5m
-  try { const { data } = await jget(FUT, `/fapi/v1/openInterest?symbol=${s}`); out.oi = num(data.openInterest); }
-  catch (e) { out.errors.push("oi:" + (e && e.message)); }
-  try {
-    const { data } = await jget(FUT, `/futures/data/openInterestHist?symbol=${s}&period=5m&limit=2`);
-    if (Array.isArray(data) && data.length >= 2) {
-      const now = num(data[data.length - 1].sumOpenInterest), prev = num(data[0].sumOpenInterest);
-      out.oiDelta5m = (now != null && prev) ? +(((now - prev) / prev) * 100).toFixed(4) : null;
-    }
-  } catch (e) { out.errors.push("oiHist:" + (e && e.message)); }
-  // long/short ratios (5m)
-  try { const { data } = await jget(FUT, `/futures/data/globalLongShortAccountRatio?symbol=${s}&period=5m&limit=1`); out.lsrGlobal = Array.isArray(data) && data[0] ? num(data[0].longShortRatio) : null; }
-  catch (e) { out.errors.push("lsrG:" + (e && e.message)); }
-  try { const { data } = await jget(FUT, `/futures/data/topLongShortPositionRatio?symbol=${s}&period=5m&limit=1`); out.lsrTop = Array.isArray(data) && data[0] ? num(data[0].longShortRatio) : null; }
-  catch (e) { out.errors.push("lsrT:" + (e && e.message)); }
-  try { const { data } = await jget(FUT, `/futures/data/takerlongshortRatio?symbol=${s}&period=5m&limit=1`); out.takerLS = Array.isArray(data) && data[0] ? num(data[0].buySellRatio) : null; }
-  catch (e) { out.errors.push("taker:" + (e && e.message)); }
-  // spot depth imbalance (top 20)
-  try {
-    const { data } = await jget(SPOT, `/api/v3/depth?symbol=${s}&limit=20`);
-    const sum = (arr) => (arr || []).reduce((a, r) => a + (+r[0]) * (+r[1]), 0);
-    const b = sum(data.bids), a = sum(data.asks);
-    out.depthImb = (b + a > 0) ? +(((b - a) / (b + a)).toFixed(4)) : null;
-  } catch (e) { out.errors.push("depth:" + (e && e.message)); }
-  out.ok = out.errors.length === 0;
+  const s = SYMS[k], bs = BY_SYM[k], os = OKX_SWAP[k], osp = OKX_SPOT[k];
+  const out = { sym: k, t: Date.now(), src: {} };
+
+  const fb = await first([
+    ["bnc-fapi", async () => { const d = await jget(FUT, `/fapi/v1/premiumIndex?symbol=${s}`); const mk = num(d.markPrice), ix = num(d.indexPrice); return { funding: num(d.lastFundingRate), basisPct: mk != null && ix ? +(((mk - ix) / ix) * 100).toFixed(5) : null }; }],
+    ["bybit", async () => { const d = await jget(BYBIT, `/v5/market/tickers?category=linear&symbol=${bs}`); const r = d.result && d.result.list && d.result.list[0]; if (!r) return null; const mk = num(r.markPrice), ix = num(r.indexPrice); return { funding: num(r.fundingRate), basisPct: mk != null && ix ? +(((mk - ix) / ix) * 100).toFixed(5) : null }; }],
+    ["okx", async () => { const [fr, mp] = await Promise.all([jget(OKX, `/api/v5/public/funding-rate?instId=${os}`), jget(OKX, `/api/v5/public/mark-price?instType=SWAP&instId=${os}`)]); const f = fr.data && fr.data[0], m = mp.data && mp.data[0]; return { funding: f ? num(f.fundingRate) : null, basisPct: m ? num(m.markPx) : null }; }],
+  ]);
+  if (fb.v) { out.funding = fb.v.funding ?? null; out.basisPct = fb.v.basisPct ?? null; }
+  out.src.funding = fb.src;
+
+  const oi = await first([
+    ["bnc-fapi", async () => { const d = await jget(FUT, `/fapi/v1/openInterest?symbol=${s}`); return num(d.openInterest); }],
+    ["bybit", async () => { const d = await jget(BYBIT, `/v5/market/open-interest?category=linear&symbol=${bs}&intervalTime=5min&limit=1`); const r = d.result && d.result.list && d.result.list[0]; return r ? num(r.openInterest) : null; }],
+    ["okx", async () => { const d = await jget(OKX, `/api/v5/public/open-interest?instType=SWAP&instId=${os}`); const r = d.data && d.data[0]; return r ? num(r.oi) : null; }],
+  ]);
+  out.oi = oi.v; out.src.oi = oi.src;
+
+  const oid = await first([
+    ["bnc-fapi", async () => { const d = await jget(FUT, `/futures/data/openInterestHist?symbol=${s}&period=5m&limit=2`); if (!Array.isArray(d) || d.length < 2) return null; const a = num(d[0].sumOpenInterest), b = num(d[d.length - 1].sumOpenInterest); return a && b != null ? +(((b - a) / a) * 100).toFixed(4) : null; }],
+    ["bybit", async () => { const d = await jget(BYBIT, `/v5/market/open-interest?category=linear&symbol=${bs}&intervalTime=5min&limit=2`); const l = (d.result && d.result.list) || []; if (l.length < 2) return null; const a = num(l[0].openInterest), b = num(l[l.length - 1].openInterest); return a && b != null ? +(((b - a) / a) * 100).toFixed(4) : null; }],
+  ]);
+  out.oiDelta5m = oid.v; out.src.oiDelta5m = oid.src;
+
+  const lsr = await first([
+    ["bnc-fapi", async () => { const g = await jget(FUT, `/futures/data/globalLongShortAccountRatio?symbol=${s}&period=5m&limit=1`); const t = await jget(FUT, `/futures/data/topLongShortPositionRatio?symbol=${s}&period=5m&limit=1`); return { lsrGlobal: Array.isArray(g) && g[0] ? num(g[0].longShortRatio) : null, lsrTop: Array.isArray(t) && t[0] ? num(t[0].longShortRatio) : null }; }],
+    ["bybit", async () => { const d = await jget(BYBIT, `/v5/market/account-ratio?category=linear&symbol=${bs}&period=5min&limit=1`); const r = d.result && d.result.list && d.result.list[0]; return r ? { lsrGlobal: num(r.buyRatio) != null ? +(num(r.buyRatio) / (num(r.sellRatio) || 1)).toFixed(4) : null, lsrTop: null } : null; }],
+    ["okx", async () => { const d = await jget(OKX, `/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy=${k}&period=5m`); const r = d.data && d.data[0]; return r ? { lsrGlobal: num(r[1]), lsrTop: null } : null; }],
+  ]);
+  if (lsr.v) { out.lsrGlobal = lsr.v.lsrGlobal ?? null; out.lsrTop = lsr.v.lsrTop ?? null; }
+  out.src.lsr = lsr.src;
+
+  const tk = await first([
+    ["bnc-fapi", async () => { const d = await jget(FUT, `/futures/data/takerlongshortRatio?symbol=${s}&period=5m&limit=1`); return Array.isArray(d) && d[0] ? num(d[0].buySellRatio) : null; }],
+    ["okx", async () => { const d = await jget(OKX, `/api/v5/rubik/stat/taker-volume?ccy=${k}&period=5m`); const r = d.data && d.data[0]; if (!r) return null; const sell = num(r[1]), buy = num(r[2]); return sell ? +(buy / sell).toFixed(4) : null; }],
+  ]);
+  out.takerLS = tk.v; out.src.takerLS = tk.src;
+
+  const dp = await first([
+    ["bnc-spot", async () => { const d = await jget(SPOT, `/api/v3/depth?symbol=${s}&limit=20`); const sum = (arr) => (arr || []).reduce((a, r) => a + (+r[0]) * (+r[1]), 0); const b = sum(d.bids), a = sum(d.asks); return b + a > 0 ? +(((b - a) / (b + a)).toFixed(4)) : null; }],
+    ["bybit", async () => { const d = await jget(BYBIT, `/v5/market/orderbook?category=spot&symbol=${bs}&limit=20`); const sum = (arr) => (arr || []).reduce((a, r) => a + (+r[0]) * (+r[1]), 0); const b = sum(d.result && d.result.b), a = sum(d.result && d.result.a); return b + a > 0 ? +(((b - a) / (b + a)).toFixed(4)) : null; }],
+    ["okx", async () => { const d = await jget(OKX, `/api/v5/market/books?instId=${osp}&sz=20`); const r = d.data && d.data[0]; if (!r) return null; const sum = (arr) => (arr || []).reduce((a, x) => a + (+x[0]) * (+x[1]), 0); const b = sum(r.bids), a = sum(r.asks); return b + a > 0 ? +(((b - a) / (b + a)).toFixed(4)) : null; }],
+  ]);
+  out.depthImb = dp.v; out.src.depthImb = dp.src;
+
+  out.ok = [out.funding, out.oi, out.oiDelta5m, out.lsrGlobal, out.takerLS, out.depthImb].some((x) => x != null);
   return out;
 }
 
-const cache = {};           // sym -> feature object
+const cache = {};
 let lastRefresh = 0, lastMs = null;
-
 async function refreshAll() {
   const t0 = Date.now();
-  await Promise.all(Object.keys(SYMS).map(async (k) => { try { cache[k] = await fetchSym(k); } catch (e) { cache[k] = { sym: k, ok: false, errors: [String(e && e.message)] , t: Date.now()}; } }));
+  await Promise.all(Object.keys(SYMS).map(async (k) => { try { cache[k] = await fetchSym(k); } catch (e) { cache[k] = { sym: k, ok: false, t: Date.now() }; } }));
   lastRefresh = Date.now(); lastMs = lastRefresh - t0;
   return cache;
 }
-
-// sync getter untuk computeSignal (dari cache; null bila belum ada)
 function get(sym) {
   const c = cache[sym];
   if (!c) return null;
-  return {
-    funding: c.funding ?? null, basisPct: c.basisPct ?? null, oi: c.oi ?? null, oiDelta5m: c.oiDelta5m ?? null,
+  return { funding: c.funding ?? null, basisPct: c.basisPct ?? null, oi: c.oi ?? null, oiDelta5m: c.oiDelta5m ?? null,
     lsrGlobal: c.lsrGlobal ?? null, lsrTop: c.lsrTop ?? null, takerLS: c.takerLS ?? null, depthImb: c.depthImb ?? null,
-    ageMs: Date.now() - (c.t || 0),
-  };
+    src: c.src || null, ageMs: Date.now() - (c.t || 0) };
 }
 function probe() { return { lastRefresh, lastMs, at: new Date().toISOString(), cache }; }
 

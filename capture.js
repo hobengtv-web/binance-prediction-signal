@@ -352,13 +352,21 @@ function computeSignal(o) {
       && !liqLow && rsi != null && rsi < Number(process.env.FLAT_ENTRY_RSI || 40) && P.flatOk === true) {
     flatEntry = true; accepted = true;
   }
+  // ===== LOOSEN ke arah MOM (EKSPERIMEN) — kill switch GATE_LOOSEN_MOM (default OFF) =====
+  // MOM = terima SEMUA sesi berarah NON-FLAT (bypass tier/veto), kecuali (opsional) likuiditas tipis.
+  // Default OFF -> perilaku produksi TIDAK berubah sampai env diaktifkan. Reversibel tanpa deploy.
+  let loosen = false;
+  if (process.env.GATE_LOOSEN_MOM === "1" && !flatReason && (currentDir === "up" || currentDir === "down")
+      && !(process.env.GATE_LOOSEN_KEEP_LIQ === "1" && liqLow)) {
+    accepted = true; reject = null; loosen = true;
+  }
   return {
     ok: true,
     skipped: (flatReason && !flatEntry) ? flatReason : undefined,
     signal: {
       asset: sym, interval: tf, t0, lock,
       power,
-      dir: currentDir, silent: silentDir || undefined, mode, conf, flatEntry: flatEntry || undefined,
+      dir: currentDir, silent: silentDir || undefined, mode, conf, flatEntry: flatEntry || undefined, loosen: loosen || undefined,
       grade: grade || null, accepted: (flatReason && !flatEntry) ? false : accepted, reject: (flatReason && !flatEntry) ? null : reject, thresholdsOK: !!thOK,
       reclaim: (reclaim && !flatReason) ? { f: reclaim.f, v: reclaim.v, lo: reclaim.lo, hi: reclaim.hi, n: reclaim.n, lb: reclaim.lb } : null,
       invert: (inverted && !flatReason) ? { and: inverted.and, n: inverted.n, flipWR: inverted.flipWR, lbFlip: inverted.lbFlip } : null,

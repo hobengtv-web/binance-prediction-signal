@@ -47,7 +47,7 @@ async function fetchSym(k) {
   const fb = await first([
     ["bnc-fapi", async () => { const d = await jget(FUT, `/fapi/v1/premiumIndex?symbol=${s}`); const mk = num(d.markPrice), ix = num(d.indexPrice); return { funding: num(d.lastFundingRate), basisPct: mk != null && ix ? +(((mk - ix) / ix) * 100).toFixed(5) : null }; }],
     ["bybit", async () => { const d = await jget(BYBIT, `/v5/market/tickers?category=linear&symbol=${bs}`); const r = d.result && d.result.list && d.result.list[0]; if (!r) return null; const mk = num(r.markPrice), ix = num(r.indexPrice); return { funding: num(r.fundingRate), basisPct: mk != null && ix ? +(((mk - ix) / ix) * 100).toFixed(5) : null }; }],
-    ["okx", async () => { const [fr, mp] = await Promise.all([jget(OKX, `/api/v5/public/funding-rate?instId=${os}`), jget(OKX, `/api/v5/public/mark-price?instType=SWAP&instId=${os}`)]); const f = fr.data && fr.data[0], m = mp.data && mp.data[0]; return { funding: f ? num(f.fundingRate) : null, basisPct: m ? num(m.markPx) : null }; }],
+    ["okx", async () => { const [fr, mp, ix] = await Promise.all([jget(OKX, `/api/v5/public/funding-rate?instId=${os}`), jget(OKX, `/api/v5/public/mark-price?instType=SWAP&instId=${os}`), jget(OKX, `/api/v5/market/index-tickers?instId=${osp}`)]); const f = fr.data && fr.data[0], m = mp.data && mp.data[0], x = ix.data && ix.data[0]; const mk = m ? num(m.markPx) : null, idx = x ? num(x.idxPx) : null; return { funding: f ? num(f.fundingRate) : null, basisPct: (mk != null && idx) ? +(((mk - idx) / idx) * 100).toFixed(5) : null }; }],
   ]);
   if (fb.v) { out.funding = fb.v.funding ?? null; out.basisPct = fb.v.basisPct ?? null; }
   out.src.funding = fb.src;
@@ -62,6 +62,7 @@ async function fetchSym(k) {
   const oid = await first([
     ["bnc-fapi", async () => { const d = await jget(FUT, `/futures/data/openInterestHist?symbol=${s}&period=5m&limit=2`); if (!Array.isArray(d) || d.length < 2) return null; const a = num(d[0].sumOpenInterest), b = num(d[d.length - 1].sumOpenInterest); return a && b != null ? +(((b - a) / a) * 100).toFixed(4) : null; }],
     ["bybit", async () => { const d = await jget(BYBIT, `/v5/market/open-interest?category=linear&symbol=${bs}&intervalTime=5min&limit=2`); const l = (d.result && d.result.list) || []; if (l.length < 2) return null; const a = num(l[0].openInterest), b = num(l[l.length - 1].openInterest); return a && b != null ? +(((b - a) / a) * 100).toFixed(4) : null; }],
+    ["okx", async () => { const d = await jget(OKX, `/api/v5/rubik/stat/contracts/open-interest-volume?ccy=${k}&period=5m`); const a = d.data; if (!Array.isArray(a) || a.length < 2) return null; const p = num(a[0][1]), q = num(a[a.length - 1][1]); return p && q != null ? +(((q - p) / p) * 100).toFixed(4) : null; }],
   ]);
   out.oiDelta5m = oid.v; out.src.oiDelta5m = oid.src;
 

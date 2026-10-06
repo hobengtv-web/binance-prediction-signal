@@ -125,8 +125,17 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       // ===== $ NYATA = uang akun (botRoi) ATAU harga-token Binance nyata (settleRoi, hold-to-settle) =====
       settleRoi: (r.res && typeof r.res.settleRoi === "number") ? +r.res.settleRoi.toFixed(4) : null,
       settleSrc: (r.res && r.res.settleSrc) || null,
+      // MENANG-$ (basis keputusan): 1 bila $ nyata > 0, 0 bila <=0, null bila tak ada $ nyata.
+      dwin: (botRoi != null ? (botRoi > 0 ? 1 : 0) : ((r.res && typeof r.res.settleRoi === "number") ? (r.res.settleRoi > 0 ? 1 : 0) : null)),
       pnlReal: (botRoi != null ? botRoi : ((r.res && typeof r.res.settleRoi === "number") ? +r.res.settleRoi.toFixed(4) : null)),
       pnlRealSrc: (botRoi != null ? "account" : ((r.res && typeof r.res.settleRoi === "number") ? (r.res.settleSrc || "binance-quote") : null)),
+      // $ NYATA utk arah TERBALIK (invert): dari HARGA TOKEN Binance sisi lawan + outcome nyata.
+      flipRoi: (function () {
+        const o = r.odds; if (!o || (dir !== "up" && dir !== "down")) return null;
+        const pf = dir === "up" ? o.down : o.up;                 // harga token sisi LAWAN
+        if (typeof pf !== "number" || !(pf > 0) || !(pf < 1)) return null;
+        return (r.res.won === 1) ? -100 : +(((1 - pf) / pf) * 100).toFixed(4);
+      })(),
       taWin: (pnlPct != null) ? (pnlPct > 0 ? 1 : 0) : null,
       taCapWin: (capturePct != null) ? (capturePct >= 50 ? 1 : 0) : null,
       // ===== MIKRO-STRUKTUR (fitur baru untuk mempertajam arah U/D) =====
@@ -228,11 +237,11 @@ function decide(row, blockers) {
 // skor = winrate dari sinyal yang DIAMBIL x akar(cakupan) — filternya harus berguna,
 // bukan sekadar mengambil sedikit sinyal.
 function evalModel(rows, gateRules, touchRules) {
-  const gb = blockersOf(gateRules.map((r) => ({ ...r, metric: "won" })), "won");
-  const tb = blockersOf(touchRules.map((r) => ({ ...r, metric: "touch" })), "touch");
+  const gb = blockersOf(gateRules.map((r) => ({ ...r, metric: "dwin" })), "dwin");
+  const tb = blockersOf(touchRules.map((r) => ({ ...r, metric: "dwin" })), "dwin");
   const taken = rows.filter((r) => decide(r, gb) && decide(r, tb));
   const cov = rows.length ? taken.length / rows.length : 0;
-  const wr = taken.length ? mean(taken.map((r) => r.won)) : 0;
+  const wr = taken.length ? mean(taken.map((r) => r.dwin)) : 0;   // metrik = $ (dwin)
   return { n: rows.length, taken: taken.length, coverage: +cov.toFixed(4), takenWinrate: +wr.toFixed(4), score: +(wr * Math.sqrt(cov)).toFixed(4), gateBlockers: gb.map((b) => b.k), touchBlockers: tb.map((b) => b.k) };
 }
 /* ---------- VALIDASI BERGULIR (rolling / k-fold kronologis) ----------
@@ -288,10 +297,9 @@ function hourVetoes(rows, opts = {}) {
     // FAIL-OPEN: jam OFF = jam TERBURUK saja, dibatasi offCap (default <=50% jam yg bisa diputuskan).
     // Cegah "OFF 20/24 jam" (over-block) yang membuat key nyaris tanpa sinyal. OBJEKTIF $: jam dgn
     // data $ positif JANGAN di-OFF-kan.
-    const cand = stats.filter((s) => (s.wr < thr && !s.improving && !(s.pnlN >= 4 && s.pnl > 0)) || (s.pnlN >= 4 && s.pnl != null && s.pnl < pnlBadThr)).sort((a, b) => {
-      const pa = a.pnl == null ? Infinity : a.pnl, pb = b.pnl == null ? Infinity : b.pnl;
-      return pa !== pb ? pa - pb : a.wr - b.wr;
-    });
+    // KEPUTUSAN 100% BERBASIS $ NYATA: jam OFF bila rata-rata $ akun < ambang (bukan WR).
+    const minPnl = opts.minPnl != null ? opts.minPnl : 4;
+    const cand = stats.filter((s) => s.pnlN >= minPnl && s.pnl != null && s.pnl < pnlBadThr).sort((a, b) => a.pnl - b.pnl);
     const maxOff = Math.floor(offCap * stats.length);
     const hours = cand.slice(0, maxOff).map((s) => s.h);
     keys[key] = { hours, stats };
@@ -336,7 +344,7 @@ function keyTiers(rows, opts = {}) {
   const gridS = [0, 0.5, 1, 1.5, 2, 3, 4];
   const groups = {};
   for (const r of rows) {
-    if (r.won == null || !r.symbol || !r.interval || r.volRel2 == null || r.surprise == null) continue;
+    if (r.dwin == null || !r.symbol || !r.interval || r.volRel2 == null || r.surprise == null) continue;  // tier dari $ NYATA
     const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r);
   }
   const out = {};
@@ -347,7 +355,7 @@ function keyTiers(rows, opts = {}) {
       for (const v of gridV) for (const s of gridS) {
         const sub = a.filter((r) => r.volRel2 >= v && r.surprise >= s);
         if (sub.length < minN) continue;
-        const w = sub.reduce((x, r) => x + (r.won ? 1 : 0), 0) / sub.length;
+        const w = sub.reduce((x, r) => x + (r.dwin ? 1 : 0), 0) / sub.length;   // fraksi MENANG-$ ($>0)
         // pilih ambang TERENDAH yg masih mencapai target (paling permisif)
         if (w >= t && (!best || (v + s / 2) < (best.volRel2 + best.surprise / 2))) best = { volRel2: v, surprise: s, wr: +w.toFixed(4), n: sub.length };
       }
@@ -368,24 +376,21 @@ function pickBadRanges(bins, valOf, thr, minN, opts, allRows) {
   const minAllowedN = (opts.minAllowedN != null && opts.minAllowedN > 0) ? opts.minAllowedN : minN;
   const withFeat = allRows.filter((r) => valOf(r) != null);
   const total = withFeat.length || 1;
+  const minPnl = opts.minPnl != null ? opts.minPnl : 4;
+  const pnlBadThr = opts.pnlBad != null ? opts.pnlBad : -2;
   const cand = [];
+  // KEPUTUSAN 100% BERBASIS $ NYATA (pnlReal): bin buruk bila rata-rata $ < ambang. TIDAK memakai WR.
+  // Bila data $ belum cukup -> bin NETRAL (tidak diveto) — konsisten "jangan putuskan tanpa $ nyata".
   for (const [lo, hi] of bins) {
     const s = withFeat.filter((r) => { const v = valOf(r); return v >= lo && v < hi; });
     if (s.length < minN) continue;
-    const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0) / s.length;
-    const ps = s.filter((r) => r.pnlReal != null);          // $ NYATA (akun / harga-token Binance), bukan proksi spot
-    const pm = ps.length ? mean(ps.map((r) => r.pnlReal)) : null;
-    // OBJEKTIF $ (utama): bin BURUK bila (a) WR<thr & $ tidak positif, ATAU (b) $ JELAS NEGATIF
-    // walau WR-nya bagus (mis. BNB_5m pasar ramai: WR 0,53 tapi $ -44%). Simpan $ demi compounding.
-    const pnlBadThr = opts.pnlBad != null ? opts.pnlBad : -2;
-    const pnlBad = ps.length >= 4 && pm != null && pm < pnlBadThr;
-    if ((w < thr && !(ps.length >= 4 && pm > 0)) || pnlBad) cand.push({ lo, hi, n: s.length, wr: w, pnl: pm != null ? +pm.toFixed(2) : null });
+    const ps = s.filter((r) => r.pnlReal != null);
+    if (ps.length < minPnl) continue;
+    const pm = mean(ps.map((r) => r.pnlReal));
+    if (pm < pnlBadThr) cand.push({ lo, hi, n: s.length, nPnl: ps.length, pnl: +pm.toFixed(2) });
   }
   if (!cand.length) return { ranges: [], cov: 0, allowedN: total, failOpen: false };
-  cand.sort((x, y) => {                                            // $-terburuk dulu, lalu WR-terburuk
-    const px = x.pnl == null ? Infinity : x.pnl, py = y.pnl == null ? Infinity : y.pnl;
-    return px !== py ? px - py : x.wr - y.wr;
-  });
+  cand.sort((x, y) => x.pnl - y.pnl);                              // $-terburuk dulu
   const sel = []; let coveredN = 0;
   for (const c of cand) { if ((coveredN + c.n) / total > covCap) continue; sel.push([c.lo, c.hi]); coveredN += c.n; }
   const allowedN = total - coveredN;
@@ -409,7 +414,7 @@ const RECLAIM_FEATS = [
 ];
 const RECLAIM_HOURS = [[0, 4], [4, 8], [8, 12], [12, 16], [16, 20], [20, 24]];
 function keyReclaim(rows, opts = {}) {
-  const minN = opts.reclaimMinN || 30, wlb = opts.reclaimWlb != null ? opts.reclaimWlb : 0.52;
+  const minPnl = opts.reclaimMinPnl || 10, wlb = opts.reclaimWlb != null ? opts.reclaimWlb : 0.52;
   const maxCtx = opts.reclaimMax || 4;
   const covCap = opts.reclaimCovCap != null ? opts.reclaimCovCap : 0.4;   // maks cakupan union reclaim (anti-balik-snowball)
   const groups = {};
@@ -423,21 +428,24 @@ function keyReclaim(rows, opts = {}) {
   const out = {};
   for (const k of Object.keys(groups)) {
     const a = groups[k]; const cands = [];
+    // KEPUTUSAN 100% BERBASIS $ NYATA: reclaim bila rata-rata $ > 0 DAN meyakinkan di level $ (wilson
+    // pada "menang-$" pnlReal>0) DAN dua paruh waktu $-positif. TIDAK memakai WR arah.
     const add = (ctx, s) => {
-      if (s.length < minN) return;
-      const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0);
-      const lb = wilson(w, s.length).lo;
+      const ps = s.filter((r) => r.pnlReal != null);
+      if (ps.length < minPnl) return;
+      const pm = mean(ps.map((r) => r.pnlReal));
+      if (!(pm > 0)) return;
+      const w = ps.reduce((t, r) => t + (r.pnlReal > 0 ? 1 : 0), 0);
+      const lb = wilson(w, ps.length).lo;
       if (lb < wlb) return;
-      // OBJEKTIF $: bila konteks punya cukup data $ AKUN dan rata-ratanya NEGATIF -> JANGAN di-reclaim.
-      const ps = s.filter((r) => r.pnlReal != null);         // $ NYATA (akun / harga-token Binance)
-      const pm = ps.length ? mean(ps.map((r) => r.pnlReal)) : null;
-      if (ps.length >= 5 && !(pm > 0)) return;
-      cands.push(Object.assign({ n: s.length, wr: +(w / s.length).toFixed(4), lb: +lb.toFixed(4), pnlN: ps.length, pnl: pm != null ? +pm.toFixed(3) : null }, ctx));
+      const h = Math.floor(ps.length / 2);
+      if (h > 0) { const o = ps.slice(0, h), n2 = ps.slice(ps.length - h); if (mean(o.map((r) => r.pnlReal)) <= 0 || mean(n2.map((r) => r.pnlReal)) <= 0) return; }
+      cands.push(Object.assign({ n: ps.length, lb: +lb.toFixed(4), pnl: +pm.toFixed(3) }, ctx));
     };
     for (const { f, bins } of RECLAIM_FEATS) for (const [lo, hi] of bins) add({ f, lo, hi }, a.filter((r) => r[f] != null && r[f] >= lo && r[f] < hi));
     for (const [lo, hi] of RECLAIM_HOURS) add({ f: "hourWIB", lo, hi }, a.filter((r) => { const h = Math.floor(((r.t0 + 7 * 3600) % 86400) / 3600); return h >= lo && h < hi; }));
     for (const f of ["dir", "grade"]) { const vals = {}; for (const r of a) { const v = r[f]; if (v == null) continue; (vals[v] = vals[v] || []).push(r); } for (const v of Object.keys(vals)) add({ f, v }, vals[v]); }
-    cands.sort((x, y) => y.lb - x.lb);
+    cands.sort((x, y) => y.pnl - x.pnl);                             // $-terbaik dulu
     // Pilih terkuat dulu, TAPI batasi cakupan UNION <= covCap agar reclaim tak jadi "ON-kan semua".
     const sel = [];
     for (const c of cands) {
@@ -474,7 +482,7 @@ function keyInvert(rows, opts = {}) {
     const x = r[p.f]; return x != null && x >= p.lo && x < p.hi;
   };
   const ctxMatch = (c, r) => (c.and || []).every((p) => partMatch(p, r));
-  const flipWR = (a) => a.length ? 1 - (a.reduce((t, r) => t + r.won, 0) / a.length) : 0;
+  const minPnl = opts.invertMinPnl || 10;
   const out = {};
   for (const k of Object.keys(groups)) {
     const a = groups[k].slice().sort((x, y) => (x.t0 || 0) - (y.t0 || 0));
@@ -484,14 +492,19 @@ function keyInvert(rows, opts = {}) {
     for (const [lo, hi] of RECLAIM_HOURS) parts.push({ p: { f: "hourWIB", lo, hi }, rows: a.filter((r) => { const h = Math.floor(((r.t0 + 7 * 3600) % 86400) / 3600); return h >= lo && h < hi; }) });
     for (const f of ["dir", "grade"]) { const vals = {}; for (const r of a) { const v = r[f]; if (v == null) continue; (vals[v] = vals[v] || []).push(r); } for (const v of Object.keys(vals)) parts.push({ p: { f, v }, rows: vals[v] }); }
     const cands = [];
+    // KEPUTUSAN 100% BERBASIS $ NYATA: invert bila $ arah-terbalik (flipRoi dari harga token lawan)
+    // rata-rata > 0, meyakinkan (wilson menang-$), dan dua paruh $-positif. Bukan WR.
     const consider = (plist, s) => {
-      if (s.length < minN) return;
-      const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0);
-      const lbFlip = wilson(s.length - w, s.length).lo;      // LB utk arah TERBALIK
+      const fs = s.filter((r) => r.flipRoi != null);
+      if (fs.length < minPnl) return;
+      const fm = mean(fs.map((r) => r.flipRoi));
+      if (!(fm > 0)) return;
+      const wf = fs.reduce((t, r) => t + (r.flipRoi > 0 ? 1 : 0), 0);
+      const lbFlip = wilson(wf, fs.length).lo;
       if (lbFlip < wlb) return;
-      const h = Math.floor(s.length / 2);
-      if (h > 0) { const older = s.slice(0, h), newer = s.slice(s.length - h); if (flipWR(older) < 0.5 || flipWR(newer) < 0.5) return; }
-      cands.push({ and: plist, n: s.length, wr: +(w / s.length).toFixed(4), flipWR: +flipWR(s).toFixed(4), lbFlip: +lbFlip.toFixed(4) });
+      const h = Math.floor(fs.length / 2);
+      if (h > 0) { const o = fs.slice(0, h), n2 = fs.slice(fs.length - h); if (mean(o.map((r) => r.flipRoi)) <= 0 || mean(n2.map((r) => r.flipRoi)) <= 0) return; }
+      cands.push({ and: plist, n: fs.length, pnlFlip: +fm.toFixed(3), lbFlip: +lbFlip.toFixed(4) });
     };
     for (const A of parts) consider([A.p], A.rows);                     // 1-fitur
     for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {   // 2-fitur (irisan)
@@ -535,19 +548,19 @@ function keyConfirm(rows, opts = {}) {
     const parts = [];
     for (const { f, bins } of CONFIRM_FEATS) for (const [lo, hi] of bins) parts.push({ p: { f, lo, hi }, rows: a.filter((r) => r[f] != null && r[f] >= lo && r[f] < hi) });
     const cands = [];
+    // KEPUTUSAN 100% BERBASIS $ NYATA: confirm bila $ rata-rata > 0, meyakinkan (wilson menang-$), 2 paruh $>0.
+    const minPnl = opts.confirmMinPnl || 10;
     const consider = (plist, s) => {
-      if (s.length < minN) return;
-      const w = s.reduce((t, r) => t + (r.won ? 1 : 0), 0);
-      const lb = wilson(w, s.length).lo;
-      if (lb < wlb) return;
-      const h = Math.floor(s.length / 2);
-      if (h > 0) { const older = s.slice(0, h), newer = s.slice(s.length - h); const wrO = older.reduce((t, r) => t + r.won, 0) / older.length, wrN = newer.reduce((t, r) => t + r.won, 0) / newer.length; if (wrO < 0.5 || wrN < 0.5) return; }
-      // OBJEKTIF $ (WAJIB): jangan CONFIRM konteks yg $-NYATA negatif walau WR bagus (mis. ETH_15m OFI
-      // setuju: WR 53% tapi mean $ -1.8%; vol>=1.5: -14.7%). Boost grade hanya bila $ tidak merugi.
       const ps = s.filter((r) => r.pnlReal != null);
-      const pm = ps.length ? mean(ps.map((r) => r.pnlReal)) : null;
-      if (ps.length >= 15 && !(pm > 0)) return;
-      cands.push({ and: plist, n: s.length, wr: +(w / s.length).toFixed(4), lb: +lb.toFixed(4), pnlN: ps.length, pnl: pm != null ? +pm.toFixed(3) : null });
+      if (ps.length < minPnl) return;
+      const pm = mean(ps.map((r) => r.pnlReal));
+      if (!(pm > 0)) return;
+      const wf = ps.reduce((t, r) => t + (r.pnlReal > 0 ? 1 : 0), 0);
+      const lb = wilson(wf, ps.length).lo;
+      if (lb < wlb) return;
+      const h = Math.floor(ps.length / 2);
+      if (h > 0) { const o = ps.slice(0, h), n2 = ps.slice(ps.length - h); if (mean(o.map((r) => r.pnlReal)) <= 0 || mean(n2.map((r) => r.pnlReal)) <= 0) return; }
+      cands.push({ and: plist, n: ps.length, lb: +lb.toFixed(4), pnl: +pm.toFixed(3) });
     };
     for (const A of parts) consider([A.p], A.rows);
     for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
@@ -661,15 +674,18 @@ function pnlContexts(rows, FEATS) {
 /* ---------- bangun model dari baris fitur ---------- */
 function buildModel(rows, opts = {}) {
   const o = Object.assign({ minTrain: 60, minTest: 40, minRows: 120 }, opts);
-  if (rows.length < o.minRows) return { ok: false, reason: `butuh >= ${o.minRows} hasil, ada ${rows.length}`, rows: rows.length };
+  // KEPUTUSAN 100% BERBASIS $ NYATA: hanya belajar dari baris yang punya $ nyata (dwin != null).
+  // Bila $ belum cukup -> model tidak dibangun (netral), bukan memakai WR.
+  rows = rows.filter((r) => r.dwin != null);
+  if (rows.length < o.minRows) return { ok: false, reason: `butuh >= ${o.minRows} hasil ber-$, ada ${rows.length}`, rows: rows.length };
   const splitIdx = Math.floor(rows.length * 0.7);
   const train = rows.slice(0, splitIdx), test = rows.slice(splitIdx);
-  const dirBase = mean(test.map((r) => r.won)), touchBase = mean(test.map((r) => r.touch));
-  const dirTrain = mean(train.map((r) => r.won));
+  const dirBase = mean(test.map((r) => r.dwin)), touchBase = dirBase;   // objek = $ (dwin), bukan arah
+  const dirTrain = mean(train.map((r) => r.dwin));
   const gateBuckets = bucketsOf(train, test, GATE_FEATS);
   const touchBuckets = bucketsOf(train, test, TOUCH_FEATS);
-  const gateRules = mineRules(train, test, GATE_FEATS, GATE_PAIRS, dirBase, "won", o);
-  const touchRules = mineRules(train, test, TOUCH_FEATS, TOUCH_PAIRS, touchBase, "touch", o);
+  const gateRules = mineRules(train, test, GATE_FEATS, GATE_PAIRS, dirBase, "dwin", o);
+  const touchRules = mineRules(train, test, TOUCH_FEATS, TOUCH_PAIRS, touchBase, "dwin", o);
   const gateSuppress = gateRules.filter((r) => r.verdict === "suppress").map((r) => r.k);
   const touchSuppress = touchRules.filter((r) => r.verdict === "suppress").map((r) => r.k);
   const metrics = evalModel(test, gateRules, touchRules);
@@ -717,7 +733,7 @@ const TH_FEATS = { volRel2: 1, surprise: 1, liqRatio: 1, gapPct: -1, histStrengt
 function evalTaken(rows, thresholds) {
   const taken = rows.filter((r) => applyThresholds2(r, thresholds));
   const cov = rows.length ? taken.length / rows.length : 0;
-  const wr = taken.length ? mean(taken.map((r) => r.won)) : 0;
+  const wr = taken.length ? mean(taken.map((r) => r.dwin)) : 0;   // metrik = $ (dwin)
   return { n: rows.length, taken: taken.length, coverage: +cov.toFixed(4), takenWinrate: +wr.toFixed(4), score: +(wr * Math.sqrt(cov)).toFixed(4) };
 }
 function applyThresholds2(row, thresholds) {
@@ -731,8 +747,9 @@ function applyThresholds2(row, thresholds) {
 }
 function learnThresholds(rows, opts = {}) {
   const o = Object.assign({ minRows: 300, minTaken: 80, minCov: 0.2, grid: 20, rounds: 3, minGain: 0.004 }, opts);
-  const usable = rows.filter((r) => r.dir === "up" || r.dir === "down");
-  if (usable.length < o.minRows) return { ok: false, reason: `butuh >= ${o.minRows} baris berarah, ada ${usable.length}` };
+  // KEPUTUSAN 100% BERBASIS $ NYATA: threshold dimining dari baris ber-$ nyata saja (dwin != null).
+  const usable = rows.filter((r) => (r.dir === "up" || r.dir === "down") && r.dwin != null);
+  if (usable.length < o.minRows) return { ok: false, reason: `butuh >= ${o.minRows} baris ber-$ berarah, ada ${usable.length}` };
   const splitIdx = Math.floor(usable.length * 0.7);
   const train = usable.slice(0, splitIdx), test = usable.slice(splitIdx);
   if (train.length < 100 || test.length < 60) return { ok: false, reason: "jendela latih/uji terlalu kecil" };
@@ -742,7 +759,7 @@ function learnThresholds(rows, opts = {}) {
   const util = (sel) => {
     const taken = train.filter((r) => applyThresholds2(r, sel));
     if (taken.length < o.minTaken) return { u: -1, taken: taken.length, cov: 0, wr: 0, lb: 0 };
-    const st = stat(taken, "won");
+    const st = stat(taken, "dwin");
     const cov = taken.length / train.length;
     if (cov < o.minCov) return { u: -1, taken: taken.length, cov, wr: st.wr, lb: st.lb };
     return { u: st.lb, taken: taken.length, cov, wr: st.wr, lb: st.lb };

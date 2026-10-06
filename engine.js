@@ -100,7 +100,7 @@ function createEngine(deps) {
         if (onEvent && latMs <= EMIT_MAX_MS) {
           try { onEvent({ type: "start", sym, tf, t0: t0, dir: r.signal.dir, accepted: !!r.signal.accepted,
             grade: r.signal.grade || null, surprise: r.signal.surprise != null ? +r.signal.surprise.toFixed(2) : null,
-            lock: r.signal.lock != null ? r.signal.lock : null, at: Date.now(),
+            lock: r.signal.lock != null ? r.signal.lock : null, flatEntry: !!r.signal.flatEntry, at: Date.now(),
             latMs: latMs }); } catch (_) {}
         } else if (onEvent) {
           log(`[ENGINE] ${sym} ${tf} terkunci-telat ${Math.round(latMs / 1000)}s > ${Math.round(EMIT_MAX_MS / 1000)}s — TIDAK re-emit start (anti sinyal basi)`);

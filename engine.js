@@ -83,7 +83,7 @@ function createEngine(deps) {
           if (arr.length >= 20) align[t] = SignalCore.analyzeHistoricalTrend(arr, 50).predictDir;
         }
       } catch (_) {}
-      const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m: market[sym].five5m, profile, getModel, SignalCore, nowSec: nowS, align });
+      const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m: market[sym].five5m, one1m: market[sym].one1m, profile, getModel, SignalCore, nowSec: nowS, align });
       const sigForPlan = r.skipped ? null : r.signal;
       const plan = computePlan(sym, tf, t0, nowS, sigForPlan, market[sym]);
       const conf = computeConf(sym, tf, t0, nowS, sigForPlan, market[sym]);
@@ -301,6 +301,7 @@ function createEngine(deps) {
     pushSeries(sym, m.ones);                                // window 5s + deret close (trail)
     for (const tf of tfsOf(sym)) m.tf[tf] = await getKlines(sym, tf, nowSec, 60);   // termasuk candle sesi berjalan
     m.five5m = m.tf["5m"] || [];                            // RSI 5m (tanpa fetch tambahan)
+    try { m.one1m = await getKlines(sym, "1m", nowSec, 60); } catch (_) { m.one1m = m.one1m || []; }   // RECORDER/GATE 1m RSI+Stoch
   }
 
   /* TRADE ASSISTANT dihitung di SERVER memakai modul bersama trade-plan.js.

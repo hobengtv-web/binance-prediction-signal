@@ -374,6 +374,14 @@ function computeSignal(o) {
       && !(process.env.GATE_LOOSEN_KEEP_LIQ === "1" && liqLow)) {
     accepted = true; reject = null; loosen = true;
   }
+  // ===== GATE 1m RSI/Stoch (EKSPERIMEN) — buang momentum saat 1m JENUH-BELI (WR<53%). =====
+  // Kill switch RSI1M_GATE (default OFF). Oversold (rsi1m<=30/stochK<=20) tetap lolos (WR ~78-79%).
+  let rsi1mGated = false;
+  if (process.env.RSI1M_GATE === "1" && !flatReason && (currentDir === "up" || currentDir === "down") && ind1m
+      && ((ind1m.rsi != null && ind1m.rsi >= Number(process.env.RSI1M_OB_RSI || 70))
+       || (ind1m.stochK != null && ind1m.stochK >= Number(process.env.RSI1M_OB_STOCH || 80)))) {
+    accepted = false; reject = "rsi1m-overbought"; rsi1mGated = true;
+  }
   return {
     ok: true,
     skipped: (flatReason && !flatEntry) ? flatReason : undefined,
@@ -404,6 +412,7 @@ function computeSignal(o) {
       // Label gate EKSPERIMENTAL (observasional; tidak memengaruhi accepted/reject). Spec: EXPERIMENT.md
       exp: (!flatReason && (currentDir === "up" || currentDir === "down"))
         ? EXP_GATE.cohortOfSignal({ dir: currentDir, mv2, ind }, t0) : [],
+      rsi1mGated: rsi1mGated || undefined,
       // Fitur EKSTERNAL (Batch 1, observasional): funding/OIΔ/LSR/basis/depthImb dari cache server.
       ext: (() => { try { return (typeof EXT.get === "function") ? EXT.get(sym) : null; } catch (_) { return null; } })(),
     },

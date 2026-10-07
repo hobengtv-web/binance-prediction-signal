@@ -352,10 +352,11 @@ function computeTradePlan(bias, ctx) {
         && ((peakFavNow - favor) / peakFavNow) * 100 >= TA.TRAIL_GIVEBACK_PCT);
       // MODE GAP: keluar bila capture turun >= TRAIL_GAP_PP poin dari PUNCAK capture (mis. 50%->35%).
       const capPeakV = ctx.capPeak != null ? ctx.capPeak : capturedPct;
+      const capNowV = ctx.capNow != null ? ctx.capNow : capturedPct;   // FIX: bandingkan gap pada DERET YANG SAMA (capturedPct2)
       // GAP per-TF (hasil harness: 15m untung pakai gap, 5m RUGI -> 5m tetap pakai callback harga)
       const gapPp = (TA.PER_TF && ctx.tf && TA.PER_TF[ctx.tf] && TA.PER_TF[ctx.tf].TRAIL_GAP_PP != null)
         ? TA.PER_TF[ctx.tf].TRAIL_GAP_PP : TA.TRAIL_GAP_PP;
-      const gapHit = gapPp > 0 && trailArmed && (capPeakV - capturedPct) >= gapPp;
+      const gapHit = gapPp > 0 && trailArmed && (capPeakV - capNowV) >= gapPp;
       const trailHitCond = (tpHit || gbHit || gapHit || (gapPp <= 0 && trailRetracePct != null && trailRetracePct >= cbEff));
       // STOP LOSS TA: harga bergerak MELAWAN entry >= ambang (cegah plan "tahan ke 0")
       const advFromEntryPct = (entPx != null && ctx.price != null) ? ((isUp ? (entPx - ctx.price) : (ctx.price - entPx)) / entPx) * 100 : 0;
@@ -363,7 +364,7 @@ function computeTradePlan(bias, ctx) {
       if (stopHit || (trailArmed && trailHitCond && (trailHeldMs >= MIN_HOLD_TF || hybEarly || beHit || tpHit || gbHit))) {
         state = "CLOSE"; cls = "exit";
         action = stopHit ? `STOP LOSS — harga ${advFromEntryPct.toFixed(3)}% melawan entry (ambang ${TA.STOP_LOSS_ENTRY_PCT}%)`
-          : gapHit ? `TRAIL EXIT (GAP) — puncak ${capPeakV.toFixed(0)}% -> sekarang ${capturedPct}% (gap -${(capPeakV - capturedPct).toFixed(0)}pp, ambang ${gapPp}pp)`
+          : gapHit ? `TRAIL EXIT (GAP) — puncak ${capPeakV.toFixed(0)}% -> sekarang ${capNowV.toFixed(0)}% (gap -${(capPeakV - capNowV).toFixed(0)}pp, ambang ${gapPp}pp)`
           : tpHit ? `TRAIL EXIT (TP ${TA.TP_CAP_PCT}%) — profit ${capturedPct}% dari potensi`
           : gbHit ? `TRAIL EXIT (give-back ${TA.TRAIL_GIVEBACK_PCT}% dari puncak profit) — profit ${capturedPct}% dari potensi`
           : `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${cbEff.toFixed(3)}%${cbStd > cbBase ? ` · adaptif k=${TA.TRAIL_STD_K}` : ""}) · profit ${capturedPct}% dari potensi`;
@@ -545,9 +546,12 @@ function buildPlan(input) {
   const _ent0 = state.entered[key];
   const entPx = _ent0 ? _ent0.price : null;
   const contT = taUp ? O * 1.0005 : O * 0.9995;
-  const pot = (entPx != null) ? Math.abs(contT - entPx) : null;
+  const potRaw = (entPx != null) ? Math.abs(contT - entPx) : null;
+  // FLOOR penyebut + CAP: cegah "capture" meledak (mis. 1292%) saat entry dekat lock -> GAP/arm palsu.
+  const pot = (potRaw != null) ? Math.max(potRaw, C * 0.005) : null;   // floor 0,5% harga
   const traveled = (entPx != null) ? (taUp ? (C - entPx) : (entPx - C)) : null;
-  const capturedPct2 = (pot && pot > C * 0.00001) ? (traveled / pot) * 100 : (traveled > 0 ? 100 : 0);
+  let capturedPct2 = (pot && pot > C * 0.00001) ? (traveled / pot) * 100 : (traveled > 0 ? 100 : 0);
+  capturedPct2 = Math.max(-200, Math.min(200, capturedPct2));          // cap +/-200%
   const lockTouch = taUp ? (C >= O) : (C <= O);
   const armOnLock = TA.TRAIL_ARM_ON_LOCK ? lockTouch : false;   // default: arm hanya bila capture>=ARM
   state.capPeak = state.capPeak || {};
@@ -578,7 +582,7 @@ function buildPlan(input) {
   const plan = computeTradePlan(bias, {
     tf: input.tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
     entered, turn, fade, trail, retreatStd, retraceFromPeakPct, extremeDepthPct,
-    exitLeg, newPeakHigher, retrace2Pct, trailArmed, trailRetracePct, trailHeldMs, capPeak: state.capPeak[key],
+    exitLeg, newPeakHigher, retrace2Pct, trailArmed, trailRetracePct, trailHeldMs, capPeak: state.capPeak[key], capNow: capturedPct2,
     durMs: input.durMs, remainMs: input.remainMs,   // gate waktu entry
     entryPrice: state.entered[key] ? state.entered[key].price : null,   // harga entry posisi (untuk kedalaman CUT)
     dwellTurnMs: dw.turnSince ? now - dw.turnSince : 0,

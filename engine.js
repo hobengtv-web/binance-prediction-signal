@@ -101,6 +101,9 @@ function createEngine(deps) {
           try { onEvent({ type: "start", sym, tf, t0: t0, dir: r.signal.dir, accepted: !!r.signal.accepted,
             grade: r.signal.grade || null, surprise: r.signal.surprise != null ? +r.signal.surprise.toFixed(2) : null,
             lock: r.signal.lock != null ? r.signal.lock : null, flatEntry: !!r.signal.flatEntry, at: Date.now(),
+            spreadMaxPct: (typeof r.signal.spreadMaxPct === "number") ? r.signal.spreadMaxPct : null,
+            stakeMult: (typeof r.signal.stakeMult === "number") ? r.signal.stakeMult : null,
+            taTrailCbPct: (typeof r.signal.taTrailCbPct === "number") ? r.signal.taTrailCbPct : null,
             exp: Array.isArray(r.signal.exp) ? r.signal.exp : [], latMs: latMs }); } catch (_) {}
         } else if (onEvent) {
           log(`[ENGINE] ${sym} ${tf} terkunci-telat ${Math.round(latMs / 1000)}s > ${Math.round(EMIT_MAX_MS / 1000)}s — TIDAK re-emit start (anti sinyal basi)`);

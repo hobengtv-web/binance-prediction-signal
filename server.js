@@ -339,7 +339,6 @@ const MODEL_DIR = path.join(LEDGER_DIR, "..", "models");
 const MODEL_CUR = path.join(MODEL_DIR, "current");
 const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
 const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
-const GATES_DEF = require("./gates.js");
 const EXP_GATE = require("./exp-gate.js");
 const EXT = require("./ext-features.js");   // sumber data eksternal (Batch 1) — observasional
 const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json", exp: "exp.json", rolling: "learn_rolling.json", spread: "learn_spread.json", score: "learn_score.json", sizing: "learn_sizing.json", ta: "learn_ta.json" };

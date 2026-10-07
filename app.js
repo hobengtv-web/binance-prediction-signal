@@ -110,7 +110,7 @@ function setSrc(label) {
   const txt = "SRC " + (label || "—");
   const srcEl = document.getElementById("src");
   if (srcEl) { srcEl.textContent = txt; srcEl.title = txt; }
-  // Label sumber bisa sangat panjang ("langsung (Binance/ TradingView)"). Di layar sempit
+  // Label sumber (kini selalu server). Di layar sempit
   // #src disembunyikan (lihat styles.css) supaya header tetap SATU baris — nilainya tetap
   // bisa dibaca di tooltip dot status koneksi:
   const connEl = document.getElementById("conn");
@@ -524,7 +524,7 @@ function setReach() {
 /* ----------------------- Stream pasar via SERVER (bukan WS Binance) ----------------------- */
 let ws = null, wsRetry = 0, wsHostIdx = 0, wsGotData = false, usingTV = false, tvClient = null, binanceTries = 0;
 function connectWS() {
-  if (usingTV) return; // TradingView fallback already active
+  if (usingTV) return; // (fallback TV dihapus; 100% server)
   // 100% server-based: klien TIDAK membuka WS ke Binance. Server me-relay WS Binance -> SSE.
   setSrc("server");
   setStatus("Menghubungkan ke stream server…");
@@ -589,7 +589,7 @@ function handleKline(d) {
   feedCandle(symKey, tf, candle);
 }
 
-// Unified candle feeder for direct (Binance WS) and TradingView paths
+// Candle feeder (data dari server: SSE market-stream + REST klines)
 function feedCandle(symKey, tf, candle) {
   const store = state.cache[symKey][tf];
   const arr = store.candles;
@@ -1673,11 +1673,11 @@ function startPolling() {
       state.viaProxy = true; setConn(true); setSrc("proxy ↻ 1s"); applySnapshot(snap, true); hideStatus();
       setInterval(pollProxy, 1000);
     } else {
-      setSrc("langsung (Binance/ TradingView)");
+      setSrc("server (relay)");
       loadHistory().then(connectWS).catch(connectWS);
     }
   }).catch(() => {
-    setSrc("langsung (Binance/ TradingView)");
+    setSrc("server (relay)");
     loadHistory().then(connectWS).catch(connectWS);
   });
 }
@@ -1950,12 +1950,9 @@ const LIVE = (() => {
   return { connect, inject, fresh, signalFor, priceFor, lockFor, entryFor, covers, get snap() { return snap; }, get at() { return at; }, get tf() { return tfSub; }, get err() { return err; }, get n() { return count; } };
 })();
 
-/* ===== PROFIL GATE (ambang sinyal) — bisa diganti learner TANPA deploy =====
-   Ambang yang menentukan apakah sinyal ditampilkan (tier volRel2/surprise, floor likuiditas,
-   lateFrac, plus threshold hasil belajar) disajikan server lewat /api/model/gates. Default =
-   profil bootstrap (dilonggarkan untuk mengumpulkan data); begitu learner punya cukup bukti
-   uji, profil `learned` menggantikannya. Nilai fallback di bawah hanya dipakai bila server
-   tidak terjangkau, supaya aplikasi tetap berjalan. */
+/* ===== PROFIL GATE (ambang sinyal) — 100% dari SERVER =====
+   Ambang (tier volRel2/surprise, floor likuiditas, lateFrac, threshold numerik) disajikan
+   server lewat /api/model/gates PER coin×TF. TIDAK ada default/fallback global di klien. */
 // TANPA default global. Profil ambang SELALU dari SERVER (/api/model/gates, per-key).
 let GATES = { mode: "nokey", byKey: {}, thresholds: [], note: "menunggu profil per-key dari server" };
 async function loadGates() {
@@ -1977,13 +1974,9 @@ let _learnChipBound = false;
 function updateLearnChip() {
   const c = document.getElementById("learn-chip"); if (!c) return;
   const L = LEARNER_STATUS && LEARNER_STATUS.ledger, G = LEARNER_STATUS && LEARNER_STATUS.gates;
-  const mode = G && G.mode;
-  const learned = mode === "learned" || mode === "perkey";
-  const boot = mode === "bootstrap";
-  c.className = "learn-chip" + (learned ? " learned" : boot ? " bootstrap" : "");
-  // Teks dipersingkat (LRN n/target) karena topbar mobile sempit: nama mode cukup lewat
-  // warna chip (hijau = belajar, merah = bootstrap) + tooltip, bukan teks panjang.
-  const modeTxt = learned ? "AMBANG PER-KEY" : boot ? "BOOTSTRAP" : "PER-KEY (belum ada)";
+  const learned = !!(G && G.byKey && Object.keys(G.byKey).length);   // per-key aktif (dari server)
+  c.className = "learn-chip" + (learned ? " learned" : "");
+  const modeTxt = learned ? "AMBANG PER-KEY" : "PER-KEY (belum ada)";
   c.textContent = L
     ? `LRN ${L.canonicalWithRes || 0}/${L.target || 120}`
     : "LRN —";
@@ -2037,18 +2030,7 @@ async function loadLearn() {
     renderLessons();
   } catch (e) { LEARN.status = "error"; console.warn("[LEARN] load failed:", e.message); }
 }
-function learnNote(L) {
-  if (!L) return "";
-  const p = [];
-  if (L.intervalWR) p.push(`${L.ctx.interval} arah-close ${(L.intervalWR.wr * 100).toFixed(0)}% (n=${L.intervalWR.n})`);
-  if (L.dirWR != null) p.push(`entri ${L.ctx.minute === "1" ? "menit-1" : "menit " + L.ctx.minute} arah-close ${(L.dirWR * 100).toFixed(0)}% (n=${L.dirN})`);
-  if (L.touch != null) p.push(`kembali-ke-lock ${(L.touch * 100).toFixed(0)}% (gap ${L.ctx.gap}, n=${L.touchN})`);
-  if (!p.length) return "";
-  const tag = L.label === "KUAT" ? " · konteks KUAT ✔" : L.label === "LEMAH" ? " · ⚠ konteks LEMAH" : L.label === "CAMPURAN" ? " · konteks CAMPURAN" : "";
-  // Sumber tabel belajar harus jujur: model hasil ledger, atau tabel backtest 90 hari.
-  const src = (LEARN.gate && LEARN.gate.source === "ledger") ? `MODEL BELAJAR${LEARN.gate.version ? " " + String(LEARN.gate.version).slice(0, 16) : ""}` : (LEARN.gate ? "MODEL PER-KEY ($ akun)" : "ARSIP backtest (legacy)");
-  return `${src} (diuji): ${p.join(" · ")}${tag}.`;
-}
+/* (func learnNote DIHAPUS — inputnya learnLookup yang juga dihapus; klien tidak menghitung konteks.) */
 /* Jumlah aturan model: dukung DUA format — statis (array `rules`) & server (per-key `byKey`).
    Server /api/model/gate kini berformat byKey{TANPA `rules`} -> akses `.rules.length` dulu THROW
    ("Cannot read properties of undefined"), mematikan seluruh loadLearn. Helper ini aman (return 0). */
@@ -2185,7 +2167,7 @@ function renderLearnerStatus() {
     acts.push(learned ? `Data sudah cukup dan model belajar <b>sudah aktif</b>. Re-fit berikutnya: ${S.nextRefitAt ? new Date(S.nextRefitAt).toLocaleString() : "03:00 jam server"}.`
       : `Target data tercapai. Re-fit otomatis berikutnya <b>${S.nextRefitAt ? new Date(S.nextRefitAt).toLocaleString() : "03:00 jam server"}</b>, atau jalankan <code>POST /api/model/refit</code>. Model hanya dipakai bila <b>menang pada jendela uji</b>.`);
   }
-  if (g.mode === "bootstrap") acts.push(`Sedang <b>BOOTSTRAP</b> (ambang dilonggarkan supaya sinyal lebih sering) → winrate yang tampil memang lebih rendah. Ini disengaja sampai learner mengetatkan sendiri. Balik cepat: <code>GATES_MODE=strict</code>.`);
+  if (!learned) acts.push(`Ambang <b>numerik</b> per-key belum ada yang menang di jendela uji ($ akun masih sedikit) — gate berjalan dengan <b>tier per-key</b>, <b>tanpa ambang global</b>.`);
   if (lastKeep && !learned) acts.push(`Keputusan terakhir <b>DITAHAN</b>: ${esc(lastKeep.why || "")}.`);
   if (learned) acts.push(`Blocker konteks diterapkan <b>otomatis di server</b> per coin×TF (gerbang anti-perburukan $). Anti-snowball (ACF) menjamin cakupan sinyal tidak menuju nol.`);
   const blk = [...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])];
@@ -2206,7 +2188,7 @@ function renderLearnerStatus() {
   const _bk = Object.keys(Object.assign({}, _gatesByKey, _metaByKey, _applyByKey)).sort();
   const modelRows = _bk.map((k) => {
     const th = (_gatesByKey[k] && Array.isArray(_gatesByKey[k].thresholds) && _gatesByKey[k].thresholds.length)
-      ? _gatesByKey[k].thresholds.map((t) => `${t.f}${t.op}${t.t}`).join(" & ") : "\u2014 (bootstrap)";
+      ? _gatesByKey[k].thresholds.map((t) => `${t.f}${t.op}${t.t}`).join(" & ") : "\u2014 (per-key: belum ada)";
     const v = _metaByKey[k] || {}; const a = _applyByKey[k] || {};
     return `<div class="lstat-row"><b>${esc(k)}</b> <span class="lstat-dim">ambang: ${esc(th)} \u00b7 model: ${v.promoted ? "DIPAKAI" : "belum menang"} \u00b7 blocker: ${a.apply === false ? "OFF" : (a.apply === true ? "ON" : "\u2014")}</span></div>`;
   }).join("");
@@ -2249,7 +2231,7 @@ function renderLearnerStatus() {
       <div class="lstat-line">Yang dipelajari sistem: <b>(a) konteks</b> — kombinasi tier/aset/jam/interval yang historis lemah ditahan, yang kuat diunggulkan; <b>(b) ambang</b> — batas numerik (volRel2, surprise, gap, likuiditas) disesuaikan dari data nyata.</div>
       <div class="lstat-line">metode: mining konteks berbasis <b>mean-$ kontinu</b> (bukan WR) dengan uji selisih-means, split <b>70/30 berurutan waktu</b>; hanya aturan <b>single-feature</b> yang benar-benar bisa diterapkan live. Rule diterapkan hanya bila <b>tidak merusak $</b> vs baseline take-all. Keputusan pakai/tidak berbasis jendela uji $.</div>
       <div class="lstat-line">status MODEL konteks (aturan penahan): ${M.source === "learned" ? '<span class="lstat-badge ok">DIPAKAI</span>' : '<span class="lstat-badge def">DITAHAN</span>'} · diterapkan: ${([...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])].length) ? [...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])].map((k) => `<code>${esc(k)}</code>`).join(" · ") : '<span class="lstat-dim">belum ada penahan aktif</span>'}</div>
-      <div class="lstat-line">status AMBANG numerik (TERPISAH dari model konteks di atas): ${_allThr ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR AKTIF (semua key)</span>' : learned ? `<span class="lstat-badge ok">AMBANG NUMERIK AKTIF di ${_thrKeys.length}/${Object.keys(_bkG).length} key</span>` : '<span class="lstat-badge sup">AMBANG PER-KEY (belum ada key menang di jendela uji)</span>'} \u00b7 <span class="lstat-dim">tidak ada ambang global</span></div>
+      <div class="lstat-line">status AMBANG numerik (TERPISAH dari model konteks di atas): ${_allThr ? '<span class="lstat-badge ok">AMBANG NUMERIK AKTIF (semua key)</span>' : learned ? `<span class="lstat-badge ok">AMBANG NUMERIK AKTIF di ${_thrKeys.length}/${Object.keys(_bkG).length} key</span>` : '<span class="lstat-badge sup">AMBANG PER-KEY (belum ada key menang di jendela uji)</span>'} \u00b7 <span class="lstat-dim">tidak ada ambang global</span></div>
       ${jamInfo}
       <div class="lstat-line">ambang aktif: ${(g.thresholds && g.thresholds.length) ? g.thresholds.map((t) => `<code>${esc(t.f)} ${esc(t.op)} ${esc(t.t)}</code>`).join(" · ") : '<span class="lstat-dim">belum ada (memakai tier ladder saja)</span>'}</div>
       <div class="lstat-line lstat-dim">tier: STRONG volRel2≥${g.tiers ? g.tiers.STRONG.volRel2 : "—"}${g.tiers && g.tiers.STRONG.surprise ? " & surprise≥" + g.tiers.STRONG.surprise : ""} · GOOD ≥${g.tiers ? g.tiers.GOOD.volRel2 : "—"} · FAIR ≥${g.tiers && g.tiers.FAIR ? g.tiers.FAIR.volRel2 : "—"} · floor likuiditas ×${g.liqFloorMul != null ? g.liqFloorMul : "—"} · batas telat ${g.lateFrac != null ? (g.lateFrac * 100).toFixed(0) + "%" : "—"}${learned && g.promotedAt ? ` · dipromosikan ${new Date(g.promotedAt).toLocaleString()}` : ""}</div>
@@ -2394,67 +2376,7 @@ function renderLedgerStatus() {
 }
 setInterval(renderLedgerStatus, 10000);
 
-// TRAIL on a 15s-smoothed price (1s klines). Backtest (BTC+ETH, n=2651): trailing the smoothed
-// price by 0.01% after the lock turns the expectancy POSITIVE (+0.014%/trade, win 64%), while a
-// raw 1s trailing stop is whipsawed by noise. This is the practical way to capture more than the lock.
-
-// LOCK-TOUCH: at 2s the price sits a small distance from the lock; historically it comes back
-// with this probability (5m: 92.8% within 0.005%, 82.6% 0.005-0.01%, 79.5% 0.01-0.02%, ...).
-function lockTouchOf(tf, dist, dir) {
-  const t = (TIERS && TIERS.locktouch && TIERS.locktouch.tiers) ? TIERS.locktouch.tiers[tf] : null;
-  if (!t || !t.buckets) return null;
-  for (const b of t.buckets) {
-    const hi = b.hi == null ? Infinity : b.hi;
-    if (dist >= b.lo && dist < hi) {
-      return { dir, dist, rate: b.rate, tMed: b.tMed, ddMed: b.ddMed, tooClose: dist < 0.005, total: t.total };
-    }
-  }
-  return null;
-}
-// Measured winrate for the 2-second tiers (backtest/out/early2s.json).
-function early2sWR(grade) {
-  if (!TIERS || !TIERS.early2s || !TIERS.early2s.tiers) return null;
-  const t = TIERS.early2s.tiers[grade];
-  return t ? t.wr : null;
-}
-// Measured winrate for the exact minute the entry appeared (falls back to the grade table).
-function minuteWR(tf, minuteIn) {
-  if (!TIERS || !TIERS.byMinute) return null;
-  const t = TIERS.byMinute[tf];
-  const o = t && t[String(minuteIn)];
-  return o ? o.wr : null;
-}
-// Continuation potential after the price reaches the lock: how much further it typically runs
-// before reversing (measured on 90d). cp = continuation score (0-100).
-function continuationOf(tf, cp, isUp, price) {
-  const t = (TIERS && TIERS.continuation && TIERS.continuation.tiers) ? TIERS.continuation.tiers[tf] : null;
-  if (!t) return null;
-  const strong = cp >= 70, mid = cp >= 45;
-  const est = strong ? t.mfe.p75 : mid ? t.mfe.p50 : t.mfe.p25;
-  const prob = strong ? (t.probAligned ? t.probAligned.ge010 : t.prob.ge010) : t.prob.ge005;
-  const target = isUp ? price * (1 + est / 100) : price * (1 - est / 100);
-  return {
-    cp, est, prob,
-    peakMin: t.peakMin ? t.peakMin.p50 : null,
-    bucket: strong ? "lanjut kuat" : mid ? "lanjut sedang" : "mulai melemah",
-    target,
-  };
-}
-// CATATAN: string di bawah adalah KEY tabel kalibrasi lama (bukan ambang yang berlaku).
-// Jangan ditampilkan ke user tanpa label "kalibrasi ambang lama".
-function gradeVariant(tf, grade) {
-  if (grade === "STRONG") return "OFI strong+vol>=3";
-  if (grade === "GOOD") return "OFI agree+vol>=3";
-  if (grade === "FAIR") return tf === "5m" ? "OFI agree+vol>=0.5" : tf === "15m" ? "OFI agree+vol>=2" : "OFI agree+vol>=1.5";
-  return null;
-}
-function gradeWR(tf, grade) {
-  if (!TIERS || !TIERS.tiers) return null;
-  const v = gradeVariant(tf, grade);
-  if (!v) return null;
-  const o = TIERS.tiers[`${tf}|${v}`];
-  return o ? o.wr : null;
-}
+// (Fungsi kalibrasi lama TIERS/locktouch/early2s/continuation/gradeWR DIHAPUS — tabel statis tak dipakai; ambang dari server.)
 // Minimum volume pace for the FAIR tier, per interval (calibrated 30d).
 // Ambang volume yang SEDANG BERLAKU untuk tier FAIR — dibaca dari profil gate aktif,
 // bukan angka tetap, supaya teks UI tidak pernah menyimpang dari gate yang dipakai.
@@ -4193,7 +4115,7 @@ window.__comboStatus = function () {
   console.table(rows);
   console.log(
     "connected:", state.connected,
-    "· transport:", state.viaProxy ? "proxy/SSE" : usingTV ? "tradingview" : "ws",
+    "· transport:", state.viaProxy ? "proxy/SSE" : "server-relay",
     "· pending:", PendingSig.size(),
     "· history:", SignalLog.size(),
     "· gate:", GATE_STATUS
@@ -4225,9 +4147,9 @@ function ensureLearnerPanel() {
     d.className = "learn-status"; d.id = "learn-status"; d.open = true;
     d.innerHTML = `<summary>STATUS LEARNER · PROGRESS, PELAJARAN &amp; PENYESUAIAN ▾</summary>
       <div class="lstat-hint">Panel ini menunjukkan apa yang sedang dipelajari sistem dari sinyal nyata dan
-      penyesuaian apa yang sudah/akan diterapkan. Model belajar hanya menggantikan tabel backtest bila
-      <b>menang pada jendela uji</b> (split berurutan waktu + Wilson bound). Sesi yang <b>ditolak</b> gate
-      tetap direkam supaya ambangnya bisa dipelajari dari data.</div>
+      penyesuaian apa yang sudah/akan diterapkan. Model dibangun <b>per coin×TF dari $ akun Binance</b>
+      (bukan proksi), hanya dipakai bila <b>$ menang pada jendela uji</b> (anti-perburukan, tanpa ambang global).
+      Sesi yang <b>ditolak</b> gate tetap direkam supaya ambangnya bisa dipelajari. Anti-snowball (ACF) menjaga cakupan sinyal.</div>
       <div id="lstat-body" class="lstat-body">memuat…</div>`;
     const anchor = document.querySelector("details.help") || document.querySelector(".conf-debug");
     if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(d, anchor); else document.body.appendChild(d);

@@ -1017,19 +1017,20 @@
         const j = await r.json();
         const L = j.ledger || {}, M = j.model || {}, G = j.gates || {}, C = j.capture || {};
         const pct = Math.round((L.pct || 0) * 1000) / 10;
-        const learned = G.mode === "learned";
-        const badge = learned ? "AMBANG HASIL BELAJAR" : (G.mode === "strict" ? "AMBANG KONSERVATIF" : "BOOTSTRAP (DILONGGARKAN)");
-        const th = (G.thresholds && G.thresholds.length) ? G.thresholds.map((t) => `${t.f} ${t.op} ${t.t}`).join(" & ") : "belum ada (tier ladder saja)";
-        const T = G.tiers || {};
+        const _bk = (G && G.byKey) || {};
+        const _bkKeys = Object.keys(_bk);
+        const _thrKeys = _bkKeys.filter((k) => Array.isArray(_bk[k] && _bk[k].thresholds) && _bk[k].thresholds.length);
+        const badge = _bkKeys.length ? "AMBANG PER-KEY (dari server)" : "PER-KEY BELUM ADA";
+        const th = _thrKeys.length ? `${_thrKeys.length}/${_bkKeys.length} key punya ambang numerik` : "belum ada ambang numerik (tier per-key saja)";
+        const _k0 = _bkKeys[0]; const T = (_k0 && _bk[_k0] && _bk[_k0].tiers) || {}; const _any = _k0 ? (_bk[_k0] || {}) : {};
         el.innerHTML = `
           <div style="font-weight:800;color:var(--text);margin-bottom:0.25rem;">${badge}</div>
           <div>progress: <b style="color:var(--text)">${L.canonicalWithRes || 0}/${L.target || 120}</b> sinyal kanonik berhasil (${pct}%)</div>
           <div>data: ${L.total || 0} record · kanonik ${L.canonical || 0} · tengah sesi (dibuang) ${L.late || 0}</div>
           <div>capture server: ${C.enabled ? `aktif — ${C.captured || 0} tersimpan · ${C.accepted || 0} lolos gate · ${C.rejected || 0} ditolak (tetap direkam)` : "mati"}</div>
           <div>ambang aktif: ${th}</div>
-          <div>tier: STRONG≥${T.STRONG ? T.STRONG.volRel2 : "—"} · GOOD≥${T.GOOD ? T.GOOD.volRel2 : "—"} · FAIR≥${T.FAIR ? T.FAIR.volRel2 : "—"} · floor ×${G.liqFloorMul != null ? G.liqFloorMul : "—"} · telat ${G.lateFrac != null ? (G.lateFrac * 100).toFixed(0) + "%" : "—"}</div>
-          <div>model: ${learned ? `hasil belajar · versi ${String(M.version).slice(0, 19)}` : "default (backtest 90d) — belum ada model belajar"}</div>
-          ${G.metrics ? `<div>winrate uji ambang aktif: ${(G.metrics.takenWinrate * 100).toFixed(1)}% (cakupan ${(G.metrics.coverage * 100).toFixed(0)}%)</div>` : ""}
+          <div>tier (contoh ${_k0 || "-"}): STRONG≥${T.STRONG ? T.STRONG.volRel2 : "—"} · GOOD≥${T.GOOD ? T.GOOD.volRel2 : "—"} · FAIR≥${T.FAIR ? T.FAIR.volRel2 : "—"} · floor ×${_any.liqFloorMul != null ? _any.liqFloorMul : "—"} · telat ${_any.lateFrac != null ? (_any.lateFrac * 100).toFixed(0) + "%" : "—"}</div>
+          <div>model: ${M.version ? `versi ${String(M.version).slice(0, 19)}` : "belum ada"} · per coin×TF ($ akun Binance)</div>
         `;
       } catch (e) { el.textContent = "status learner tidak tersedia (" + (e.message || "gagal") + ")"; }
     }

@@ -15,7 +15,6 @@
    Polling hanya berjalan bila ada subscriber (hemat kuota Binance).
    ============================================================================ */
 const { computeSignal, DUR_S } = require("./capture.js");
-const GATES_DEF = require("./gates.js");
 const FLOW = require("./flow.js");        // OFI live (order flow per menit)
 const TRADE = require("./trade-plan.js");  // TRADE ASSISTANT: modul bersama (server + browser)
 const CONF = require("./confidence.js");  // MODEL CONFIDENCE: modul bersama (server + browser)

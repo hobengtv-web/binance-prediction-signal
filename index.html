@@ -169,9 +169,9 @@
     <!-- Status teknis (kapan sinyal dikunci) — sengaja kecil; teks panjang ada di tooltip -->
     <div id="calcStatus">Evaluating session…</div>
 
-    <!-- INFO AMBANG AKTIF (profil gate: bootstrap / hasil belajar) -->
+    <!-- INFO AMBANG AKTIF (profil gate PER coin×TF dari server) -->
     <div style="padding-top:8px; margin-top:10px; border-top:1px solid var(--border);">
-      <div style="font-size:11px; color:var(--muted); margin-bottom:4px;">AMBANG AKTIF (profil gate)</div>
+      <div style="font-size:11px; color:var(--muted); margin-bottom:4px;">AMBANG AKTIF (profil gate · per coin×TF)</div>
       <div id="gate-line" style="font-size:10.5px;color:var(--muted);line-height:1.5;">AMBANG AKTIF: memuat…</div>
     </div>
     
@@ -218,25 +218,25 @@
     <summary>STATUS LEARNER · PROGRESS, PELAJARAN &amp; PENYESUAIAN ▾</summary>
     <div class="lstat-hint">
       Panel ini menunjukkan apa yang sedang dipelajari sistem dari sinyal nyata dan penyesuaian apa
-      yang sudah/akan diterapkan. Model belajar hanya menggantikan tabel backtest bila
-      <b>menang pada jendela uji</b> (split berurutan waktu + Wilson bound) — tidak ada promosi tanpa bukti.
-      Sesi yang <b>ditolak</b> gate tetap direkam supaya ambangnya bisa dipelajari dari data.
-      Balik ke ambang konservatif tanpa deploy: set env server <code>GATES_MODE=strict</code>.
+      yang sudah/akan diterapkan. Model dibangun <b>per coin×TF</b> dari <b>$ akun Binance</b> (bukan
+      proksi), hanya dipakai bila <b>$ menang pada jendela uji</b> (gerbang anti-perburukan) — tidak ada
+      promosi tanpa bukti dan <b>tanpa ambang global</b>. Sesi yang <b>ditolak</b> gate tetap direkam
+      supaya ambangnya bisa dipelajari. Anti-snowball (ACF) menjaga cakupan sinyal agar tidak menuju nol.
     </div>
     <div id="lstat-body" class="lstat-body">memuat…</div>
   </details>
 
-  <!-- PHASE 1 LEARNER: pelajaran dari sinyal yang sudah berlalu (lihat backtest/learn.js) -->
+  <!-- PELAJARAN: konteks per coin×TF dari $ akun (diproses SERVER) -->
   <details class="lessons" id="lessons">
-    <summary>PELAJARAN DARI SINYAL LALU · LEARNER 90d ▾</summary>
+    <summary>PELAJARAN DARI SINYAL LALU · PER KEY ($ AKUN) ▾</summary>
     <div class="ls-hint">
-      Tabel konteks tervalidasi <b>walk-forward</b>: dilatih pada 70% data paling awal, diuji pada 30% data
-      paling akhir, dinilai dengan <b>Wilson bound</b> — bukan winrate mentah. Hanya konteks yang lolos uji
-      ditampilkan. Angka di panel REASON (baris <b>BELAJAR 90d</b>) memakai tabel ini secara langsung.
+      Konteks per <b>coin×TF</b> dari <b>$ akun Binance</b> (bukan proksi/backtest 90d): fitur
+      (single &amp; interaksi) dengan rata-rata $ tertinggi/terendah, diuji pada jendela terbaru.
+      Seluruh perhitungan &amp; keputusan dijalankan <b>di server</b>; klien hanya menampilkan.
     </div>
     <div id="lessons-body" class="ls-body"></div>
     <div class="ls-foot">
-      <span id="ls-status">—</span> · tahan sinyal pada konteks lemah: <code>window.setLearnBlock(true)</code>
+      <span id="ls-status">—</span> · penahan konteks lemah diterapkan <b>otomatis di server</b> (anti-snowball/ACF).
     </div>
     <div class="ls-foot">
       <b>LEDGER BELAJAR</b> <span id="ls-ledger">memuat…</span>
@@ -274,11 +274,11 @@
       <p><b>CONFIDENCE</b> = skor keyakinan tampilan (pola candle + RSI + momentum + likuiditas + faktor kelayakan). Ini indikator bantu; yang mengikat adalah <b>tier + ambang gate</b> dan <b>hit rate terukur</b> yang tertulis di REASON.</p>
       <p><b>Tab SIGNAL / UP / DOWN:</b> SIGNAL = keyakinan mengikuti sinyal 2 detik yang aktif; UP/DOWN = paksa tampilan untuk arah itu (untuk memantau skenario arah lawan).</p>
       <p><b>DESKTOP SIGNAL ACCURACY:</b> riwayat sinyal desktop (hijau benar / merah salah). Tombol <b>reset</b> hanya menghapus riwayat tampilan di browser ini — <b>ledger belajar di server tidak terhapus</b>.</p>
-      <p><b>Learner (tanpa AI):</b> setiap sesi — termasuk yang <b>ditolak</b> gate — direkam beserta hasilnya. Re-fit harian menyesuaikan <b>konteks</b> (bucket + Wilson bound) dan <b>ambang</b> (coordinate ascent memaksimalkan Wilson lower bound), dinilai <b>walk-forward</b> (70% data awal untuk latih, 30% paling akhir untuk uji). Model hanya menggantikan yang berjalan bila <b>menang pada jendela uji</b>, dan setiap keputusan tercatat beserta alasannya. Pantau di panel <b>STATUS LEARNER</b>. Balik ke ambang konservatif: env server <code>GATES_MODE=strict</code>.</p>
+      <p><b>Learner (tanpa AI, 100% server):</b> setiap sesi — termasuk yang <b>ditolak</b> gate — direkam beserta hasilnya. Model dibangun <b>per coin×TF</b> dari <b>$ akun Binance</b> (bukan proksi), re-fit otomatis tiap ≤1 jam + adaptasi online saat ada trade baru. Keputusan (konteks, tier, ambang, veto, kill-switch regime) hanya dipakai bila <b>$ menang pada jendela uji</b>; ada gerbang anti-perburukan &amp; anti-snowball (ACF). Setiap keputusan tercatat beserta alasannya. Pantau di panel <b>STATUS LEARNER</b>. Tidak ada ambang global.</p>
       <p><b>SUARA NOTIFIKASI:</b> browser memblokir audio sampai ada interaksi pertama. Klik sekali di halaman
       (atau tombol <b>🔇 suara</b> di header) untuk mengaktifkan — indikator berubah menjadi <b>🔊 suara</b>.
       Selama masih 🔇 alarm tetap berjalan secara visual (kartu coin berkedip/glow) tetapi tanpa bunyi.</p>
-      <p class="help-cta"><b>Cara pakai:</b> (1) baca <b>AMBANG AKTIF</b> untuk tahu sedang mode bootstrap (longgar) atau ambang hasil belajar; (2) tunggu <b>Recommendation: UP/DOWN</b> (sinyal lolos gate) dan ikuti <b>TRADE ASSISTANT</b> untuk entry/exit; (3) entry contra-lock: tunggu harga di sisi BERLAWANAN dari LOCK (rek UP -> harga di bawah LOCK lalu BELI; rek DOWN -> di atas LOCK lalu JUAL); (4) exit sesuai instruksi (JUAL DI LOCK / LADDER / TRAIL) — jangan menahan sampai settle; (5) cek <b>STATUS LEARNER</b> untuk progres data &amp; ambang yang dipakai.</p>
+      <p class="help-cta"><b>Cara pakai:</b> (1) baca <b>AMBANG AKTIF</b> (profil gate per coin×TF dari server); (2) tunggu <b>Recommendation: UP/DOWN</b> (sinyal lolos gate) dan ikuti <b>TRADE ASSISTANT</b> untuk entry/exit; (3) entry contra-lock: tunggu harga di sisi BERLAWANAN dari LOCK (rek UP -> harga di bawah LOCK lalu BELI; rek DOWN -> di atas LOCK lalu JUAL); (4) exit sesuai instruksi (JUAL DI LOCK / LADDER / TRAIL) — jangan menahan sampai settle; (5) cek <b>STATUS LEARNER</b> untuk progres data &amp; ambang yang dipakai.</p>
     </div>
   </details>
 

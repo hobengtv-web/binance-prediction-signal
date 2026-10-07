@@ -427,17 +427,9 @@ function computeSignal(o) {
       taTrailCbPct: (_ta && _ta.best) ? _ta.best.cb : null,        // B14 (callback trailing per key)
     };
   } catch (_) {}
-  // SELECTIVE ENTRY (B17): skor sinyal live di bawah ambang per-key -> tolak.
-  let scoreGated = false;
-  if (explore < 1 && extras.minScorePct != null && power && typeof power.pct === "number" && power.pct < extras.minScorePct) {
-    accepted = false; reject = "score-low"; scoreGated = true;
-  }
-  // ===== POWER SINYAL U/D (KOSMETIK, dihitung di AKHIR) =====
-  // 100% = tepat di ambang minimum; >100% = melampaui; <100% = ADA kriteria belum terpenuhi.
-  // FIX: kini MEMASUKKAN semua kriteria penolakan (regime/key-EV, RSI-1m, score selektif) sehingga
-  // power TIDAK bisa >100% saat sinyal ditolak oleh kriteria tsb (dulu bisa 126-129% padahal rejected).
-  let power = null;
-  try {
+  // ===== POWER SINYAL U/D (KOSMETIK) — part dibangun via fungsi, dipakai utk score gate & final =====
+  // Menyertakan SEMUA kriteria penolakan (regime/key-EV, RSI-1m, score) -> power <100% bila ada yg gagal.
+  function buildPowerParts() {
     const parts = [];
     const add = (label, ratio, met) => parts.push({ label, ratio: +Math.max(0, Math.min(3, ratio)).toFixed(3), met: !!met });
     const FV = (T && T.FAIR && T.FAIR.volRel2) || 0, FS = (T && T.FAIR && T.FAIR.surprise) || 0;
@@ -451,15 +443,30 @@ function computeSignal(o) {
     add("vol veto", pv.vol ? 0 : 1, !pv.vol);
     add("jam veto", pv.hour ? 0 : 1, !pv.hour);
     add("liqLow", liqLow ? 0 : 1, !liqLow);
-    add("regime/key-EV", P.keyEvGated ? 0 : 1, !P.keyEvGated);                       // FIX: dulu tak dihitung
+    add("regime/key-EV", P.keyEvGated ? 0 : 1, !P.keyEvGated);
     add("learner-block", (learn && learn.blocking) ? 0 : 1, !(learn && learn.blocking));
-    if (extras && extras.minScorePct != null) add("skor selektif", scoreGated ? 0 : 1, !scoreGated);  // FIX
-    if (process.env.RSI1M_GATE === "1") add("RSI 1m", rsi1mGated ? 0 : 1, !rsi1mGated);               // FIX
+    return parts;
+  }
+  const _finalizePower = (parts) => {
     const psum = parts.reduce((a, x) => a + x.ratio, 0);
     const metN = parts.filter((p) => p.met).length;
     let pct = parts.length ? 100 * psum / parts.length : (accepted ? 100 : 0);
     if (parts.length && metN < parts.length) pct = Math.min(pct, 100 * metN / parts.length);
-    power = { pct: Math.round(pct), parts, accepted: !!accepted, allMet: metN === parts.length };
+    return { pct: Math.round(pct), parts, accepted: !!accepted, allMet: metN === parts.length };
+  };
+  // SELECTIVE ENTRY (B17): skor live (power dasar) di bawah ambang per-key -> tolak.
+  let scoreGated = false;
+  const _basePower = _finalizePower(buildPowerParts());
+  if (explore < 1 && extras.minScorePct != null && typeof _basePower.pct === "number" && _basePower.pct < extras.minScorePct) {
+    accepted = false; reject = "score-low"; scoreGated = true;
+  }
+  // POWER final — menyertakan part skor selektif & RSI-1m.
+  let power = null;
+  try {
+    const parts = buildPowerParts();
+    if (extras && extras.minScorePct != null) parts.push({ label: "skor selektif", ratio: scoreGated ? 0 : 1, met: !scoreGated });
+    if (process.env.RSI1M_GATE === "1") parts.push({ label: "RSI 1m", ratio: rsi1mGated ? 0 : 1, met: !rsi1mGated });
+    power = _finalizePower(parts);
   } catch (_) {}
   // ACF: rekam keputusan akhir sesi ini (untuk lantai cakupan adaptif / anti-snowball)
   _acf.record(_key, t0, (flatReason && !flatEntry) ? false : !!accepted);

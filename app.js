@@ -56,8 +56,8 @@ try {
 // DATA PASAR MENTAH diambil LANGSUNG dari Binance oleh browser (IP tiap user) -> server tak menanggung
 // beban pasar (cegah 418). LOGIKA (sinyal/gate/learner/TA/prediksi) tetap 100% di server.
 const REST_HOSTS = [
-  "https://api.binance.com",
   "https://data-api.binance.vision",
+  "https://api.binance.com",
   "https://api1.binance.com",
 ];
 const WS_HOSTS = [
@@ -783,7 +783,7 @@ function applyType() {
       else { pk.textContent = "—"; pk.className = ""; }
     }
     if (rv) {
-      if (o.verdict !== "flat" && o.mode.indexOf("REVERSAL") === 0) { rv.textContent = o.verdict === "up" ? "FADE UP" : "FADE DOWN"; rv.className = o.verdict === "up" ? "up" : "down"; }
+      if (o.verdict !== "flat" && String(o.mode || "").indexOf("REVERSAL") === 0) { rv.textContent = o.verdict === "up" ? "FADE UP" : "FADE DOWN"; rv.className = o.verdict === "up" ? "up" : "down"; }
       else { rv.textContent = "—"; rv.className = ""; }
     }
     if (rw) {
@@ -1065,7 +1065,7 @@ function applyType() {
       : `Evaluating session, open +${elapsedSec}s · ${liveSig ? liveSig.mode : "collecting data"}`;
     if (uni && uni.verdict !== "flat") {
       finalVerdict = uni.verdict;
-      mode = uni.mode;
+      mode = uni.mode || "—";          // sinyal late (60s/90s) tak punya `mode` -> default "—"
       conf = uni.conf;
       gateInfo = gateLookup(gateKey(state.interval, uni.mode, uni.verdict, uni.rsi, uni.histStrength));
     } else if (uni) {

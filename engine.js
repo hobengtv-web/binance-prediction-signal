@@ -631,7 +631,7 @@ function createEngine(deps) {
 
   function start() {
     stats.subscribers = 0;
-    setInterval(() => loop().catch(() => {}), 2000);
+    setInterval(() => loop().catch(() => {}), 2500);   // cadence lebih santai (beban Binance server)
     setTimeout(() => loop().catch(() => {}), 300);
     log(`[ENGINE] aktif — sinyal server-side untuk ${TFS.join(", ")} (polling hanya bila ada subscriber)`);
   }

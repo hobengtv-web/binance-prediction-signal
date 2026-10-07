@@ -1671,7 +1671,7 @@ function startPolling() {
   probeProxy().then((snap) => {
     if (snap) {
       state.viaProxy = true; setConn(true); setSrc("proxy ↻ 1s"); applySnapshot(snap, true); hideStatus();
-      setInterval(pollProxy, 1000);
+      setInterval(pollProxy, 4000);   // 100% server-based: kurangi beban Binance proxy (cegah 418)
     } else {
       setSrc("server (relay)");
       loadHistory().then(connectWS).catch(connectWS);

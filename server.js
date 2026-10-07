@@ -795,16 +795,33 @@ function fallbackPoll() {
    - /api/v3/*      : proxy transparan REST Binance (time/klines/depth/ticker) dgn fallback host.
    - /api/market-stream : relay WS Binance (kline/ticker) -> SSE; satu upstream dibagi ke semua klien. */
 const BN_REST_HOSTS = ["https://data-api.binance.vision", "https://api.binance.com", "https://api1.binance.com"];
+// Cache + koalesensi + backoff 418/429 (proxy ini dipakai klien DAN fallback relay -> jangan boros).
+const _pxCache = new Map(), _pxInflight = new Map();
+let _pxBanUntil = 0;
+function _pxTtl(p) { return p.includes("klines") ? 3000 : p.includes("ticker") ? 5000 : p.includes("depth") ? 3000 : p.includes("time") ? 2000 : 2000; }
 async function proxyBinanceV3(pathname, search) {
-  let lastErr = null;
-  for (const h of BN_REST_HOSTS) {
-    try {
-      const r = await fetch(h + pathname + (search || ""), { cache: "no-store" });
-      const body = await r.text();
-      return { status: r.status, body, ctype: r.headers.get("content-type") || "application/json" };
-    } catch (e) { lastErr = e; }
-  }
-  return { status: 502, body: JSON.stringify({ error: "proxy gagal: " + String(lastErr) }), ctype: "application/json" };
+  const key = pathname + (search || "");
+  const now = Date.now();
+  const c = _pxCache.get(key);
+  if (c && now - c.t < _pxTtl(key)) return c.r;
+  if (now < _pxBanUntil) return c ? c.r : { status: 429, body: JSON.stringify({ error: "binance cooldown (418/429)" }), ctype: "application/json" };
+  if (_pxInflight.has(key)) return _pxInflight.get(key);
+  const p = (async () => {
+    let lastErr = null;
+    for (const h of BN_REST_HOSTS) {
+      try {
+        const r = await fetch(h + key, { cache: "no-store", signal: AbortSignal.timeout(8000) });
+        const body = await r.text();
+        if (r.status === 418 || r.status === 429) { const ra = Number(r.headers.get("retry-after") || 0); _pxBanUntil = Date.now() + Math.max(60000, ra * 1000); }
+        const res = { status: r.status, body, ctype: r.headers.get("content-type") || "application/json" };
+        if (r.ok) _pxCache.set(key, { t: Date.now(), r: res });
+        return res;
+      } catch (e) { lastErr = e; }
+    }
+    return c ? c.r : { status: 502, body: JSON.stringify({ error: "proxy gagal: " + String(lastErr) }), ctype: "application/json" };
+  })();
+  _pxInflight.set(key, p);
+  try { return await p; } finally { _pxInflight.delete(key); }
 }
 const BN_WS_HOSTS = ["wss://stream.binance.com:9443", "wss://data-stream.binance.vision"];
 let _mstreamClients = new Set(), _mstreamWs = null, _mstreamIdx = 0, _mstreamGotData = false, _mstreamPoll = null, _mstreamPollN = 0;
@@ -829,7 +846,7 @@ function _mstreamPollEmit() {
     if ((_mstreamWs && _mstreamGotData) || _mstreamClients.size === 0) { clearInterval(_mstreamPoll); _mstreamPoll = null; return; }
     try {
       _mstreamPollN++;
-      const alsoTf = (_mstreamPollN % 8 === 0);   // tiap ~10s, segarkan seri 5m/15m/1h juga
+      const alsoTf = (_mstreamPollN % 12 === 0);   // tiap ~30s, segarkan seri 5m/15m/1h
       for (const symBin of ["BTCUSDT", "ETHUSDT", "BNBUSDT"]) {
         const low = symBin.toLowerCase();
         let rows = [];
@@ -845,14 +862,16 @@ function _mstreamPollEmit() {
             } catch (_) {}
           }
         }
-        try {
-          const t = await proxyBinanceV3("/api/v3/ticker/24hr", `?symbol=${symBin}`);
-          const tj = JSON.parse(t.body);
-          if (tj && tj.lastPrice != null) _mstreamEmit({ stream: `${low}@ticker`, data: { e: "24hrTicker", s: symBin, c: tj.lastPrice, P: tj.priceChangePercent } });
-        } catch (_) {}
+        if (_mstreamPollN % 2 === 0) {   // ticker tiap ~5s (lebih ringan)
+          try {
+            const t = await proxyBinanceV3("/api/v3/ticker/24hr", `?symbol=${symBin}`);
+            const tj = JSON.parse(t.body);
+            if (tj && tj.lastPrice != null) _mstreamEmit({ stream: `${low}@ticker`, data: { e: "24hrTicker", s: symBin, c: tj.lastPrice, P: tj.priceChangePercent } });
+          } catch (_) {}
+        }
       }
     } catch (_) {}
-  }, 1200);
+  }, 2500);
 }
 function _startMstream() {
   if (_mstreamWs || typeof WebSocket === "undefined") { if (typeof WebSocket === "undefined") _mstreamPollEmit(); return; }

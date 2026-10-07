@@ -21,28 +21,68 @@ const FUTURES_REST = [
   "https://fapi.binance.com",
 ];
 
+// ===== CACHE + KOALESENSI + CIRCUIT-BREAKER =====
+// Semua beban Binance kini di SERVER (klien 100% via server). Tanpa cache, banyak klien + engine
+// menembak Binance bertubi -> 418 (IP ban). Cache TTL + dedupe in-flight + backoff saat 418/429.
+const _cache = new Map();        // path -> { t, v }
+const _inflight = new Map();     // path -> Promise (dedupe request bersamaan)
+let _banUntil = 0;               // cooldown global saat Binance balas 418/429
+function ttlFor(path) {
+  if (path.includes("/klines")) return 3000;
+  if (path.includes("/ticker")) return 5000;
+  if (path.includes("/depth")) return 3000;
+  if (path.includes("/time")) return 2000;
+  return 2000;
+}
 async function getJSON(path) {
-  let lastErr;
-  for (const h of REST) {
-    try {
-      // timeout per host supaya satu host yang menggantung tidak memblokir seluruh refresh
-      const r = await fetch(h + path, { signal: AbortSignal.timeout(8000) });
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return await r.json();
-    } catch (e) { lastErr = e; }
+  const now = Date.now();
+  const c = _cache.get(path);
+  if (c && now - c.t < ttlFor(path)) return c.v;
+  if (now < _banUntil) {
+    if (c) return c.v;                                  // pakai data lama agar UI tetap hidup
+    throw new Error("binance cooldown aktif (418/429)");
   }
-  throw lastErr;
+  if (_inflight.has(path)) return _inflight.get(path);
+  const p = (async () => {
+    let lastErr;
+    for (const h of REST) {
+      try {
+        const r = await fetch(h + path, { signal: AbortSignal.timeout(8000) });
+        if (r.status === 418 || r.status === 429) {
+          const ra = Number(r.headers.get("retry-after") || 0);
+          _banUntil = Date.now() + Math.max(60000, ra * 1000);   // backoff (min 60s)
+          throw new Error("HTTP " + r.status);
+        }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const v = await r.json();
+        _cache.set(path, { t: Date.now(), v });
+        return v;
+      } catch (e) { lastErr = e; }
+    }
+    if (c) return c.v;                                  // gagal total -> data lama (fail-soft)
+    throw lastErr;
+  })();
+  _inflight.set(path, p);
+  try { return await p; } finally { _inflight.delete(path); }
 }
 
+const _futCache = new Map();
 async function getFuturesJSON(path) {
+  const now = Date.now();
+  const c = _futCache.get(path);
+  if (c && now - c.t < 15000) return c.v;
+  if (now < _banUntil) { if (c) return c.v; throw new Error("binance cooldown aktif"); }
   let lastErr;
   for (const h of FUTURES_REST) {
     try {
-      const r = await fetch(h + path);
+      const r = await fetch(h + path, { signal: AbortSignal.timeout(8000) });
       if (!r.ok) throw new Error("HTTP " + r.status);
-      return await r.json();
+      const v = await r.json();
+      _futCache.set(path, { t: Date.now(), v });
+      return v;
     } catch (e) { lastErr = e; }
   }
+  if (c) return c.v;
   throw lastErr;
 }
 

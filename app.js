@@ -1956,16 +1956,15 @@ const LIVE = (() => {
    profil bootstrap (dilonggarkan untuk mengumpulkan data); begitu learner punya cukup bukti
    uji, profil `learned` menggantikannya. Nilai fallback di bawah hanya dipakai bila server
    tidak terjangkau, supaya aplikasi tetap berjalan. */
-let GATES = {
-  mode: "bootstrap",
-  tiers: { STRONG: { volRel2: 3, surprise: 3 }, GOOD: { volRel2: 1.5, surprise: 2 }, FAIR: { volRel2: 0.3, surprise: 0 } },
-  liqFloorMul: 0.12, lateFrac: 0.85, thresholds: [],
-  note: "fallback lokal (server tidak terjangkau)",
-};
+// TANPA default global. Profil ambang SELALU dari SERVER (/api/model/gates, per-key).
+let GATES = { mode: "nokey", byKey: {}, thresholds: [], note: "menunggu profil per-key dari server" };
 async function loadGates() {
   try {
     const r = await fetch("/api/model/gates", { cache: "no-store" });
-    if (r.ok) { const g = await r.json(); if (g && g.tiers) { GATES = g; console.log(`[GATES] profil ${g.mode}${g.thresholds && g.thresholds.length ? " · threshold " + g.thresholds.map((t) => `${t.f}${t.op}${t.t}`).join(" ") : ""}`); } }
+    if (r.ok) {
+      const g = await r.json();
+      if (g && (g.byKey || g.tiers)) { GATES = g; console.log(`[GATES] profil ${g.mode} · key ${g.byKey ? Object.keys(g.byKey).length : 0}`); }
+    }
   } catch (_) {}
   renderGateLine();
   renderLessons();
@@ -2007,7 +2006,8 @@ function renderGateLine() {
   const a = document.getElementById("help-gates"); if (a) a.textContent = sum;
   const b = document.getElementById("help-gate-mode"); if (b) b.textContent = GATES.mode;
   const c = document.getElementById("gate-line");
-  const html = `${(GATES.mode === "learned" || GATES.mode === "perkey") ? '<span class="lstat-badge ok">AMBANG PER-KEY</span>' : (GATES.mode === "strict" ? '<span class="lstat-badge def">AMBANG KONSERVATIF</span>' : '<span class="lstat-badge sup">PER-KEY BELUM ADA</span>')} <b>AMBANG AKTIF:</b> ${sum}`;
+  const hasPerKey = GATES && GATES.byKey && Object.keys(GATES.byKey).length;
+  const html = `${hasPerKey ? '<span class="lstat-badge ok">AMBANG PER-KEY AKTIF</span>' : '<span class="lstat-badge sup">PER-KEY BELUM ADA</span>'} <b>AMBANG AKTIF (profil gate):</b> ${sum}`;
   if (c) c.innerHTML = html;   // hanya versi mobile (section.confidence)
 }
 // Terapkan threshold hasil belajar (lapisan kedua setelah tier ladder).
@@ -2459,23 +2459,38 @@ function gradeWR(tf, grade) {
 // Ambang volume yang SEDANG BERLAKU untuk tier FAIR — dibaca dari profil gate aktif,
 // bukan angka tetap, supaya teks UI tidak pernah menyimpang dari gate yang dipakai.
 function fairMinVol(tf) {
-  const T = GATES && GATES.tiers;
-  return (T && T.FAIR && T.FAIR.volRel2 != null) ? T.FAIR.volRel2 : 0.9;
+  // Ambang FAIR milik key (coin×TF) dari profil SERVER. Tanpa fallback global.
+  const G = GATES || {};
+  let T = G.tiers;
+  if (!T && G.byKey) { for (const k of Object.keys(G.byKey)) { if (k.endsWith("_" + tf) && G.byKey[k] && G.byKey[k].tiers) { T = G.byKey[k].tiers; break; } } }
+  return (T && T.FAIR && T.FAIR.volRel2 != null) ? T.FAIR.volRel2 : null;
 }
 // Ringkasan ambang aktif untuk ditampilkan di UI (satu sumber kebenaran).
 function gatesSummary() {
-  const T = (GATES && GATES.tiers) || null;
-  if (!T) return "—";
-  const thTxt = (GATES.thresholds && GATES.thresholds.length)
-    ? GATES.thresholds.map((t) => `${t.f}${t.op}${t.t}`).join(" & ") : "";
-  const learned = GATES.mode === "learned";
-  const tierTxt = `${learned ? "label tier" : "tier"} STRONG volRel2≥${T.STRONG.volRel2}${T.STRONG.surprise ? " & surprise≥" + T.STRONG.surprise : ""}` +
-    ` · GOOD ≥${T.GOOD.volRel2}${T.GOOD.surprise ? " & surprise≥" + T.GOOD.surprise : ""} · FAIR ≥${T.FAIR.volRel2}`;
-  const tail = `floor likuiditas ×${GATES.liqFloorMul} · batas telat ${(GATES.lateFrac * 100).toFixed(0)}% · mode ${GATES.mode}`;
-  // Saat mode learned, yang MENGIKAT adalah daftar ambang hasil belajar — tampilkan lebih dulu.
-  return learned && thTxt
-    ? `ambang efektif: ${thTxt} · ${tierTxt} · ${tail}`
-    : `${tierTxt}${thTxt ? " · ambang: " + thTxt : ""} · ${tail}`;
+  const G = GATES || {};
+  // Profil per-key (server): ringkas tier & threshold per coin×TF yang BENAR-BENAR berlaku.
+  if (G.byKey && Object.keys(G.byKey).length) {
+    const keys = Object.keys(G.byKey);
+    const parts = keys.slice(0, 4).map((k) => {
+      const e = G.byKey[k] || {}; const T = e.tiers || {};
+      const t = [["S", T.STRONG], ["G", T.GOOD], ["F", T.FAIR]].filter((x) => x[1] && x[1].volRel2 != null)
+        .map((x) => `${x[0]}≥${x[1].volRel2}`).join(",");
+      const th = (e.thresholds && e.thresholds.length) ? ` thr:${e.thresholds.length}` : "";
+      return `${k}[${t || "—"}]${th}`;
+    });
+    const any = G.byKey[keys[0]] || {};
+    const tail = `floor ×${any.liqFloorMul != null ? any.liqFloorMul : "—"} · telat ${any.lateFrac != null ? (any.lateFrac * 100).toFixed(0) + "%" : "—"} · mode per-key (${keys.length} key)`;
+    return `${parts.join(" · ")}${keys.length > 4 ? " …" : ""} · ${tail}`;
+  }
+  // Format lama (learned/strict top-level) — kompatibilitas.
+  const T = G.tiers || null;
+  if (T) {
+    const thTxt = (G.thresholds && G.thresholds.length) ? G.thresholds.map((t) => `${t.f}${t.op}${t.t}`).join(" & ") : "";
+    const learned = G.mode === "learned";
+    const tierTxt = `${learned ? "label tier" : "tier"} STRONG≥${T.STRONG.volRel2} · GOOD≥${T.GOOD.volRel2} · FAIR≥${T.FAIR.volRel2}`;
+    return `${learned && thTxt ? "ambang efektif: " + thTxt + " · " : ""}${tierTxt}${thTxt && !learned ? " · ambang: " + thTxt : ""} · floor ×${G.liqFloorMul} · telat ${(G.lateFrac * 100).toFixed(0)}% · mode ${G.mode}`;
+  }
+  return "— (menunggu profil per-key dari server)";
 }
 // After this fraction of the session the price sits close to the lock, so the reward of a
 // recapture is tiny even if the direction is right -> those entries are suppressed.

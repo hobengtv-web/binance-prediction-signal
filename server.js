@@ -808,7 +808,7 @@ async function proxyBinanceV3(pathname, search) {
   return { status: 502, body: JSON.stringify({ error: "proxy gagal: " + String(lastErr) }), ctype: "application/json" };
 }
 const BN_WS_HOSTS = ["wss://stream.binance.com:9443", "wss://data-stream.binance.vision"];
-let _mstreamClients = new Set(), _mstreamWs = null, _mstreamIdx = 0;
+let _mstreamClients = new Set(), _mstreamWs = null, _mstreamIdx = 0, _mstreamGotData = false, _mstreamPoll = null;
 function _mstreamUrl() {
   const streams = [];
   for (const s of ["btcusdt", "ethusdt", "bnbusdt"]) {
@@ -818,11 +818,39 @@ function _mstreamUrl() {
   }
   return `${BN_WS_HOSTS[_mstreamIdx % BN_WS_HOSTS.length]}/stream?streams=${streams.join("/")}`;
 }
+function _mstreamEmit(obj) {
+  const payload = `data: ${JSON.stringify(obj)}\n\n`;
+  for (const c of _mstreamClients) { try { c.write(payload); } catch (_) {} }
+}
+// FALLBACK: bila WS Binance diblok (umum di Railway), poll REST (/api/v3) & emit pesan ala Binance
+// (klien tak perlu tahu sumbernya). Berhenti otomatis begitu WS mulai mengirim data.
+function _mstreamPollEmit() {
+  if (_mstreamPoll) return;
+  _mstreamPoll = setInterval(async () => {
+    if ((_mstreamWs && _mstreamGotData) || _mstreamClients.size === 0) { clearInterval(_mstreamPoll); _mstreamPoll = null; return; }
+    try {
+      for (const symBin of ["BTCUSDT", "ETHUSDT", "BNBUSDT"]) {
+        const low = symBin.toLowerCase();
+        let rows = [];
+        try { const k = await proxyBinanceV3("/api/v3/klines", `?symbol=${symBin}&interval=1s&limit=2`); rows = JSON.parse(k.body); } catch (_) {}
+        const r = Array.isArray(rows) ? rows[rows.length - 1] : null;
+        if (r) _mstreamEmit({ stream: `${low}@kline_1s`, data: { e: "kline", E: Date.now(), s: symBin, k: { t: r[0] / 1000, T: r[6] / 1000, s: symBin, i: "1s", o: r[1], c: r[4], h: r[2], l: r[3], v: r[5], x: true } } });
+        try {
+          const t = await proxyBinanceV3("/api/v3/ticker/24hr", `?symbol=${symBin}`);
+          const tj = JSON.parse(t.body);
+          if (tj && tj.lastPrice != null) _mstreamEmit({ stream: `${low}@ticker`, data: { e: "24hrTicker", s: symBin, c: tj.lastPrice, P: tj.priceChangePercent } });
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }, 1200);
+}
 function _startMstream() {
-  if (_mstreamWs || typeof WebSocket === "undefined") return;
-  try { _mstreamWs = new WebSocket(_mstreamUrl()); } catch (_) { _mstreamIdx++; setTimeout(_startMstream, 2000); return; }
-  _mstreamWs.onmessage = (ev) => { for (const c of _mstreamClients) { try { c.write(`data: ${ev.data}\n\n`); } catch (_) {} } };
-  _mstreamWs.onclose = () => { _mstreamWs = null; if (_mstreamClients.size) setTimeout(_startMstream, 1500); };
+  if (_mstreamWs || typeof WebSocket === "undefined") { if (typeof WebSocket === "undefined") _mstreamPollEmit(); return; }
+  try { _mstreamWs = new WebSocket(_mstreamUrl()); } catch (_) { _mstreamIdx++; _mstreamPollEmit(); setTimeout(_startMstream, 2000); return; }
+  _mstreamGotData = false;
+  _mstreamWs.onopen = () => { setTimeout(() => { if (!_mstreamGotData) _mstreamPollEmit(); }, 4000); };
+  _mstreamWs.onmessage = (ev) => { _mstreamGotData = true; for (const c of _mstreamClients) { try { c.write(`data: ${ev.data}\n\n`); } catch (_) {} } };
+  _mstreamWs.onclose = () => { _mstreamWs = null; if (_mstreamClients.size) { _mstreamPollEmit(); setTimeout(_startMstream, 3000); } };
   _mstreamWs.onerror = () => { try { _mstreamWs.close(); } catch (_) {} };
 }
 
@@ -916,6 +944,7 @@ http.createServer(async (req, res) => {
     res.write("retry: 2000\n\n");
     _mstreamClients.add(res);
     _startMstream();
+    setTimeout(() => { if (!_mstreamGotData) _mstreamPollEmit(); }, 4500);   // fallback REST bila WS diblok/silent
     const ka = setInterval(() => { try { res.write(": ka\n\n"); } catch (_) {} }, 20000);
     const stop = () => { clearInterval(ka); _mstreamClients.delete(res); };
     req.on("close", stop); req.on("error", stop); res.on("close", stop);

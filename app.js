@@ -2978,7 +2978,8 @@ function renderDual(force) {
       const srvDir = (srvSig && srvSig.accepted && (srvSig.dir === "up" || srvSig.dir === "down")) ? srvSig.dir : null;
       const effDir = (lateStage && srvDir) ? srvDir : dir;
       const effGraded = graded || !!(lateStage && srvDir);
-      const tag = lateStage ? ` · ${lateStage === "late90" ? "90s" : "60s"}` : (sig.grade ? ` · ${sig.grade}${sig.expectedWR != null ? " " + (sig.expectedWR * 100).toFixed(0) + "%" : ""}` : (sig.minuteIn ? ` · min ${sig.minuteIn}` : ""));
+      const sigTag = (sig && sig.grade) ? ` · ${sig.grade}${sig.expectedWR != null ? " " + (sig.expectedWR * 100).toFixed(0) + "%" : ""}` : ((sig && sig.minuteIn) ? ` · min ${sig.minuteIn}` : "");
+      const tag = lateStage ? ` · ${lateStage === "late90" ? "90s" : "60s"}` : sigTag;
       rEl.textContent = effGraded
         ? `Recommendation: ${String(effDir || "").toUpperCase()}${tag}`
         : (liveMode ? `No entry · ${liveMode}` : "Menunggu…");

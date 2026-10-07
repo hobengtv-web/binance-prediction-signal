@@ -51,7 +51,7 @@ const TA_VETO = {
    Output: { ok:true, signal:{...} } atau { skipped:"<alasan>" }
    ============================================================================ */
 function computeSignal(o) {
-  const { sym, tf, t0, tfc, idx, ones, five5m, getModel, SignalCore, nowSec } = o;
+  const { sym, tf, t0, tfc, idx, ones, five5m, one1m, getModel, SignalCore, nowSec } = o;
   const _key = sym + "_" + tf;
   // PER coin × TF: pakai profil (tiers+thresholds) MILIK key ini (independen), fallback bootstrap.
   let profile = o.profile || GATES_DEF.BOOTSTRAP;
@@ -115,6 +115,19 @@ function computeSignal(o) {
     if (sd === "up" || sd === "down") { currentDir = sd; silentDir = true; }
   }
   // rsi dari candle 5m yang SUDAH SELESAI (tanpa lookahead)
+  // ===== RECORDER 1m RSI + Stochastic (pola ind; observasional) — uji hipotesis reversal 1m =====
+  let ind1m = null;
+  try {
+    const c1 = (one1m || []).filter((c) => c.time + 60 <= nowSec);   // candle 1m SUDAH selesai (no lookahead)
+    if (c1.length >= 20) {
+      const rsi1m = SignalCore.rsiFromSeries(c1.slice(-50), 14);
+      const kArr = [];
+      for (let i = 13; i < c1.length; i++) { const w = c1.slice(i - 13, i + 1); const hh = Math.max(...w.map((x) => x.high)), ll = Math.min(...w.map((x) => x.low)); kArr.push(hh > ll ? ((c1[i].close - ll) / (hh - ll)) * 100 : 50); }
+      const stochK = kArr.length ? kArr[kArr.length - 1] : null;
+      const stochD = kArr.length >= 3 ? (kArr.slice(-3).reduce((a, b) => a + b, 0) / 3) : null;
+      ind1m = { rsi: rsi1m != null ? +rsi1m.toFixed(2) : null, stochK: stochK != null ? +stochK.toFixed(2) : null, stochD: stochD != null ? +stochD.toFixed(2) : null };
+    }
+  } catch (_) {}
   let rsi = null;
   try {
     if (five5m && five5m.length) rsi = SignalCore.rsiFromSeries(five5m.filter((c) => c.time + 300 <= nowSec).slice(-50), 14);
@@ -376,6 +389,7 @@ function computeSignal(o) {
       volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5),
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
       ind,   // RECORDER: EMA9/EMA21 (crossover) + MACD + pola candle 5m — untuk uji jendela panjang
+      ind1m, // RECORDER: RSI(14)+Stochastic(14,3) 1m (candle 1m selesai) — uji reversal 1m
       rewardPct: +rewardPct.toFixed(4), liqRatio: +liqRatio.toFixed(3), liqLow: !!liqLow,
       touchRate, gateKey: `${tf}|${mode}|${currentDir}|rsi:${rsiBucket(rsi)}|str:${strBucket(histTrend.strength)}`,
       micro: {
@@ -416,6 +430,8 @@ function createCapture(deps) {
     const nowSec = Math.floor(Date.now() / 1000);
     let five5m = [];
     try { five5m = await getKlines(sym, "5m", nowSec - 1, 60); } catch (_) {}
+    let one1m = [];
+    try { one1m = await getKlines(sym, "1m", nowSec - 1, 60); } catch (_) {}   // RECORDER 1m RSI+Stoch
     const profile = (typeof getGates === "function" ? getGates() : null) || GATES_DEF.BOOTSTRAP;   // profil gate yang BERLAKU (bootstrap/learned)
     // Alignment multi-TF (arah tren tf lain SEBELUM t0) — fitur model arah U/D (jalur capture juga)
     let align = null;
@@ -427,7 +443,7 @@ function createCapture(deps) {
         if (arr.length >= 20) align[t] = SignalCore.analyzeHistoricalTrend(arr, 50).predictDir;
       }
     } catch (_) {}
-    const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m, profile, getModel, SignalCore, nowSec, align });
+    const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m, one1m, profile, getModel, SignalCore, nowSec, align });
     if (r.skipped) {
       // Sesi FLAT/NOISE: rekam INFORMASIONAL dgn objek sinyal PENUH (field SAMA seperti sesi bersinyal:
       // rsi/micro/liqRatio/rewardPct/gate/power/ofi). Dulu hanya `flat-price` yg disimpan & objek ringkas

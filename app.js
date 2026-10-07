@@ -770,7 +770,7 @@ function applyType() {
       reasonEl.innerHTML = shortReason(o);
       reasonEl.title = generateEntryReason(o);
     }
-    if (z) { z.textContent = o.zone; z.className = o.zone.indexOf("ATAS") >= 0 ? "down" : o.zone.indexOf("BAWAH") >= 0 ? "up" : ""; }
+    if (z) { const zoneStr = String(o.zone || ""); z.textContent = o.zone || "—"; z.className = zoneStr.indexOf("ATAS") >= 0 ? "down" : zoneStr.indexOf("BAWAH") >= 0 ? "up" : ""; }
     if (m) { m.textContent = o.momentum; m.className = o.momentum === "BULLISH" ? "up" : o.momentum === "BEARISH" ? "down" : ""; }
     if (r) {
       if (o.rsi == null) { r.textContent = "—"; r.className = ""; }

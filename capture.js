@@ -140,7 +140,9 @@ function computeSignal(o) {
   // momen sinyal (rewardPct == mv2). Terbukti mengubah EV dari negatif (~-$146) → positif (+$20) di
   // seluruh rentang harga entry (0,55–0,62); WR 56%→62,5%. Di bawah ambang ini -> "flat-noise" (skip).
   // Bisa dibalik instan via env MIN_MV2_PCT (mis. 0.005). 0 = nonaktif.
-  const MIN_MV2_PCT = Number(process.env.MIN_MV2_PCT != null ? process.env.MIN_MV2_PCT : 0.015);
+  // ADAPTIF PER KEY (learner: learn_mv2.json). Fallback env MIN_MV2_PCT bila model belum ada.
+  const _mv2M = (() => { try { const m = (typeof getModel === "function") ? getModel("mv2") : null; return (m && m.byKey && m.byKey[_key]) ? m.byKey[_key] : null; } catch (_) { return null; } })();
+  const MIN_MV2_PCT = (_mv2M && typeof _mv2M.minMv2 === "number") ? _mv2M.minMv2 : Number(process.env.MIN_MV2_PCT != null ? process.env.MIN_MV2_PCT : 0.015);
   const flatReason = (currentDir === "flat") ? "flat-price" : ((MIN_MV2_PCT > 0 && mv2 < MIN_MV2_PCT) ? "flat-noise" : null);
   // ===== ARAH "SILENT" (permintaan user): SETIAP sesi tetap punya arah utk direkam & DIPELAJARI — 
   // walau tidak layak entry (flat). Tujuannya learner bisa belajar MANANG/KALAH di tiap sesi.
@@ -482,7 +484,7 @@ function computeSignal(o) {
       invert: (inverted && !flatReason) ? { and: inverted.and, n: inverted.n, flipWR: inverted.flipWR, lbFlip: inverted.lbFlip } : null,
       confirm: (confirmed && !flatReason) ? { and: confirmed.and, n: confirmed.n, wr: confirmed.wr, lb: confirmed.lb, from: confirmed.from || null, to: confirmed.to || grade } : null,
       skipped: (flatReason && !flatEntry) ? flatReason : null,
-      volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5),
+      volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5), mv2MinPct: +MIN_MV2_PCT.toFixed(4),
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
       ind,   // RECORDER: EMA9/EMA21 (crossover) + MACD + pola candle 5m — untuk uji jendela panjang
       ind1m, // RECORDER: RSI(14)+Stochastic(14,3) 1m (candle 1m selesai) — uji reversal 1m

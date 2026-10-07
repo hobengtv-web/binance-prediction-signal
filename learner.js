@@ -107,6 +107,7 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       gapPct: typeof s.rewardPct === "number" ? Math.abs(s.rewardPct) : null,
       histStrength: typeof s.histStrength === "number" ? s.histStrength : null,
       rsi: typeof s.rsi === "number" ? s.rsi : null,
+      mv2: typeof s.mv2 === "number" ? s.mv2 : null,   // gerak dari LOCK ke close detik-2 (%) — untuk ambang per-key
       // bucket RSI (untuk mining berbasis mean-$ yang bisa diterapkan live; r.rsi di atas = nilai mentah)
       rsiB: bRsi(typeof s.rsi === "number" ? s.rsi : null),
       // apakah profil gate yang SEDANG BERLAKU akan menerima sesi ini (diisi capture/klien)
@@ -850,6 +851,29 @@ function learnTA(rows, opts = {}) {
   return out;
 }
 
+/* AMBANG GERAK-MINIMUM (mv2) ADAPTIF PER KEY — menggantikan env global MIN_MV2_PCT.
+   Pilih t (mv2 minimal) yg MEMAKSIMALKAN winrate ARAH dgn syarat sampel n >= minN, agar sinyal
+   tetap ada (tak snowball) tapi arah tetap tajam. Basis outcome nyata (res.won). */
+function mineMv2(rows, opts = {}) {
+  const o = Object.assign({ grid: [0, 0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.008, 0.01, 0.012, 0.015, 0.02, 0.025, 0.03], minN: 150, maxT: 0.03, minGain: 0.02 }, opts);
+  const a = rows.filter((r) => (r.dir === "up" || r.dir === "down") && typeof r.mv2 === "number" && (r.won === 0 || r.won === 1));
+  if (a.length < o.minN) return { ok: false, n: a.length, minMv2: null, note: `data mv2 < ${o.minN}` };
+  const base = mean(a.map((r) => r.won));
+  let best = null;
+  for (const t of o.grid) {
+    if (t > o.maxT) continue;
+    const sub = a.filter((r) => r.mv2 >= t);
+    if (sub.length < o.minN) continue;
+    const wr = mean(sub.map((r) => r.won));
+    if (!best || wr > best.wr + 1e-9) best = { t, wr, n: sub.length };
+  }
+  const b0 = { t: 0, wr: base, n: a.length };
+  if (!best) best = b0;
+  const chosen = (best.wr >= base + o.minGain) ? best : b0;   // kenaikan tak berarti -> tanpa filter
+  return { ok: true, n: a.length, base: +base.toFixed(4), minMv2: chosen.t, wr: +chosen.wr.toFixed(4), nAt: chosen.n,
+    note: `mv2>=${chosen.t}: WR ${(chosen.wr * 100).toFixed(1)}% (n ${chosen.n}) vs base ${(base * 100).toFixed(1)}%` };
+}
+
 /* ---------- METRIK JENDELA BERGULIR (regime) ----------
    Pasar berganti regime harian. Statistik per key dihitung pada jendela TERBARU (default 3h/6h/12h/24h)
    berbasis $ (pnlReal). Dipakai untuk: (a) kill-switch/pause per key saat $ jendela negatif,
@@ -1077,4 +1101,4 @@ function shouldPromote(candidate, incumbent, opts = {}) {   // opts: {minTake,mi
   return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}%` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, minePnl, rollingStats, regimePause, stderr, shouldPromote, blockersOf, APPLY_KEYS, DECIDE_FIELD, ruleParts, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, PN_FEATS, PN_PAIRS, mineTA, mineSpread, mineScore, mineSizing, learnTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, minePnl, rollingStats, regimePause, stderr, shouldPromote, blockersOf, APPLY_KEYS, DECIDE_FIELD, ruleParts, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, PN_FEATS, PN_PAIRS, mineTA, mineSpread, mineScore, mineSizing, learnTA, mineMv2, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

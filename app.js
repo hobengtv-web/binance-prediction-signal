@@ -2363,7 +2363,18 @@ function renderLearnerStatus() {
     return `<div class="lstat-row"><b>${esc(k)}</b> <span class="lstat-dim">ambang: ${esc(th)} \u00b7 model: ${v.promoted ? "DIPAKAI" : "belum menang"} \u00b7 blocker: ${a.apply === false ? "OFF" : (a.apply === true ? "ON" : "\u2014")}</span></div>`;
   }).join("");
   const modelSec = _bk.length ? `<div class="lstat-sec"><b>MODEL &amp; AMBANG per coin &amp; durasi</b> <span class="lstat-dim">(terpisah, tidak digeneralisir)</span>${modelRows}</div>` : "";
-  const jamInfo = modelSec + `<div class="lstat-sec">
+  // ===== REGIME $ BERGULIR per key (berbasis $ nyata, jendela 3h/6h/12h/24h) =====
+  const _roll = S.rolling || {};
+  const _rollKeys = _roll.keys || {};
+  const _rollCell = (w, sec) => { const x = w[sec] || w[String(sec)]; if (!x || x.n == null) return "\u2014"; return `${x.meanPnl != null ? (x.meanPnl > 0 ? "+" : "") + x.meanPnl + "%" : "\u2014"} (n${x.n})`; };
+  const _rollRows = Object.keys(_rollKeys).sort().map((k) => {
+    const w = _rollKeys[k] || {};
+    const rp = S.veto && S.veto.prof && S.veto.prof.keys && S.veto.prof.keys[k] && S.veto.prof.keys[k].regime;
+    const paused = rp && rp.pause;
+    return `<div class="lstat-row"><b>${esc(k)}</b> <span class="lstat-dim">3h: ${_rollCell(w, 10800)} \u00b7 6h: ${_rollCell(w, 21600)} \u00b7 12h: ${_rollCell(w, 43200)} \u00b7 24h: ${_rollCell(w, 86400)}${paused ? ' \u00b7 <span class="lstat-warn">PAUSE (regime $ negatif)</span>' : ""}</span></div>`;
+  }).join("");
+  const rollSec = Object.keys(_rollKeys).length ? `<div class="lstat-sec"><b>REGIME $ BERGULIR per coin &amp; durasi</b> <span class="lstat-dim">(berbasis $ nyata; 30m terlalu noise \u2192 jendela min 3h)</span>${_rollRows}</div>` : "";
+  const jamInfo = modelSec + rollSec + `<div class="lstat-sec">
       <b>JAM ON/OFF TRADE (WIB) \u2014 per coin &amp; durasi</b> <span class="lstat-dim">dari learner terbaru${S.veto && S.veto.generated ? " · diperbarui " + new Date(S.veto.generated).toLocaleString() + " (" + esc(S.veto.trigger || "") + ")" : ""}</span>
       ${jamRows}
       <div class="lstat-line lstat-dim">dasar: per (coin×durasi) — jam dgn WR &lt; ${((S.veto && S.veto.thr) || 0.5) * 100}% (n≥${(S.veto && S.veto.minN) || 8}) \u2192 OFF; dibuka bila ${(S.veto && S.veto.recentWin) || 2}/${(S.veto && S.veto.recentN) || 3} sesi terakhir menang. Tiap coin/TF independen (tidak digeneralisir).</div>
@@ -2388,7 +2399,7 @@ function renderLearnerStatus() {
     <div class="lstat-sec">
       <b>2 · APA YANG DI-IMPROVE</b>
       <div class="lstat-line">Yang dipelajari sistem: <b>(a) konteks</b> — kombinasi tier/aset/jam/interval yang historis lemah ditahan, yang kuat diunggulkan; <b>(b) ambang</b> — batas numerik (volRel2, surprise, gap, likuiditas) disesuaikan dari data nyata.</div>
-      <div class="lstat-line">metode: split <b>70/30 berurutan waktu</b> (latih = data paling awal, uji = 30% paling akhir) + <b>Wilson bound</b>; ambang dicari dengan coordinate-ascent memaksimalkan batas bawah Wilson, dengan syarat cakupan ≥20%. Model hanya dipakai bila <b>menang pada jendela uji</b>.</div>
+      <div class="lstat-line">metode: mining konteks berbasis <b>mean-$ kontinu</b> (bukan WR) dengan uji selisih-means, split <b>70/30 berurutan waktu</b>; hanya aturan <b>single-feature</b> yang benar-benar bisa diterapkan live. Rule diterapkan hanya bila <b>tidak merusak $</b> vs baseline take-all. Keputusan pakai/tidak berbasis jendela uji $.</div>
       <div class="lstat-line">status MODEL konteks (aturan penahan): ${M.source === "learned" ? '<span class="lstat-badge ok">DIPAKAI</span>' : '<span class="lstat-badge def">DITAHAN</span>'} · diterapkan: ${([...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])].length) ? [...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])].map((k) => `<code>${esc(k)}</code>`).join(" · ") : '<span class="lstat-dim">belum ada penahan aktif</span>'}</div>
       <div class="lstat-line">status AMBANG numerik (TERPISAH dari model konteks di atas): ${learned ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR AKTIF</span>' : (g.mode === "strict" ? '<span class="lstat-badge def">AMBANG KONSERVATIF</span>' : '<span class="lstat-badge sup">BOOTSTRAP AKTIF (ambang belajar belum menang)</span>')}</div>
       ${jamInfo}

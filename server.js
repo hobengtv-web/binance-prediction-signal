@@ -340,7 +340,7 @@ const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
 const GATES_DEF = require("./gates.js");
 const EXP_GATE = require("./exp-gate.js");
 const EXT = require("./ext-features.js");   // sumber data eksternal (Batch 1) — observasional
-const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json", exp: "exp.json" };
+const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json", exp: "exp.json", rolling: "learn_rolling.json" };
 let gatesMeta = { mode: GATES_DEF.BOOTSTRAP.mode, promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
 
@@ -405,34 +405,55 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     const pnlMap = keepOnly(Object.assign({}, prevPnl.byKey || {}));
     const metaMap = keepOnly(Object.assign({}, prevMeta.byKey || {}));
     const keys = onlyKey ? [onlyKey] : allKeys;   // per-key trigger -> proses key itu saja
-    const minApplyCov = Number(process.env.MIN_APPLY_COV != null ? process.env.MIN_APPLY_COV : 0.35);
+    const minApplyCov = Number(process.env.MIN_APPLY_COV != null ? process.env.MIN_APPLY_COV : 0.15);
     const keyRes = {}; let anyPromote = false, anyGates = false;
+    const nowRef = Math.floor(Date.now() / 1000);
+    const learnWindow = Number(process.env.LEARN_WINDOW_SEC || 0);   // 0 = seluruh histori; >0 = jendela regime (mis. 86400 = 24 jam)
+    // Metrik jendela bergulir (regime) berbasis $ — dipakai kill-switch per key & panel.
+    const rolling = LEARNER.rollingStats(rows, { now: nowRef, windows: [3 * 3600, 6 * 3600, 12 * 3600, 24 * 3600] });
     for (const key of keys) {
       const kr = rows.filter((r) => r.symbol + "_" + r.interval === key);
-      const cand = LEARNER.buildModel(kr);
+      const cand = LEARNER.buildModel(kr, {
+        minTrain: Number(process.env.LEARN_MIN_TRAIN || 40), minTest: Number(process.env.LEARN_MIN_TEST || 25),
+        pnlMinN: Number(process.env.LEARN_PNL_MIN_N || 20), pnlMinDelta: Number(process.env.LEARN_PNL_MIN_DELTA || 3),
+        windowSec: learnWindow, now: nowRef,
+      });
       if (!cand.ok) {
         // data tak cukup -> JANGAN simpan config lama (snowball). Hapus agar key bebas dari blocker usang.
         keyRes[key] = { n: kr.length, ok: false, why: cand.reason };
         delete gateMap[key]; delete touchMap[key]; delete applyMap[key]; delete metaMap[key]; delete gatesMap[key];
         continue;
       }
-      const splitIdxNow = Math.floor(kr.length * 0.7);
-      const testNow = kr.slice(splitIdxNow);
+      // PENTING: jendela uji HARUS sejajar dengan split model (baris ber-$ saja). Sebelumnya memakai
+      // `kr` mentah (termasuk baris tanpa $) -> uji tidak selaras dengan latih -> metrik menyesatkan.
+      const krPnl = kr.filter((r) => r.dwin != null);
+      const splitIdxNow = (cand.splitIdx != null) ? cand.splitIdx : Math.floor(krPnl.length * 0.7);
+      const testNow = krPnl.slice(splitIdxNow);
       const inc = gateMap[key] ? { gate: { rules: gateMap[key].rules || [] }, touch: { rules: (touchMap[key] && touchMap[key].rules) || [] }, metrics: (metaMap[key] && metaMap[key].metrics) || null } : null;
       const candEval = LEARNER.evalModelRolling(testNow, cand.gate.rules, cand.touch.rules, 3);
       const incEval = inc ? LEARNER.evalModelRolling(testNow, inc.gate.rules, inc.touch.rules, 3) : null;
       const candPnl = LEARNER.evalModelPnl(testNow, cand.gate.rules, cand.touch.rules);
       const incPnl = inc ? LEARNER.evalModelPnl(testNow, inc.gate.rules, inc.touch.rules) : null;
-      const dec = LEARNER.shouldPromote({ metrics: Object.assign({}, candEval, { pnl: candPnl }) }, incEval ? { metrics: Object.assign({}, incEval, { pnl: incPnl }) } : null);
+      const baselinePnl = LEARNER.evalModelPnl(testNow, [], []);   // take-all = pembanding nyata (bukan insiden $-identik)
+      // Blocker EFEKTIF (single-feature APPLY_KEYS) — bukan sekadar jumlah suppress mentah.
+      const candBlockersEff = LEARNER.blockersOf(cand.gate.rules, "dwin").length + LEARNER.blockersOf(cand.touch.rules, "dwin").length;
+      const dec = LEARNER.shouldPromote(
+        { metrics: Object.assign({}, candEval, { pnl: candPnl }) },
+        incEval ? { metrics: Object.assign({}, incEval, { pnl: incPnl }) } : null,
+        { minCov: Number(process.env.LEARN_MIN_COV || 0.10), minTake: Number(process.env.LEARN_MIN_TAKE || 15), minDelta: Number(process.env.LEARN_MIN_DELTA || 2), baselinePnl, hasBlockers: candBlockersEff > 0 });
       const liveEval = dec.promote ? candEval : (incEval || candEval);
-      // FIX inkonsistensi: apply HANYA bermakna bila memang ADA aturan blocker (gate/touch).
-      // Dulu apply=true walau suppress kosong -> panel mengklaim "blocker diterapkan" padahal no-op.
+      // FIX inkonsistensi: apply HANYA bermakna bila memang ADA aturan blocker efektif (gate/touch).
       const gateRules = (cand.gate && cand.gate.suppress) || [];
       const touchRules = (cand.touch && cand.touch.suppress) || [];
-      const hasBlockers = (gateRules.length + touchRules.length) > 0;
-      const applyBlockers = hasBlockers && !!liveEval && (liveEval.coverage || 1) >= minApplyCov;
-      applyMap[key] = { apply: applyBlockers, hasBlockers, nRules: gateRules.length + touchRules.length, coverage: liveEval ? liveEval.coverage : null, minApplyCov,
+      const hasBlockers = candBlockersEff > 0;
+      // PENTING: rule live dibaca capture dari learn_gate.json per key TANPA menunggu "promote".
+      // Karena itu penerapan digerbangi oleh: tidak merusak $ vs baseline take-all (cegah model yg OOS-nya lebih buruk).
+      const improvesBaseline = !!(candPnl && baselinePnl && candPnl.n >= 15 && candPnl.meanPnl >= baselinePnl.meanPnl);
+      const applyBlockers = hasBlockers && improvesBaseline && !!liveEval && (liveEval.coverage || 1) >= minApplyCov;
+      applyMap[key] = { apply: applyBlockers, hasBlockers, improvesBaseline, nRules: gateRules.length + touchRules.length, coverage: liveEval ? liveEval.coverage : null, minApplyCov,
+        candPnl: candPnl ? candPnl.meanPnl : null, basePnl: baselinePnl ? baselinePnl.meanPnl : null, candN: candPnl ? candPnl.n : null,
         note: !hasBlockers ? "tak ada aturan blocker (model ambil-semua) -> blocker TIDAK diterapkan"
+          : !improvesBaseline ? `$ model ${candPnl ? candPnl.meanPnl : "-"}% < baseline ${baselinePnl ? baselinePnl.meanPnl : "-"}% -> blocker TIDAK diterapkan (cegah perburukan)`
           : applyBlockers ? "blocker diterapkan"
           : `cakupan ${(100 * (liveEval ? liveEval.coverage : 0)).toFixed(0)}% < ${(minApplyCov * 100).toFixed(0)}% -> blocker TIDAK diterapkan` };
       const th = LEARNER.learnThresholds(kr);
@@ -459,7 +480,8 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       gateMap[key] = cand.gate; touchMap[key] = cand.touch;
       metaMap[key] = { version: ver, promotedAt: new Date().toISOString(), n: kr.length, rows: cand.rows, metrics: candEval, why: dec.why, promoted: !!dec.promote };
       if (dec.promote) anyPromote = true;
-      keyRes[key] = { n: kr.length, promote: dec.promote, why: dec.why, coverage: liveEval ? liveEval.coverage : null, gatesPromoted };
+      keyRes[key] = { n: kr.length, promote: dec.promote, why: dec.why, coverage: liveEval ? liveEval.coverage : null, gatesPromoted,
+        blockers: candBlockersEff, candPnl: candPnl ? candPnl.meanPnl : null, basePnl: baselinePnl ? baselinePnl.meanPnl : null, baseN: baselinePnl ? baselinePnl.n : null };
     }
     write("learn_gate.json", { generated: new Date().toISOString(), source: "ledger", version: ver, byKey: gateMap });
     write("learn_touch90.json", { generated: new Date().toISOString(), source: "ledger", version: ver, byKey: touchMap });
@@ -467,12 +489,26 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     write("learn_apply.json", { generated: new Date().toISOString(), version: ver, byKey: applyMap });
     write("lessons.json", { generated: new Date().toISOString(), version: ver, byKey: lessonsMap });
     write("learn_pnl.json", { generated: new Date().toISOString(), version: ver, byKey: pnlMap });
+    // ===== METRIK JENDELA BERGULIR (regime, berbasis $) =====
+    // per key: mean-$/WR pada 3h/6h/12h/24h terakhir. Dipakai kill-switch & panel.
+    write("learn_rolling.json", Object.assign({ generated: new Date().toISOString(), version: ver, learnWindow }, rolling));
     write("meta.json", { version: ver, promotedAt: new Date().toISOString(), trigger, byKey: metaMap });
     // ===== GATE EKSPERIMENTAL (OBSERVASIONAL) — tidak mengubah accepted/reject produksi =====
     try { write("exp.json", EXP_GATE.evaluate(records)); } catch (e) { console.log("[EXP] gagal evaluasi:", e.message); }
     try {
       const hv = LEARNER.hourVetoes(rows, { minN: Number(process.env.VETO_MIN_N || 25), thr: Number(process.env.VETO_WR_THR || 0.50), recentN: Number(process.env.VETO_RECENT_N || 3), recentWin: Number(process.env.VETO_RECENT_WIN || 2), offCap: Number(process.env.VETO_HOUR_OFF_CAP || 0.5), pnlBad: Number(process.env.VETO_PNL_BAD != null ? process.env.VETO_PNL_BAD : -2) });
       const kv = LEARNER.keyVetoes(rows, { thr: Number(process.env.VETO_WR_THR || 0.50), minN: Number(process.env.VETO_MIN_N || 25), covCap: Number(process.env.VETO_COV_CAP || 0.6), minAllowedN: Number(process.env.VETO_MIN_ALLOWED_N || 0), minAllowedCov: Number(process.env.VETO_MIN_ALLOWED_COV || 0.3), reclaimMinN: Number(process.env.VETO_RECLAIM_MIN_N || 30), reclaimWlb: Number(process.env.VETO_RECLAIM_WLB || 0.52), reclaimMax: Number(process.env.VETO_RECLAIM_MAX || 4), reclaimCovCap: Number(process.env.VETO_RECLAIM_COV || 0.4), pnlBad: Number(process.env.VETO_PNL_BAD != null ? process.env.VETO_PNL_BAD : -2), invertMinN: Number(process.env.INVERT_MIN_N || 25), invertWlb: Number(process.env.INVERT_WLB || 0.52), invertMax: Number(process.env.INVERT_MAX || 3), invertCovCap: Number(process.env.INVERT_COV || 0.4), confirmMinN: Number(process.env.CONFIRM_MIN_N || 40), confirmWlb: Number(process.env.CONFIRM_WLB || 0.52), confirmMax: Number(process.env.CONFIRM_MAX || 3), confirmCovCap: Number(process.env.CONFIRM_COV || 0.6), keyEvGate: process.env.KEY_EV_GATE === "1", keyEvN: Number(process.env.KEY_EV_N || 20), keyEvMin: Number(process.env.KEY_EV_MIN || 0), keyEvWin: Number(process.env.KEY_EV_WIN || 40), flatEvN: Number(process.env.FLAT_EV_N || 20) });
+      // ===== KILL-SWITCH REGIME per key (berbasis $ jendela bergulir) =====
+      // Pause key bila $ 6h DAN konfirmasi 12h sama-sama negatif (histeresis -> hindari whipsaw).
+      // Data: pada 30m $ = noise (persist 0.50); persistensi baru terukur di 3-6 jam -> jendela minimum 3h.
+      if (process.env.KEY_EV_GATE === "1") {
+        const rpOpts = { fast: Number(process.env.REGIME_FAST_SEC || 21600), confirm: Number(process.env.REGIME_CONFIRM_SEC || 43200), minN: Number(process.env.REGIME_MIN_N || 12), thrPct: Number(process.env.REGIME_THR_PCT || 0) };
+        for (const k of Object.keys((kv && kv.keys) || {})) {
+          const rp = LEARNER.regimePause(rolling, k, rpOpts);
+          kv.keys[k].regime = rp;
+          if (rp.pause) kv.keys[k].keyEvGated = true;
+        }
+      }
       write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv, { prof: kv }));
     } catch (_) {}
     // ===== ANALISIS KONTEKS FLAT per coin×TF (dari record flat informasional) =====
@@ -1009,6 +1045,7 @@ http.createServer(async (req, res) => {
       })(),
       apply: readModelPart("apply"),          // {byKey: {key:{apply,coverage,...}}}
       veto: readModelPart("veto"),            // {keys:{key:{hours,stats}}, ...}
+      rolling: readModelPart("rolling"),      // {keys:{key:{<windowSec>:{n,meanPnl,winrate,lb}}}, windows}
       gates: (() => { const gg = readGates() || {}; return { mode: gg.mode, byKey: gg.byKey || {}, thresholds: gg.thresholds || [], liqFloorMul: gg.liqFloorMul, lateFrac: gg.lateFrac, note: gg.note }; })(),
       capture: capture.status(),
       history,

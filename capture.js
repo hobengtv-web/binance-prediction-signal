@@ -291,15 +291,19 @@ function computeSignal(o) {
       if (touchRate != null && touchRate < 0.62) weak.push("touch");
       if (touchRate != null && touchRate >= 0.72) strong.push("touch");
       if (miWR != null && miWR >= 0.70) strong.push("dir");
-      // Terapkan aturan penahan learner yang DIKENAL saat lock (tunggal; kunci: interval/symbol/dir/hour/gap/mode).
-      // Dulu hanya `interval=`/`gap=` yang diakui -> aturan `hour=`/`symbol=` hasil mining TAK PERNAH diterapkan.
-      // LANGKAH CAKUPAN: bila model memblok terlalu banyak, flag apply=false -> jangan terapkan.
+      // Terapkan aturan penahan learner yang DIKENAL saat lock (single-feature; bucket SAMA dgn learner/DECIDE_FIELD).
+      // Dulu hanya `interval=`/`gap=`/`hour=`/`symbol=`/`dir=`/`mode=` yang diakui -> aturan rsi/vol/hist/trend
+      // hasil mining mean-$ TAK PERNAH diterapkan. Sekarang semua bucket dihitung live agar rule benar-benar berlaku.
       const applyWhole = (() => { try { return (typeof getModel === "function" ? getModel("apply") : null); } catch (_) { return null; } })();
       const applyM = (applyWhole && applyWhole.byKey) ? applyWhole.byKey[_key] : applyWhole;   // PER key
       const applyBlockers = !applyM || applyM.apply !== false;
       const blocking = (!applyBlockers) ? false : (() => {
         const rules = [].concat((g && g.suppress) || [], (t && t.suppress) || []);
-        const featVal = { interval: tf, symbol: sym, dir: currentDir, hour: hourB, gap: gapB, mode };
+        const featVal = {
+          interval: tf, symbol: sym, dir: currentDir, hour: hourB, gap: gapB, mode,
+          rsi: LEARNER_BUCKETS.bRsi(rsi), vol: LEARNER_BUCKETS.bVol(volRel2),
+          hist: LEARNER_BUCKETS.bHist(histTrend.strength), trend: trend || "na", minute: LEARNER_BUCKETS.bMinute(1),
+        };
         return rules.some((k) => {
           if (typeof k !== "string" || k.indexOf("&") !== -1) return false;
           const i = k.indexOf("="); if (i < 0) return false;

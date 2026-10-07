@@ -103,6 +103,8 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       gapPct: typeof s.rewardPct === "number" ? Math.abs(s.rewardPct) : null,
       histStrength: typeof s.histStrength === "number" ? s.histStrength : null,
       rsi: typeof s.rsi === "number" ? s.rsi : null,
+      // bucket RSI (untuk mining berbasis mean-$ yang bisa diterapkan live; r.rsi di atas = nilai mentah)
+      rsiB: bRsi(typeof s.rsi === "number" ? s.rsi : null),
       // apakah profil gate yang SEDANG BERLAKU akan menerima sesi ini (diisi capture/klien)
       accepted: r.gate ? !!r.gate.accepted : null,
       reject: r.gate ? (r.gate.reject || null) : null,
@@ -223,7 +225,13 @@ function mineRules(train, test, FEATS, PAIRS, base, metric, opts) {
 // Aturan penahan yang dipakai app: gate -> HANYA aturan interval tunggal; touch -> HANYA gap tunggal.
 // Kunci fitur yang DIKENAL saat lock (bisa diterapkan live oleh capture.js). Harus sama dgn
 // yang dievaluasi di sini, supaya metrik model = apa yang benar-benar diterapkan.
-const APPLY_KEYS = new Set(["interval", "symbol", "dir", "hour", "gap", "mode"]);
+const APPLY_KEYS = new Set(["interval", "symbol", "dir", "hour", "gap", "mode", "rsi", "vol", "hist", "trend", "minute"]);
+// Peta fitur -> nilai pada baris (dipakai decide). Bucket HARUS sama dengan yang dihitung live di capture.js.
+const DECIDE_FIELD = {
+  gap: (r) => r.gap, interval: (r) => r.interval, symbol: (r) => r.symbol, hour: (r) => r.hour,
+  dir: (r) => r.dir, mode: (r) => r.mode, rsi: (r) => r.rsiB, vol: (r) => r.vol,
+  hist: (r) => r.hist, trend: (r) => r.trend, minute: (r) => r.minute,
+};
 function blockersOf(rules, metric) {
   return rules.filter((r) => r.verdict === "suppress" && r.k.indexOf("&") === -1 &&
     APPLY_KEYS.has(r.k.slice(0, r.k.indexOf("="))));
@@ -231,8 +239,8 @@ function blockersOf(rules, metric) {
 function decide(row, blockers) {
   return !blockers.some((b) => {
     const i = b.k.indexOf("="), f = b.k.slice(0, i), v = b.k.slice(i + 1);
-    const rv = f === "gap" ? row.gap : f === "interval" ? row.interval : f === "symbol" ? row.symbol : f === "hour" ? row.hour : f === "dir" ? row.dir : null;
-    return rv === v;
+    const get = DECIDE_FIELD[f];
+    return get ? get(row) === v : false;
   });
 }
 // skor = winrate dari sinyal yang DIAMBIL x akar(cakupan) — filternya harus berguna,
@@ -694,6 +702,71 @@ function pnlContexts(rows, FEATS) {
   return { all: +all.toFixed(4), n: base.length, contexts: out };
 }
 
+/* ---------- MINING BERBASIS MEAN-$ (live-applicable, single-feature) ----------
+   Masalah lama: mining biner `dwin` + minTrain=60 jarang menghasilkan suppress, sehingga model
+   jadi "ambil-semua" (apply=false) dan learner selalu memakai BOOTSTRAP global. Fungsi ini
+   memakai objektif mean-$ KONTINU (pnlReal, satuan %) dengan uji selisih-means (z), hanya pada
+   fitur SINGLE yang benar-benar bisa diterapkan live (APPLY_KEYS) -> rule suppress nyata. */
+const PN_FEATS = {
+  hour: (r) => r.hour, rsi: (r) => r.rsiB, vol: (r) => r.vol, hist: (r) => r.hist,
+  trend: (r) => r.trend, dir: (r) => r.dir, gap: (r) => r.gap, mode: (r) => r.mode, minute: (r) => r.minute,
+};
+function stderr(a) { const n = a.length; if (n < 2) return 0; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) * (x - m), 0) / (n - 1)) / Math.sqrt(n); }
+function minePnl(rows, opts = {}) {
+  const o = Object.assign({ minN: 20, minDelta: 3, zMin: 1.0, windowSec: 0, now: 0 }, opts);
+  let base0 = rows.filter((r) => r.pnlReal != null && (r.dir === "up" || r.dir === "down"));
+  if (o.windowSec > 0 && o.now > 0) base0 = base0.filter((r) => o.now - r.t0 <= o.windowSec);
+  if (base0.length < o.minN * 2) return { base: null, n: base0.length, rules: [] };
+  const all = mean(base0.map((r) => r.pnlReal));
+  const out = [];
+  for (const f of Object.keys(PN_FEATS)) {
+    const g = groupBy(base0, PN_FEATS[f]);
+    for (const [k, arr] of g) {
+      if (arr.length < o.minN) continue;
+      const vals = arr.map((r) => r.pnlReal);
+      const m = mean(vals), d = m - all, s = stderr(vals);
+      const sig = s <= 0 || Math.abs(d) >= o.zMin * s;
+      if (d <= -o.minDelta && sig) out.push({ k: `${f}=${k}`, f, n: arr.length, meanPnl: +m.toFixed(4), delta: +d.toFixed(4), verdict: "suppress", metric: "dwin" });
+      else if (d >= o.minDelta && sig) out.push({ k: `${f}=${k}`, f, n: arr.length, meanPnl: +m.toFixed(4), delta: +d.toFixed(4), verdict: "boost", metric: "dwin" });
+    }
+  }
+  out.sort((a, b) => a.meanPnl - b.meanPnl);
+  return { base: +all.toFixed(4), n: base0.length, rules: out };
+}
+
+/* ---------- METRIK JENDELA BERGULIR (regime) ----------
+   Pasar berganti regime harian. Statistik per key dihitung pada jendela TERBARU (default 3h/6h/12h/24h)
+   berbasis $ (pnlReal). Dipakai untuk: (a) kill-switch/pause per key saat $ jendela negatif,
+   (b) tampilan panel. Analisis data: pada 30m $ = noise (persist 0.50) -> jendela minimum 3h. */
+function rollingStats(rows, opts = {}) {
+  const now = opts.now || (rows.length ? Math.max(...rows.map((r) => r.t0)) : 0);
+  const windows = opts.windows || [3 * 3600, 6 * 3600, 12 * 3600, 24 * 3600];
+  const groups = groupBy(rows.filter((r) => (r.dir === "up" || r.dir === "down") && r.pnlReal != null), (r) => r.symbol + "_" + r.interval);
+  const keys = {};
+  for (const [k, rr] of groups) {
+    keys[k] = {};
+    for (const W of windows) {
+      const sel = rr.filter((r) => now - r.t0 <= W);
+      const ps = sel.map((r) => r.pnlReal);
+      const n = ps.length;
+      const wins = ps.filter((x) => x > 0).length;
+      const wb = n >= 8 ? wilson(wins, n) : { lo: null };
+      keys[k][W] = { n, meanPnl: n ? +mean(ps).toFixed(3) : null, winrate: n ? +(wins / n).toFixed(4) : null, lb: wb.lo != null ? +wb.lo.toFixed(4) : null };
+    }
+  }
+  return { now, windows, keys };
+}
+// Keputusan pause/histeresis: pause bila jendela cepat (3h/6h) DAN konfirmasi (12h) sama-sama negatif.
+function regimePause(rolling, key, opts = {}) {
+  const o = Object.assign({ fast: 6 * 3600, confirm: 12 * 3600, minN: 12, thrPct: 0 }, opts);
+  const kd = rolling && rolling.keys && rolling.keys[key];
+  if (!kd) return { pause: false, why: "no-data" };
+  const f = kd[o.fast], c = kd[o.confirm];
+  if (!f || !c || f.n < o.minN || c.n < o.minN) return { pause: false, why: "n-kurang", fast: f, confirm: c };
+  const pause = f.meanPnl != null && c.meanPnl != null && f.meanPnl < o.thrPct && c.meanPnl < o.thrPct;
+  return { pause, why: pause ? `$ ${o.fast / 3600}h ${f.meanPnl}% & ${o.confirm / 3600}h ${c.meanPnl}% negatif` : "regime ok", fast: f, confirm: c };
+}
+
 /* ---------- bangun model dari baris fitur ---------- */
 function buildModel(rows, opts = {}) {
   const o = Object.assign({ minTrain: 60, minTest: 40, minRows: 120 }, opts);
@@ -707,28 +780,35 @@ function buildModel(rows, opts = {}) {
   const dirTrain = mean(train.map((r) => r.dwin));
   const gateBuckets = bucketsOf(train, test, GATE_FEATS);
   const touchBuckets = bucketsOf(train, test, TOUCH_FEATS);
-  const gateRules = mineRules(train, test, GATE_FEATS, GATE_PAIRS, dirBase, "dwin", o);
+  let gateRules = mineRules(train, test, GATE_FEATS, GATE_PAIRS, dirBase, "dwin", o);
   const touchRules = mineRules(train, test, TOUCH_FEATS, TOUCH_PAIRS, touchBase, "dwin", o);
-  const gateSuppress = gateRules.filter((r) => r.verdict === "suppress").map((r) => r.k);
+  // ===== MINING MEAN-$ (kontinu, single-feature live-applicable) =====
+  // Menambal kelemahan mining biner: menemukan konteks yang RUGI-$ secara signifikan walau n kecil.
+  const pnlMine = minePnl(train, { minN: o.pnlMinN || 20, minDelta: o.pnlMinDelta || 3, zMin: o.pnlZ || 1.0, windowSec: o.windowSec || 0, now: o.now || 0 });
+  const pnlSuppress = (pnlMine.rules || []).filter((r) => r.verdict === "suppress");
+  const pnlBoost = (pnlMine.rules || []).filter((r) => r.verdict === "boost");
+  if (pnlSuppress.length || pnlBoost.length) gateRules = gateRules.concat(pnlSuppress, pnlBoost);
+  const gateSuppress = [...new Set([...gateRules.filter((r) => r.verdict === "suppress").map((r) => r.k), ...pnlSuppress.map((r) => r.k)])];
   const touchSuppress = touchRules.filter((r) => r.verdict === "suppress").map((r) => r.k);
   const metrics = evalModel(test, gateRules, touchRules);
   return {
     ok: true, rows: rows.length, splitIdx,
     baseline: { dirTrain: +dirTrain.toFixed(4), dirTest: +dirBase.toFixed(4), touchTest: +touchBase.toFixed(4) },
-    gate: { buckets: gateBuckets, rules: gateRules, suppress: gateSuppress, boost: gateRules.filter((r) => r.verdict === "boost").map((r) => r.k) },
+    gate: { buckets: gateBuckets, rules: gateRules, suppress: gateSuppress, boost: gateRules.filter((r) => r.verdict === "boost").map((r) => r.k), pnlBase: pnlMine.base, pnlN: pnlMine.n },
     touch: { buckets: touchBuckets, rules: touchRules, suppress: touchSuppress, boost: touchRules.filter((r) => r.verdict === "boost").map((r) => r.k) },
     lessons: { lessons: lessonsFrom(gateRules, touchRules, test, dirBase, touchBase) },
     metrics,
     // ===== OBJEKTIF PnL (res.trade) =====
     pnl: pnlContexts(train, TA_FEATS),
+    pnlMine: pnlMine.rules,
     pnlTest: evalModelPnl(test, gateRules, touchRules),
   };
 }
 
 function lessonsFrom(gateRules, touchRules, test, dirBase, touchBase) {
   const L = [];
-  for (const r of gateRules.filter((x) => x.verdict === "boost").slice(0, 12)) L.push({ type: "boost", rule: r.k, nTest: r.nTest, wrTest: +r.wrTest.toFixed(4), lbTest: +r.lbTest.toFixed(4), text: `konteks ${r.k}: winrate uji ${(r.wrTest * 100).toFixed(1)}% (LB ${(r.lbTest * 100).toFixed(1)}%, n=${r.nTest})` });
-  for (const r of gateRules.filter((x) => x.verdict === "suppress").slice(0, 12)) L.push({ type: "suppress", rule: r.k, nTest: r.nTest, wrTest: +r.wrTest.toFixed(4), ubTest: +r.ubTest.toFixed(4), text: `konteks ${r.k}: winrate uji ${(r.wrTest * 100).toFixed(1)}% (UB ${(r.ubTest * 100).toFixed(1)}%, n=${r.nTest}) — hindari` });
+  for (const r of gateRules.filter((x) => x.verdict === "boost" && x.nTest != null).slice(0, 12)) L.push({ type: "boost", rule: r.k, nTest: r.nTest, wrTest: +r.wrTest.toFixed(4), lbTest: +r.lbTest.toFixed(4), text: `konteks ${r.k}: winrate uji ${(r.wrTest * 100).toFixed(1)}% (LB ${(r.lbTest * 100).toFixed(1)}%, n=${r.nTest})` });
+  for (const r of gateRules.filter((x) => x.verdict === "suppress" && x.nTest != null).slice(0, 12)) L.push({ type: "suppress", rule: r.k, nTest: r.nTest, wrTest: +r.wrTest.toFixed(4), ubTest: +r.ubTest.toFixed(4), text: `konteks ${r.k}: winrate uji ${(r.wrTest * 100).toFixed(1)}% (UB ${(r.ubTest * 100).toFixed(1)}%, n=${r.nTest}) — hindari` });
   for (const r of touchRules.filter((x) => x.verdict === "suppress" && x.k.indexOf("&") === -1).slice(0, 8)) L.push({ type: "suppress", rule: r.k, nTest: r.nTest, wrTest: +r.wrTest.toFixed(4), ubTest: +r.ubTest.toFixed(4), text: `peluang kembali ke lock ${r.k}: ${(r.wrTest * 100).toFixed(1)}% (UB ${(r.ubTest * 100).toFixed(1)}%, n=${r.nTest})` });
   // penyebab: fitur yang lebih sering muncul pada sinyal KALAH
   const WIN = test.filter((r) => r.won === 1), LOSE = test.filter((r) => r.won === 0);
@@ -825,21 +905,34 @@ function learnThresholds(rows, opts = {}) {
    Untuk sinyal ke BOT, yang penting = WINRATE dari sinyal yang DIAMBIL (makin sedikit rugi),
    dengan syarat cakupan masih memadai & stabil di tiap lipatan. Metrik lama (WR x akar(coverage))
    menghukum selektivitas sehingga filter penajam tak pernah bisa promote. */
-function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.35) {   // minCov = MIN_APPLY_COV supaya model yg dipakai PASTI diterapkan
+function shouldPromote(candidate, incumbent, opts = {}) {   // opts: {minTake,minCov,minDelta,baselinePnl,hasBlockers}
+  const minTake = opts.minTake != null ? opts.minTake : 15;
+  const minCov = opts.minCov != null ? opts.minCov : 0.10;
+  const minDelta = opts.minDelta != null ? opts.minDelta : 2;   // pp $ minimal vs baseline/insiden (satuan %)
   const c = candidate && candidate.metrics, i = incumbent && incumbent.metrics;
   if (!c) return { promote: false, why: "kandidat tidak valid" };
+  // Kandidat tanpa blocker efektif = "ambil-semua" (tidak menajamkan apa pun) -> jangan adopsi.
+  // Ini memutus loop no-op lama: insiden == kandidat (keduanya tanpa blocker) -> $ identik -> tak pernah promote.
+  if (opts.hasBlockers === false) return { promote: false, why: "kandidat tanpa blocker efektif (ambil-semua) -> tidak diadopsi" };
   if (c.taken < minTake) return { promote: false, why: `sinyal diambil hanya ${c.taken} (< ${minTake}) — bukti belum cukup` };
   if ((c.coverage || 0) < minCov) return { promote: false, why: `cakupan ${((c.coverage || 0) * 100).toFixed(0)}% < ${(minCov * 100).toFixed(0)}% — terlalu selektif` };
   const cp = c.pnl, ip = i && i.pnl;
   const pnlReady = !!(cp && cp.n >= 30);
   // ===== OBJEKTIF UTAMA: $ (PnL). Dipakai lebih dulu bila datanya memadai — bukan sekadar WR. =====
-  // PnL mencerminkan trailing TP / close mandiri BOT (uang nyata), beda dari WR arah.
   if (pnlReady) {
-    if (!ip || ip.n < 30) return (cp.meanPnl > 0)
-      ? { promote: true, why: `$: kandidat meanPnl ${cp.meanPnl}% (n ${cp.n}) > 0; insiden data $ kurang -> adopsi kandidat` }
-      : { promote: false, why: `$ kandidat NEGATIF (${cp.meanPnl}%, n ${cp.n}) -> tidak diadopsi` };
+    if (cp.meanPnl <= 0) return { promote: false, why: `$ kandidat NEGATIF (${cp.meanPnl}%, n ${cp.n}) -> tidak diadopsi` };
+    if (!ip || ip.n < 30) {
+      const bp = opts.baselinePnl;
+      if (bp && bp.n >= 30) {
+        const d = cp.meanPnl - bp.meanPnl;
+        return d >= minDelta
+          ? { promote: true, why: `$ naik vs baseline take-all: ${cp.meanPnl}% vs ${bp.meanPnl}% (+${d.toFixed(2)}pp) n ${cp.n}` }
+          : { promote: false, why: `$ ${cp.meanPnl}% tidak menambah >=${minDelta}pp vs baseline ${bp.meanPnl}% (n ${cp.n})` };
+      }
+      return { promote: true, why: `$: kandidat meanPnl ${cp.meanPnl}% (n ${cp.n}) > 0; baseline data kurang -> adopsi kandidat` };
+    }
     const dPnl = cp.meanPnl - ip.meanPnl;
-    if (dPnl >= 0.02) return { promote: true, why: `$ membaik: ${cp.meanPnl}% vs ${ip.meanPnl}% (+${dPnl.toFixed(3)}pp) n ${cp.n}/${ip.n} · WR ${(c.takenWinrate * 100).toFixed(1)}% cov ${((c.coverage || 0) * 100).toFixed(0)}%` };
+    if (dPnl >= minDelta) return { promote: true, why: `$ membaik: ${cp.meanPnl}% vs ${ip.meanPnl}% (+${dPnl.toFixed(2)}pp) n ${cp.n}/${ip.n} · WR ${(c.takenWinrate * 100).toFixed(1)}% cov ${((c.coverage || 0) * 100).toFixed(0)}%` };
     const dWr = c.takenWinrate - i.takenWinrate;
     if (dWr >= 0.03 && dPnl >= 0) return { promote: true, why: `$ datar (${cp.meanPnl}% vs ${ip.meanPnl}%) tapi WR +${(dWr * 100).toFixed(1)}pp tanpa turunkan $` };
     return { promote: false, why: `$ tidak membaik: ${cp.meanPnl}% vs insiden ${ip.meanPnl}% (n ${cp.n}/${ip.n})` };
@@ -850,10 +943,10 @@ function shouldPromote(candidate, incumbent, minTake = 40, minCov = 0.35) {   //
   const iMin = (i.parts && i.parts.length) ? Math.min(...i.parts.map((p) => p.takenWinrate)) : i.takenWinrate;
   const dWr = c.takenWinrate - i.takenWinrate;
   if (dWr >= 0.02 && cMin >= iMin) {
-    if (cp && ip && cp.n >= 30 && ip.n >= 30 && cp.meanPnl < ip.meanPnl - 0.02) return { promote: false, why: `WR naik tapi $ turun (${cp.meanPnl}% < ${ip.meanPnl}%) — ditolak` };
+    if (cp && ip && cp.n >= 30 && ip.n >= 30 && cp.meanPnl < ip.meanPnl - minDelta) return { promote: false, why: `WR naik tapi $ turun (${cp.meanPnl}% < ${ip.meanPnl}%) — ditolak` };
     return { promote: true, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% (+${(dWr * 100).toFixed(1)}pp) cov ${((c.coverage || 0) * 100).toFixed(0)}% (data $ <30 -> fallback WR)` };
   }
   return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}%` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, shouldPromote, blockersOf, APPLY_KEYS, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, minePnl, rollingStats, regimePause, stderr, shouldPromote, blockersOf, APPLY_KEYS, DECIDE_FIELD, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, PN_FEATS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

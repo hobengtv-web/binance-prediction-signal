@@ -3496,10 +3496,12 @@ function renderConfidenceReport() {
   // Isi sisa lebar kartu (di layar lebar ~31 kolom @21px per blok koin). Kelebihannya bisa
   // di-scroll; di mobile default tampil dari KIRI = sesi TERBARU karena urutannya terbaru->lama.
   const PER_COIN = 40;
-  // WINDOW WAKTU: history DITAMPILKAN hanya 34 jam terakhir; W/L & S/F DIHITUNG hanya dari 24 jam terakhir (WIB).
+  // WINDOW WAKTU: history DITAMPILKAN 34 jam terakhir (rolling); W/L & S/F DIHITUNG dari hari ini
+  // SEJAK 00:00 WIB (bukan rolling 24 jam).
   const nowMs = Date.now();
   const DISP_WINDOW_MS = 34 * 3600e3;
-  const STAT_WINDOW_MS = 24 * 3600e3;
+  const WIB_OFFSET_MS = 7 * 3600e3;
+  const DAY_START_MS = Math.floor((nowMs + WIB_OFFSET_MS) / 86400e3) * 86400e3 - WIB_OFFSET_MS;   // 00:00 WIB hari ini
 
   // Satu sesi = SATU KOLOM berisi 3 baris: signal (U/D), entry (E), early close (C).
   // Warna memakai konvensi yang sudah ada: hijau = benar/sukses, merah = salah/gagal,
@@ -3536,11 +3538,11 @@ function renderConfidenceReport() {
   let html = `<div class="sa-cols">`;
   for (const sym of COINS) {
     const all = rounds.filter((r) => r.asset === sym && r.interval === tf);
-    const inWin = (r, ms) => (r.t0Sec == null) ? true : (r.t0Sec * 1000 >= nowMs - ms);   // record tanpa t0 (fallback lokal) tetap tampil
-    // Baris yang DITAMPILKAN: 34 jam terakhir.
-    const dispData = all.filter((r) => inWin(r, DISP_WINDOW_MS));
-    // W/L & S/F: DIHITUNG hanya dari 24 jam terakhir (WIB).
-    const statData = all.filter((r) => inWin(r, STAT_WINDOW_MS));
+    const inWin = (r, ms) => (r.t0Sec == null) ? true : (r.t0Sec * 1000 >= ms);   // record tanpa t0 (fallback lokal) tetap tampil
+    // Baris yang DITAMPILKAN: 34 jam terakhir (rolling).
+    const dispData = all.filter((r) => inWin(r, nowMs - DISP_WINDOW_MS));
+    // W/L & S/F: DIHITUNG dari hari ini sejak 00:00 WIB.
+    const statData = all.filter((r) => inWin(r, DAY_START_MS));
     const evald = statData.filter((r) => r.won !== undefined);
     const wins = evald.reduce((a, r) => a + r.won, 0);
     const wr = evald.length ? Math.round(wins / evald.length * 100) : null;
@@ -3574,10 +3576,10 @@ function renderConfidenceReport() {
         : `<div class="cd-empty">${sym === "BNB" && tf !== "5m" ? "BNB hanya 5m" : "belum ada sesi"}</div>`}
     </div>`;
   }
-  html += `</div><div class="sa-legend">window: history <b>34 jam terakhir</b> · <b>W/L &amp; S/F dihitung dari 24 jam terakhir (WIB)</b> · tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal (dengan % sukses) · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> = entry &amp; apakah target LOCK tercapai · baris 3 <b>C</b> = early close ter-signal (hijau = ya · merah = tidak · abu = tidak ada entry/posisi)</div>`;
+  html += `</div><div class="sa-legend">window: history <b>34 jam terakhir</b> · <b>W/L &amp; S/F dihitung sejak 00:00 WIB hari ini</b> · tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal (dengan % sukses) · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> = entry &amp; apakah target LOCK tercapai · baris 3 <b>C</b> = early close ter-signal (hijau = ya · merah = tidak · abu = tidak ada entry/posisi)</div>`;
 
   if (head) head.textContent = "DESKTOP SIGNAL ACCURACY · per sesi (signal · entry · early close) · 34 jam ";
-  if (countEl) countEl.textContent = `${totalShown} sesi ${tf} (34 jam · W/L & S/F 24 jam WIB) · sumber ${srcLabel}`
+  if (countEl) countEl.textContent = `${totalShown} sesi ${tf} (34 jam · W/L & S/F sejak 00:00 WIB) · sumber ${srcLabel}`
     + `${GATE_STATUS === "ok" ? "" : ` · gate ${GATE_STATUS}`}${TIER_STATUS === "ok" ? "" : ` · tiers ${TIER_STATUS}`}`;
   body.innerHTML = html;
 }

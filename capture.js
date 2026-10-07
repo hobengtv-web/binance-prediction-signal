@@ -308,8 +308,8 @@ function computeSignal(o) {
           interval: tf, symbol: sym, dir: currentDir, hour: hourB, gap: gapB, mode,
           rsi: LEARNER_BUCKETS.bRsi(rsi), vol: LEARNER_BUCKETS.bVol(volRel2),
           hist: LEARNER_BUCKETS.bHist(histTrend.strength), trend: trend || "na", minute: LEARNER_BUCKETS.bMinute(1),
-          // mikro-struktur (B): sama dgn bucketing di learner.DECIDE_FIELD
-          mAlignB: String(["5m", "15m", "1h"].filter((t) => _al[t] === currentDir).length),
+          // mikro-struktur (B): sama dgn bucketing di learner.DECIDE_FIELD (harus IDENTIK agar rule match)
+          mAlignB: (align && Object.keys(align).length) ? String(["5m", "15m", "1h"].filter((t) => _al[t] === currentDir).length) : "na",
           mAgreeB: (bodyAgree != null) ? (bodyAgree ? "agree" : "disagree") : "na",
           mRanZone: (ranPos != null) ? (ranPos < 0.2 ? "low" : ranPos > 0.8 ? "high" : "mid") : "na",
           mBody: (_mO2 == null) ? "na" : (_mO2 > 0.5 ? "strong+" : _mO2 < -0.5 ? "strong-" : "weak"),

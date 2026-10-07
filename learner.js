@@ -258,7 +258,7 @@ function ruleParts(k) {
   return String(k).split("&").map((p) => { const i = p.indexOf("="); return i < 0 ? null : { f: p.slice(0, i), v: p.slice(i + 1) }; }).filter(Boolean);
 }
 function blockersOf(rules, metric) {
-  return rules.filter((r) => {
+  return (rules || []).filter((r) => {
     if (!r || r.verdict !== "suppress") return false;
     const ps = ruleParts(r.k);
     return ps.length > 0 && ps.every((p) => APPLY_KEYS.has(p.f));
@@ -273,8 +273,8 @@ function decide(row, blockers) {
 // skor = winrate dari sinyal yang DIAMBIL x akar(cakupan) — filternya harus berguna,
 // bukan sekadar mengambil sedikit sinyal.
 function evalModel(rows, gateRules, touchRules) {
-  const gb = blockersOf(gateRules.map((r) => ({ ...r, metric: "dwin" })), "dwin");
-  const tb = blockersOf(touchRules.map((r) => ({ ...r, metric: "dwin" })), "dwin");
+  const gb = blockersOf((gateRules || []).map((r) => ({ ...r, metric: "dwin" })), "dwin");
+  const tb = blockersOf((touchRules || []).map((r) => ({ ...r, metric: "dwin" })), "dwin");
   const taken = rows.filter((r) => decide(r, gb) && decide(r, tb));
   const cov = rows.length ? taken.length / rows.length : 0;
   const wr = taken.length ? mean(taken.map((r) => r.dwin)) : 0;   // metrik = $ (dwin)
@@ -700,8 +700,8 @@ function liveHourGate(rows, opts = {}, nowMs = Date.now()) {
    bukan hanya winrate. Hanya baris dgn `botRoi` (uang nyata dari akun Binance) yang dihitung —
    proksi spot (pnlPct) TIDAK dipakai untuk keputusan $. */
 function evalModelPnl(rows, gateRules, touchRules) {
-  const gb = blockersOf(gateRules.map((r) => ({ ...r, metric: "won" })), "won");
-  const tb = blockersOf(touchRules.map((r) => ({ ...r, metric: "touch" })), "touch");
+  const gb = blockersOf((gateRules || []).map((r) => ({ ...r, metric: "won" })), "won");
+  const tb = blockersOf((touchRules || []).map((r) => ({ ...r, metric: "touch" })), "touch");
   const taken = rows.filter((r) => r.pnlReal != null && decide(r, gb) && decide(r, tb));
   const n = taken.length;
   return {
@@ -744,20 +744,23 @@ const PN_FEATS = {
 const PN_PAIRS = [["hour", "dir"], ["dir", "vol"], ["dir", "rsi"], ["hour", "vol"], ["trend", "dir"],
   ["gap", "dir"], ["mAlignB", "dir"], ["mAgreeB", "dir"], ["hist", "dir"], ["dir", "minute"]];
 function stderr(a) { const n = a.length; if (n < 2) return 0; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) * (x - m), 0) / (n - 1)) / Math.sqrt(n); }
+// Rata-rata BERBOBOT (recency, B15). Bila semua bobot 1 -> identik dgn mean biasa.
+function wmeanArr(vals, wts) { let s = 0, sw = 0; for (let i = 0; i < vals.length; i++) { const w = (wts[i] > 0 ? wts[i] : 1); s += w * vals[i]; sw += w; } return sw > 0 ? s / sw : 0; }
 function minePnl(rows, opts = {}) {
   const o = Object.assign({ minN: 8, minDelta: 3, zMin: 1.0, windowSec: 0, now: 0 }, opts);
   let base0 = rows.filter((r) => r.pnlReal != null && (r.dir === "up" || r.dir === "down"));
   if (o.windowSec > 0 && o.now > 0) base0 = base0.filter((r) => o.now - r.t0 <= o.windowSec);
   if (base0.length < o.minN * 2) return { base: null, n: base0.length, rules: [] };
-  const all = mean(base0.map((r) => r.pnlReal));
+  const wOf = (r) => (typeof r.w === "number" && r.w > 0) ? r.w : 1;   // bobot recency (B15)
+  const all = wmeanArr(base0.map((r) => r.pnlReal), base0.map(wOf));
   const out = [];
   const run = (feats) => {
     const keyf = (r) => feats.map((f) => `${f}=${PN_FEATS[f](r)}`).join("&");
     const g = groupBy(base0, keyf);
     for (const [k, arr] of g) {
       if (arr.length < o.minN) continue;
-      const vals = arr.map((r) => r.pnlReal);
-      const m = mean(vals), d = m - all, s = stderr(vals);
+      const vals = arr.map((r) => r.pnlReal), wts = arr.map(wOf);
+      const m = wmeanArr(vals, wts), d = m - all, s = stderr(vals);
       const sig = s <= 0 || Math.abs(d) >= o.zMin * s;
       if (d <= -o.minDelta && sig) out.push({ k, f: feats.join("&"), n: arr.length, meanPnl: +m.toFixed(4), delta: +d.toFixed(4), verdict: "suppress", metric: "dwin" });
       else if (d >= o.minDelta && sig) out.push({ k, f: feats.join("&"), n: arr.length, meanPnl: +m.toFixed(4), delta: +d.toFixed(4), verdict: "boost", metric: "dwin" });
@@ -779,7 +782,8 @@ function mineSpread(rows, opts = {}) {
   const o = Object.assign({ minN: 6, thrPct: 0 }, opts);
   const a = rows.filter((r) => r.pnlReal != null && typeof r.spreadPct === "number");
   if (a.length < o.minN) return { ok: false, n: a.length, spreadMaxPct: null, note: "data spread kurang" };
-  const grid = [0.03, 0.05, 0.08, 0.1, 0.12, 0.15, 0.2, 0.3];
+  // PENTING: bot.entrySpreadPct dalam PERSEN (mis. 8 = 8%), bukan fraksi. Grid juga dalam %.
+  const grid = [3, 5, 8, 10, 12, 15, 20, 30];
   let best = null;
   for (const X of grid) {
     const sub = a.filter((r) => r.spreadPct <= X);

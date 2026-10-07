@@ -475,9 +475,17 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
           : `cakupan ${(100 * (liveEval ? liveEval.coverage : 0)).toFixed(0)}% < ${(minApplyCov * 100).toFixed(0)}% -> blocker TIDAK diterapkan` };
       const th = LEARNER.learnThresholds(kr);
       const gatesPromoted = !!(th.ok && th.beatsBaseline);
-      // TIER LADDER per key (dimining) — menggantikan bootstrap global utk key ini.
-      const kt = LEARNER.keyTiers(kr, { minN: Number(process.env.TIER_MIN_N || 8) });
-      const gt = (kt.keys[key] && Object.keys(kt.keys[key]).length) ? kt.keys[key] : null;
+      // TIER LADDER: utamakan tier MILIK key; bila key kekurangan data -> fallback tier POOL TF-level
+      // (semua coin TF sama digabung). Per-key tetap prioritas; pool hanya warm-start (tanpa ambang global).
+      const ktOwn = LEARNER.keyTiers(kr, { minN: Number(process.env.TIER_MIN_N || 8) });
+      let gt = (ktOwn.keys[key] && Object.keys(ktOwn.keys[key]).length) ? ktOwn.keys[key] : null;
+      let tiersPooled = false;
+      if (!gt) {
+        const poolTiersRows = poolRows.map((r) => (r.symbol === "POOL" ? r : Object.assign({}, r, { symbol: "POOL" })));
+        const ktP = LEARNER.keyTiers(poolTiersRows, { minN: Number(process.env.TIER_MIN_N || 8) });
+        const _ktKey = `POOL_${tfNow}`;
+        if (ktP.keys[_ktKey] && Object.keys(ktP.keys[_ktKey]).length) { gt = ktP.keys[_ktKey]; tiersPooled = true; }
+      }
       // GANTI SELALU (jangan merge config lama) -> tak ada threshold usang yg menahan sinyal.
       const gEntry = {
         mode: "perkey", liqFloorMul: Number(process.env.LIQ_FLOOR_MUL != null ? process.env.LIQ_FLOOR_MUL : 0.12),
@@ -485,6 +493,7 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
         generated: new Date().toISOString(), version: ver, rows: kr.length,
       };
       if (gt) gEntry.tiers = gt;
+      if (tiersPooled) gEntry.tiersPooled = true;
       if (gatesPromoted) { gEntry.thresholds = th.thresholds; gEntry.thMetrics = th.test; gEntry.train = th.train; gEntry.baselineTest = th.baselineTest; anyGates = true; }
       gatesMap[key] = gEntry;
       pnlMap[key] = Object.assign({ test: cand.pnlTest }, cand.pnl);

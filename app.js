@@ -2208,7 +2208,7 @@ function learnNote(L) {
   if (!p.length) return "";
   const tag = L.label === "KUAT" ? " · konteks KUAT ✔" : L.label === "LEMAH" ? " · ⚠ konteks LEMAH" : L.label === "CAMPURAN" ? " · konteks CAMPURAN" : "";
   // Sumber tabel belajar harus jujur: model hasil ledger, atau tabel backtest 90 hari.
-  const src = (LEARN.gate && LEARN.gate.source === "ledger") ? `MODEL BELAJAR${LEARN.gate.version ? " " + String(LEARN.gate.version).slice(0, 16) : ""}` : "BELAJAR 90d (backtest)";
+  const src = (LEARN.gate && LEARN.gate.source === "ledger") ? `MODEL BELAJAR${LEARN.gate.version ? " " + String(LEARN.gate.version).slice(0, 16) : ""}` : (LEARN.gate ? "MODEL PER-KEY ($ akun)" : "ARSIP backtest (legacy)");
   return `${src} (diuji): ${p.join(" · ")}${tag}.`;
 }
 /* Jumlah aturan model: dukung DUA format — statis (array `rules`) & server (per-key `byKey`).
@@ -2241,15 +2241,21 @@ function renderLessons() {
   else if (l && l.byKey && typeof l.byKey === "object") {
     for (const k of Object.keys(l.byKey)) { const arr = (l.byKey[k] && l.byKey[k].lessons) || []; for (const x of arr) flat.push(Object.assign({ key: k }, x)); }
   }
-  if (!flat.length) { el.innerHTML = '<div class="cd-empty">belum ada data pelajaran</div>'; return; }
+  if (!flat.length) { el.innerHTML = '<div class="cd-empty">belum ada konteks (menunggu $ akun cukup per key)</div>'; return; }
   const kk = (x) => (x.key ? x.key + " · " : "");
-  const row = (x) => x.type === "cause"
-    ? `<div class="ls-row ls-cause"><span class="ls-k">${kk(x)}${x.feature}=${x.bucket}</span><span class="ls-v">muncul ${(x.pLose * 100).toFixed(1)}% di sinyal SALAH vs ${(x.pWin * 100).toFixed(1)}% benar</span></div>`
-    : `<div class="ls-row ${x.type === "boost" ? "ls-boost" : "ls-sup"}"><span class="ls-k">${kk(x)}${x.rule}</span><span class="ls-v">${(x.wrTest * 100).toFixed(1)}% (n=${x.nTest})</span></div>`;
+  const row = (x) => {
+    if (x.type === "cause") return `<div class="ls-row ls-cause"><span class="ls-k">${kk(x)}${x.feature}=${x.bucket}</span><span class="ls-v">muncul ${(x.pLose * 100).toFixed(1)}% di sinyal SALAH vs ${(x.pWin * 100).toFixed(1)}% benar</span></div>`;
+    const isPnl = x.type === "pnl-boost" || x.type === "pnl-suppress";
+    const bad = x.type === "suppress" || x.type === "pnl-suppress";
+    const val = isPnl ? `$ ${x.meanPnl >= 0 ? "+" : ""}${x.meanPnl}% (n=${x.n})` : `${(x.wrTest * 100).toFixed(1)}% (n=${x.nTest})`;
+    return `<div class="ls-row ${bad ? "ls-sup" : "ls-boost"}"><span class="ls-k">${kk(x)}${x.rule}</span><span class="ls-v">${val}</span></div>`;
+  };
   const sec = (t, arr, cls) => arr.length ? `<div class="ls-sec ${cls}"><b>${t}</b>${arr.slice(0, 6).map(row).join("")}</div>` : "";
   el.innerHTML =
-    sec("✔ Konteks kuat (lolos uji)", flat.filter((x) => x.type === "boost"), "c-boost") +
-    sec("⚠ Konteks lemah — hindari", flat.filter((x) => x.type === "suppress"), "c-sup") +
+    sec("✔ Konteks $ akun KUAT", flat.filter((x) => x.type === "pnl-boost"), "c-boost") +
+    sec("⚠ Konteks $ akun LEMAH — hindari", flat.filter((x) => x.type === "pnl-suppress"), "c-sup") +
+    sec("✔ Konteks arah kuat (lolos uji)", flat.filter((x) => x.type === "boost"), "c-boost") +
+    sec("⚠ Konteks arah lemah", flat.filter((x) => x.type === "suppress"), "c-sup") +
     sec("🔎 Penyebab sinyal salah", flat.filter((x) => x.type === "cause"), "c-cause");
 }
 window.setLearnBlock = (v) => { LEARN_BLOCK = !!v; console.log("[LEARN] tahan konteks lemah =", LEARN_BLOCK); return LEARN_BLOCK; };
@@ -2340,7 +2346,7 @@ function renderLearnerStatus() {
   }
   if (g.mode === "bootstrap") acts.push(`Sedang <b>BOOTSTRAP</b> (ambang dilonggarkan supaya sinyal lebih sering) → winrate yang tampil memang lebih rendah. Ini disengaja sampai learner mengetatkan sendiri. Balik cepat: <code>GATES_MODE=strict</code>.`);
   if (lastKeep && !learned) acts.push(`Keputusan terakhir <b>DITAHAN</b>: ${esc(lastKeep.why || "")}.`);
-  if (learned) acts.push(`Aktifkan penahanan konteks lemah (opsional): <code>window.setLearnBlock(true)</code> — sinyal pada konteks tervalidasi lemah akan ditahan (mode <code>LEARN-BLOCK</code>).`);
+  if (learned) acts.push(`Blocker konteks diterapkan <b>otomatis di server</b> per coin×TF (gerbang anti-perburukan $). Anti-snowball (ACF) menjamin cakupan sinyal tidak menuju nol.`);
   const blk = [...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])];
   if (blk.length) acts.push(`Penahan konteks aktif: ${blk.map((k) => `<code>${esc(k)}</code>`).join(" · ")}`);
   const actsHtml = acts.map((a, i) => `<div class="lstat-line">${i + 1}. ${a}</div>`).join("");
@@ -4373,11 +4379,12 @@ function ensureLearnerPanel() {
   if (!document.getElementById("lessons-body")) {
     const d = document.createElement("details");
     d.className = "lessons"; d.id = "lessons";
-    d.innerHTML = `<summary>PELAJARAN DARI SINYAL LALU · LEARNER 90d ▾</summary>
-      <div class="ls-hint">Konteks tervalidasi <b>walk-forward</b>: latih 70% data paling awal, uji 30%
-      paling akhir, dinilai Wilson bound. Hanya konteks yang lolos uji yang ditampilkan.</div>
+    d.innerHTML = `<summary>PELAJARAN DARI SINYAL LALU · PER KEY ($ AKUN) ▾</summary>
+      <div class="ls-hint">Konteks per <b>coin×TF</b> dari <b>$ akun Binance</b> (bukan proksi/backtest 90d):
+      fitur (single &amp; interaksi) dengan rata-rata $ tertinggi/terendah, diuji pada jendela terbaru.
+      Hanya konteks yang bisa diterapkan live yang tampil.</div>
       <div id="lessons-body" class="ls-body"></div>
-      <div class="ls-foot"><span id="ls-status">—</span> · tahan sinyal pada konteks lemah: <code>window.setLearnBlock(true)</code></div>
+      <div class="ls-foot"><span id="ls-status">—</span> · anti-snowball (ACF): cakupan sinyal per key dijaga agar tidak menuju nol.</div>
       <div class="ls-foot"><b>LEDGER BELAJAR</b> <span id="ls-ledger">memuat…</span></div>`;
     const anchor = document.querySelector("details.help");
     if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(d, anchor); else document.body.appendChild(d);

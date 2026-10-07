@@ -918,7 +918,13 @@ function buildModel(rows, opts = {}) {
     baseline: { dirTrain: +dirTrain.toFixed(4), dirTest: +dirBase.toFixed(4), touchTest: +touchBase.toFixed(4) },
     gate: { buckets: gateBuckets, rules: gateRules, suppress: gateSuppress, boost: gateRules.filter((r) => r.verdict === "boost").map((r) => r.k), pnlBase: pnlMine.base, pnlN: pnlMine.n },
     touch: { buckets: touchBuckets, rules: touchRules, suppress: touchSuppress, boost: touchRules.filter((r) => r.verdict === "boost").map((r) => r.k) },
-    lessons: { lessons: lessonsFrom(gateRules, touchRules, test, dirBase, touchBase) },
+    lessons: { lessons: lessonsFrom(gateRules, touchRules, test, dirBase, touchBase).concat(
+      // REPURPOSE: "pelajaran" kini = konteks mean-$ AKUN (single/interaksi) yang bisa diterapkan live.
+      (pnlMine.rules || []).slice(0, 14).map((r) => ({
+        type: r.verdict === "suppress" ? "pnl-suppress" : "pnl-boost",
+        rule: r.k, meanPnl: r.meanPnl, n: r.n,
+        text: `${r.k}: $ ${r.meanPnl >= 0 ? "+" : ""}${r.meanPnl}% (n=${r.n}) ${r.verdict === "suppress" ? "— hindari" : "— kuat"}`,
+      }))) },
     metrics,
     // ===== OBJEKTIF PnL (res.trade) =====
     pnl: pnlContexts(train, TA_FEATS),

@@ -808,7 +808,7 @@ async function proxyBinanceV3(pathname, search) {
   return { status: 502, body: JSON.stringify({ error: "proxy gagal: " + String(lastErr) }), ctype: "application/json" };
 }
 const BN_WS_HOSTS = ["wss://stream.binance.com:9443", "wss://data-stream.binance.vision"];
-let _mstreamClients = new Set(), _mstreamWs = null, _mstreamIdx = 0, _mstreamGotData = false, _mstreamPoll = null;
+let _mstreamClients = new Set(), _mstreamWs = null, _mstreamIdx = 0, _mstreamGotData = false, _mstreamPoll = null, _mstreamPollN = 0;
 function _mstreamUrl() {
   const streams = [];
   for (const s of ["btcusdt", "ethusdt", "bnbusdt"]) {
@@ -829,12 +829,23 @@ function _mstreamPollEmit() {
   _mstreamPoll = setInterval(async () => {
     if ((_mstreamWs && _mstreamGotData) || _mstreamClients.size === 0) { clearInterval(_mstreamPoll); _mstreamPoll = null; return; }
     try {
+      _mstreamPollN++;
+      const alsoTf = (_mstreamPollN % 8 === 0);   // tiap ~10s, segarkan seri 5m/15m/1h juga
       for (const symBin of ["BTCUSDT", "ETHUSDT", "BNBUSDT"]) {
         const low = symBin.toLowerCase();
         let rows = [];
         try { const k = await proxyBinanceV3("/api/v3/klines", `?symbol=${symBin}&interval=1s&limit=2`); rows = JSON.parse(k.body); } catch (_) {}
         const r = Array.isArray(rows) ? rows[rows.length - 1] : null;
         if (r) _mstreamEmit({ stream: `${low}@kline_1s`, data: { e: "kline", E: Date.now(), s: symBin, k: { t: r[0] / 1000, T: r[6] / 1000, s: symBin, i: "1s", o: r[1], c: r[4], h: r[2], l: r[3], v: r[5], x: true } } });
+        if (alsoTf) {
+          for (const tf of ["5m", "15m", "1h"]) {
+            try {
+              const kk = await proxyBinanceV3("/api/v3/klines", `?symbol=${symBin}&interval=${tf}&limit=2`);
+              const rr = JSON.parse(kk.body); const c = Array.isArray(rr) ? rr[rr.length - 1] : null;
+              if (c) _mstreamEmit({ stream: `${low}@kline_${tf}`, data: { e: "kline", E: Date.now(), s: symBin, k: { t: c[0] / 1000, T: c[6] / 1000, s: symBin, i: tf, o: c[1], c: c[4], h: c[2], l: c[3], v: c[5], x: false } } });
+            } catch (_) {}
+          }
+        }
         try {
           const t = await proxyBinanceV3("/api/v3/ticker/24hr", `?symbol=${symBin}`);
           const tj = JSON.parse(t.body);

@@ -1904,13 +1904,19 @@ const LIVE = (() => {
     if (!fresh() || !snap) return null;
     if (tfSub !== tf) return null;
     const a = snap.assets && snap.assets[asset];
-    if (!a || !a.signal) return null;
+    if (!a) return null;
+    // Utamakan sinyal PER-TF (all[tf]); top-level `signal` bisa untuk tf lain. Late-signal (60s/90s)
+    // juga ada di all[tf]. T0 diambil dari entri tf (bukan dari signal, yg bisa tak punya t0).
+    const ent = (a.all && a.all[tf]) ? a.all[tf] : null;
+    const sig = ent ? ent.signal : a.signal;
+    if (!sig) return null;
     const dur = INTERVAL_MS[tf] || 300000;
     const t0 = Math.floor(serverNow() / dur) * dur / 1000;
-    if (a.signal.t0 !== t0) return null;                 // snapshot beda sesi -> abaikan
-    return Object.assign({}, a.signal, {
-      verdict: a.signal.verdict || (a.signal.accepted ? a.signal.dir : "flat"),
-      source: "server", roundStart: a.signal.t0,
+    const st0 = (ent && ent.t0 != null) ? ent.t0 : (sig.t0 != null ? sig.t0 : null);
+    if (st0 != null && st0 !== t0) return null;                 // snapshot beda sesi -> abaikan
+    return Object.assign({}, sig, {
+      verdict: sig.verdict || (sig.accepted ? sig.dir : "flat"),
+      source: "server", roundStart: st0,
     });
   }
   const priceFor = (asset) => (fresh() && snap && snap.assets && snap.assets[asset]) ? snap.assets[asset].price : null;

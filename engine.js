@@ -614,7 +614,7 @@ function createEngine(deps) {
     return {
       t0: t0 / 1000,
       skipped: same ? sess.skipped : "pending",
-      signal: sig ? Object.assign({}, sig, { verdict: sig.accepted ? sig.dir : "flat" }) : null,
+      signal: sig ? Object.assign({}, sig, { verdict: sig.accepted ? sig.dir : "flat", t0: same ? sess.t0 : null }) : null,
       plan: same ? (sess.plan || null) : null,
       // LOCK sesi: harga OPEN candle sesi — SELALU tersedia walau sinyalnya belum terkunci atau
       // di-skip. Sebelumnya nilainya hanya ada bila ada sinyal, sehingga GARIS LOCK di chart
@@ -655,7 +655,7 @@ function createEngine(deps) {
         deltaUsd: (px != null && sig && sig.lock) ? +(px - sig.lock).toFixed(2) : null,
         // `dir` = arah mentah (dipakai ledger/learning). `verdict` = yang DITAMPILKAN:
         // "flat" bila gate menolak (tier/likuiditas/threshold) — sama seperti app.
-        signal: sig ? Object.assign({}, sig, { verdict: sig.accepted ? sig.dir : "flat" }) : null,
+        signal: sig ? Object.assign({}, sig, { verdict: sig.accepted ? sig.dir : "flat", t0: sameSession ? sess.t0 : null }) : null,
         // Trade Assistant (diproses server): aksi, level, status entry/close, health.
         plan: (sess && sameSession) ? (sess.plan || null) : null,
         // Model confidence (diproses server): angka untuk arah up/down + konteks.

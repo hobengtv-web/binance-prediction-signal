@@ -76,8 +76,12 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
     const gain = (tr.closed && tr.closePrice != null && tr.entryPrice != null) ? (dirUp ? (tr.closePrice - tr.entryPrice) : (tr.entryPrice - tr.closePrice)) : null;
     const capturePct = (gain != null && pot && pot > 0) ? (gain / pot * 100) : null;
     const pnlPct = (gain != null && tr.entryPrice) ? (gain / tr.entryPrice * 100) : null;
-    // PnL $ NYATA BOT (dikirim BOT ke record.bot) -> lebih diutamakan daripada proksi spot pnlPct
-    const botRoi = (r.bot && typeof r.bot.roiPct === "number") ? +r.bot.roiPct.toFixed(4) : null;
+    // ===== $ STRICT DARI AKUN BINANCE (TANPA GAP) =====
+    // HANYA `bot.roiPct` dengan `bot.pnlSrc === "account"` (uang nyata akun, dikirim BOT LIVE).
+    // Proksi `res.settleRoi` (hold-to-settle dari harga token) TIDAK dipakai untuk keputusan $,
+    // agar learner tidak memakai hitungan sendiri di luar realisasi akun. pnlSrc "paper"/tanpa bukti -> null.
+    const botSrc = (r.bot && r.bot.pnlSrc) || null;
+    const botRoi = (botSrc === "account" && typeof r.bot.roiPct === "number") ? +r.bot.roiPct.toFixed(4) : null;
     out.push({
       t0: r.t0, asset: r.asset, interval: r.interval,
       symbol: r.asset, mode: s.mode || "na",
@@ -125,13 +129,14 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       botRoi: botRoi,
       botPnl: (r.bot && typeof r.bot.pnl === "number") ? +r.bot.pnl.toFixed(4) : null,
       pnlUse: (botRoi != null ? botRoi : (pnlPct != null ? +pnlPct.toFixed(4) : null)),   // DISPLAY saja (akun, else proksi spot)
-      // ===== $ NYATA = uang akun (botRoi) ATAU harga-token Binance nyata (settleRoi, hold-to-settle) =====
+      // ===== $ NYATA = HANYA uang akun Binance (botRoi, pnlSrc === "account") =====
+      // Proksi settleRoi disimpan sebagai OBSERVASI saja (bukan dasar keputusan learner).
       settleRoi: (r.res && typeof r.res.settleRoi === "number") ? +r.res.settleRoi.toFixed(4) : null,
       settleSrc: (r.res && r.res.settleSrc) || null,
-      // MENANG-$ (basis keputusan): 1 bila $ nyata > 0, 0 bila <=0, null bila tak ada $ nyata.
-      dwin: (botRoi != null ? (botRoi > 0 ? 1 : 0) : ((r.res && typeof r.res.settleRoi === "number") ? (r.res.settleRoi > 0 ? 1 : 0) : null)),
-      pnlReal: (botRoi != null ? botRoi : ((r.res && typeof r.res.settleRoi === "number") ? +r.res.settleRoi.toFixed(4) : null)),
-      pnlRealSrc: (botRoi != null ? "account" : ((r.res && typeof r.res.settleRoi === "number") ? (r.res.settleSrc || "binance-quote") : null)),
+      // MENANG-$ / PnL $-nya: STRICT akun (null bila tidak ada bukti akun -> baris DIKECUALIKAN dari belajar $).
+      dwin: (botRoi != null ? (botRoi > 0 ? 1 : 0) : null),
+      pnlReal: (botRoi != null ? botRoi : null),
+      pnlRealSrc: (botRoi != null ? "account" : null),
       // $ NYATA utk arah TERBALIK (invert): dari HARGA TOKEN Binance sisi lawan + outcome nyata.
       flipRoi: (function () {
         const o = r.odds; if (!o || (dir !== "up" && dir !== "down")) return null;
@@ -713,7 +718,7 @@ const PN_FEATS = {
 };
 function stderr(a) { const n = a.length; if (n < 2) return 0; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) * (x - m), 0) / (n - 1)) / Math.sqrt(n); }
 function minePnl(rows, opts = {}) {
-  const o = Object.assign({ minN: 20, minDelta: 3, zMin: 1.0, windowSec: 0, now: 0 }, opts);
+  const o = Object.assign({ minN: 8, minDelta: 3, zMin: 1.0, windowSec: 0, now: 0 }, opts);
   let base0 = rows.filter((r) => r.pnlReal != null && (r.dir === "up" || r.dir === "down"));
   if (o.windowSec > 0 && o.now > 0) base0 = base0.filter((r) => o.now - r.t0 <= o.windowSec);
   if (base0.length < o.minN * 2) return { base: null, n: base0.length, rules: [] };
@@ -769,7 +774,8 @@ function regimePause(rolling, key, opts = {}) {
 
 /* ---------- bangun model dari baris fitur ---------- */
 function buildModel(rows, opts = {}) {
-  const o = Object.assign({ minTrain: 60, minTest: 40, minRows: 120 }, opts);
+  // Minimum DITURUNKAN karena $ sekarang STRICT dari akun Binance (hanya ~20-35 baris/key saat ini).
+  const o = Object.assign({ minTrain: 12, minTest: 6, minRows: 15 }, opts);
   // KEPUTUSAN 100% BERBASIS $ NYATA: hanya belajar dari baris yang punya $ nyata (dwin != null).
   // Bila $ belum cukup -> model tidak dibangun (netral), bukan memakai WR.
   rows = rows.filter((r) => r.dwin != null);
@@ -849,13 +855,13 @@ function applyThresholds2(row, thresholds) {
   return true;
 }
 function learnThresholds(rows, opts = {}) {
-  const o = Object.assign({ minRows: 300, minTaken: 80, minCov: 0.2, grid: 20, rounds: 3, minGain: 0.004 }, opts);
+  const o = Object.assign({ minRows: 30, minTaken: 10, minCov: 0.15, grid: 20, rounds: 3, minGain: 0.004 }, opts);
   // KEPUTUSAN 100% BERBASIS $ NYATA: threshold dimining dari baris ber-$ nyata saja (dwin != null).
   const usable = rows.filter((r) => (r.dir === "up" || r.dir === "down") && r.dwin != null);
   if (usable.length < o.minRows) return { ok: false, reason: `butuh >= ${o.minRows} baris ber-$ berarah, ada ${usable.length}` };
   const splitIdx = Math.floor(usable.length * 0.7);
   const train = usable.slice(0, splitIdx), test = usable.slice(splitIdx);
-  if (train.length < 100 || test.length < 60) return { ok: false, reason: "jendela latih/uji terlalu kecil" };
+  if (train.length < 12 || test.length < 6) return { ok: false, reason: "jendela latih/uji terlalu kecil" };
   // Objektif = Wilson LOWER BOUND dari winrate sinyal yang diambil, dengan syarat
   // cakupan >= minCov dan jumlah diambil >= minTaken. LB otomatis menghukum sampel
   // kecil, jadi tidak bisa "menang" hanya dengan mengambil 5 sinyal yang kebetulan benar.
@@ -895,7 +901,7 @@ function learnThresholds(rows, opts = {}) {
     trainLb: cur.lb, testLb: +candLbTest.toFixed(4), baselineLbTest: +baseLbTest.toFixed(4),
     // menang out-of-sample: LB uji lebih tinggi DAN cakupan masih memadai DAN winrate naik
     // WR-first (konsisten dgn shouldPromote): menang bila WR uji naik >=2pp, cakupan memadai, LB tak merosot.
-    beatsBaseline: testM.taken >= (o.minTakenTest || 40) && (testM.coverage || 0) >= o.minCov && (testM.takenWinrate - baseTest.takenWinrate) >= 0.02 && candLbTest >= baseLbTest - 0.01,
+    beatsBaseline: testM.taken >= (o.minTakenTest || 10) && (testM.coverage || 0) >= o.minCov && (testM.takenWinrate - baseTest.takenWinrate) >= 0.02 && candLbTest >= baseLbTest - 0.01,
     note: sel.map((x) => `${x.f} ${x.op} ${x.t}`).join(" & ") || "tidak ada threshold yang menambah nilai",
   };
 }
@@ -906,7 +912,7 @@ function learnThresholds(rows, opts = {}) {
    dengan syarat cakupan masih memadai & stabil di tiap lipatan. Metrik lama (WR x akar(coverage))
    menghukum selektivitas sehingga filter penajam tak pernah bisa promote. */
 function shouldPromote(candidate, incumbent, opts = {}) {   // opts: {minTake,minCov,minDelta,baselinePnl,hasBlockers}
-  const minTake = opts.minTake != null ? opts.minTake : 15;
+  const minTake = opts.minTake != null ? opts.minTake : 6;
   const minCov = opts.minCov != null ? opts.minCov : 0.10;
   const minDelta = opts.minDelta != null ? opts.minDelta : 2;   // pp $ minimal vs baseline/insiden (satuan %)
   const c = candidate && candidate.metrics, i = incumbent && incumbent.metrics;

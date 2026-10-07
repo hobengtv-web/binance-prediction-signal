@@ -2374,7 +2374,7 @@ function renderLearnerStatus() {
     const paused = rp && rp.pause;
     return `<div class="lstat-row"><b>${esc(k)}</b> <span class="lstat-dim">3h: ${_rollCell(w, 10800)} \u00b7 6h: ${_rollCell(w, 21600)} \u00b7 12h: ${_rollCell(w, 43200)} \u00b7 24h: ${_rollCell(w, 86400)}${paused ? ' \u00b7 <span class="lstat-warn">PAUSE (regime $ negatif)</span>' : ""}</span></div>`;
   }).join("");
-  const rollSec = Object.keys(_rollKeys).length ? `<div class="lstat-sec"><b>REGIME $ BERGULIR per coin &amp; durasi</b> <span class="lstat-dim">(berbasis $ nyata; 30m terlalu noise \u2192 jendela min 3h)</span>${_rollRows}</div>` : "";
+  const rollSec = Object.keys(_rollKeys).length ? `<div class="lstat-sec"><b>REGIME $ BERGULIR per coin &amp; durasi</b> <span class="lstat-dim">(berbasis $ AKUN Binance \u2014 pnlSrc=account, tanpa proksi; 30m terlalu noise \u2192 jendela min 3h)</span>${_rollRows}</div>` : "";
   const jamInfo = modelSec + rollSec + `<div class="lstat-sec">
       <b>JAM ON/OFF TRADE (WIB) \u2014 per coin &amp; durasi</b> <span class="lstat-dim">dari learner terbaru${S.veto && S.veto.generated ? " · diperbarui " + new Date(S.veto.generated).toLocaleString() + " (" + esc(S.veto.trigger || "") + ")" : ""}</span>
       ${jamRows}

@@ -414,8 +414,8 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     for (const key of keys) {
       const kr = rows.filter((r) => r.symbol + "_" + r.interval === key);
       const cand = LEARNER.buildModel(kr, {
-        minTrain: Number(process.env.LEARN_MIN_TRAIN || 40), minTest: Number(process.env.LEARN_MIN_TEST || 25),
-        pnlMinN: Number(process.env.LEARN_PNL_MIN_N || 20), pnlMinDelta: Number(process.env.LEARN_PNL_MIN_DELTA || 3),
+        minTrain: Number(process.env.LEARN_MIN_TRAIN || 12), minTest: Number(process.env.LEARN_MIN_TEST || 6), minRows: Number(process.env.LEARN_MIN_ROWS || 15),
+        pnlMinN: Number(process.env.LEARN_PNL_MIN_N || 8), pnlMinDelta: Number(process.env.LEARN_PNL_MIN_DELTA || 3),
         windowSec: learnWindow, now: nowRef,
       });
       if (!cand.ok) {
@@ -440,7 +440,7 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       const dec = LEARNER.shouldPromote(
         { metrics: Object.assign({}, candEval, { pnl: candPnl }) },
         incEval ? { metrics: Object.assign({}, incEval, { pnl: incPnl }) } : null,
-        { minCov: Number(process.env.LEARN_MIN_COV || 0.10), minTake: Number(process.env.LEARN_MIN_TAKE || 15), minDelta: Number(process.env.LEARN_MIN_DELTA || 2), baselinePnl, hasBlockers: candBlockersEff > 0 });
+        { minCov: Number(process.env.LEARN_MIN_COV || 0.10), minTake: Number(process.env.LEARN_MIN_TAKE || 6), minDelta: Number(process.env.LEARN_MIN_DELTA || 2), baselinePnl, hasBlockers: candBlockersEff > 0 });
       const liveEval = dec.promote ? candEval : (incEval || candEval);
       // FIX inkonsistensi: apply HANYA bermakna bila memang ADA aturan blocker efektif (gate/touch).
       const gateRules = (cand.gate && cand.gate.suppress) || [];
@@ -448,7 +448,7 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       const hasBlockers = candBlockersEff > 0;
       // PENTING: rule live dibaca capture dari learn_gate.json per key TANPA menunggu "promote".
       // Karena itu penerapan digerbangi oleh: tidak merusak $ vs baseline take-all (cegah model yg OOS-nya lebih buruk).
-      const improvesBaseline = !!(candPnl && baselinePnl && candPnl.n >= 15 && candPnl.meanPnl >= baselinePnl.meanPnl);
+      const improvesBaseline = !!(candPnl && baselinePnl && candPnl.n >= 6 && candPnl.meanPnl >= baselinePnl.meanPnl);
       const applyBlockers = hasBlockers && improvesBaseline && !!liveEval && (liveEval.coverage || 1) >= minApplyCov;
       applyMap[key] = { apply: applyBlockers, hasBlockers, improvesBaseline, nRules: gateRules.length + touchRules.length, coverage: liveEval ? liveEval.coverage : null, minApplyCov,
         candPnl: candPnl ? candPnl.meanPnl : null, basePnl: baselinePnl ? baselinePnl.meanPnl : null, candN: candPnl ? candPnl.n : null,
@@ -459,7 +459,7 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       const th = LEARNER.learnThresholds(kr);
       const gatesPromoted = !!(th.ok && th.beatsBaseline);
       // TIER LADDER per key (dimining) — menggantikan bootstrap global utk key ini.
-      const kt = LEARNER.keyTiers(kr, { minN: Number(process.env.TIER_MIN_N || 20) });
+      const kt = LEARNER.keyTiers(kr, { minN: Number(process.env.TIER_MIN_N || 8) });
       const gt = (kt.keys[key] && Object.keys(kt.keys[key]).length) ? kt.keys[key] : null;
       // GANTI SELALU (jangan merge config lama) -> tak ada threshold usang yg menahan sinyal.
       const gEntry = {
@@ -502,7 +502,7 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       // Pause key bila $ 6h DAN konfirmasi 12h sama-sama negatif (histeresis -> hindari whipsaw).
       // Data: pada 30m $ = noise (persist 0.50); persistensi baru terukur di 3-6 jam -> jendela minimum 3h.
       if (process.env.KEY_EV_GATE === "1") {
-        const rpOpts = { fast: Number(process.env.REGIME_FAST_SEC || 21600), confirm: Number(process.env.REGIME_CONFIRM_SEC || 43200), minN: Number(process.env.REGIME_MIN_N || 12), thrPct: Number(process.env.REGIME_THR_PCT || 0) };
+        const rpOpts = { fast: Number(process.env.REGIME_FAST_SEC || 21600), confirm: Number(process.env.REGIME_CONFIRM_SEC || 43200), minN: Number(process.env.REGIME_MIN_N || 8), thrPct: Number(process.env.REGIME_THR_PCT || 0) };
         for (const k of Object.keys((kv && kv.keys) || {})) {
           const rp = LEARNER.regimePause(rolling, k, rpOpts);
           kv.keys[k].regime = rp;
@@ -593,7 +593,7 @@ function computeVetoNow() {
   if (process.env.KEY_EV_GATE === "1") {
     try {
       const rolling = LEARNER.rollingStats(rows, { now: Math.floor(Date.now() / 1000), windows: [3 * 3600, 6 * 3600, 12 * 3600, 24 * 3600] });
-      const rpOpts = { fast: Number(process.env.REGIME_FAST_SEC || 21600), confirm: Number(process.env.REGIME_CONFIRM_SEC || 43200), minN: Number(process.env.REGIME_MIN_N || 12), thrPct: Number(process.env.REGIME_THR_PCT || 0) };
+      const rpOpts = { fast: Number(process.env.REGIME_FAST_SEC || 21600), confirm: Number(process.env.REGIME_CONFIRM_SEC || 43200), minN: Number(process.env.REGIME_MIN_N || 8), thrPct: Number(process.env.REGIME_THR_PCT || 0) };
       for (const k of Object.keys((kv && kv.keys) || {})) {
         const rp = LEARNER.regimePause(rolling, k, rpOpts);
         kv.keys[k].regime = rp;

@@ -577,6 +577,26 @@ function createCapture(deps) {
 
   const done = new Set();
   let busy = false;
+  const REC_LATE = process.env.REC_LATE !== "0";   // rekam fitur 60s/90s (validasi & fallback late-signal)
+  // REKAM LATE (60s/90s): enrich record yg SAMA dgn px/mv/dir pada detik ke-60 & ke-90.
+  // Riset (36h, 1s klines): arah candle-60s -> hasil akhir ~67-69% (subset flat-2s), 72-81% bila mv60>=0.02-0.03.
+  async function captureLate(sym, tf, t0, sec) {
+    const tfSec = DUR_S[tf]; if (!tfSec) return { skipped: "bad-tf" };
+    const tfc = await getKlines(sym, tf, t0 + tfSec - 1, 60);
+    const idx = tfc.findIndex((c) => c.time === t0);
+    if (idx < 26) return { skipped: "no-session" };
+    const lock = tfc[idx].open; if (!lock) return { skipped: "no-lock" };
+    const ones = await getKlines(sym, "1s", t0 + sec + 3, 140);
+    const c = ones.slice().reverse().find((o) => o.time <= t0 + sec - 1 && o.time >= t0);
+    if (!c) return { skipped: "no-1s" };
+    const px = c.close, mv = Math.abs(px - lock) / lock * 100, dir = px > lock ? 1 : 0;
+    const rec = { k: `${sym}_${tf}_${t0}`, asset: sym, interval: tf, t0, src: "server" };
+    rec["late" + sec] = { sec, px: +px, mv: +mv.toFixed(5), dir, lock, at: Date.now() };
+    const ok = save(rec, "server");
+    if (ok) log(`[CAPTURE] late${sec} ${sym} ${tf} ${rec.k} px=${px} mv=${mv.toFixed(4)}% dir=${dir ? "up" : "down"}`);
+    return { ok: !!ok, rec };
+  }
+  function mark(key, suffix) { const k = key + (suffix || ""); if (done.has(k)) return false; done.add(k); if (done.size > 6000) { const it = done.values(); for (let i = 0; i < 3000; i++) done.delete(it.next().value); } return true; }
   async function tick() {
     if (!stats.enabled || busy) return;
     busy = true;
@@ -588,23 +608,35 @@ function createCapture(deps) {
           const durMs = DUR_S[tf] * 1000;
           const t0 = Math.floor(now / durMs) * durMs;
           const off = now - t0;
-          if (off < 3500 || off > 20000) continue;            // hanya dekat awal sesi
           const key = `${sym}_${tf}_${t0 / 1000}`;
-          if (done.has(key)) continue;
-          done.add(key);
-          if (done.size > 4000) { const it = done.values(); for (let i = 0; i < 2000; i++) done.delete(it.next().value); }
-          try {
-            const r = await captureOne(sym, tf, t0 / 1000);
-            if (r && r.skipped) { stats.skipped++; log(`[CAPTURE] ${sym} ${tf} dilewati: ${r.skipped}`); }
-            else if (r && r.ok && r.flat) {
-              stats.flat = (stats.flat || 0) + 1;
-              log(`[CAPTURE] ${sym} ${tf} ${r.rec.k} FLAT (informasional, tanpa sinyal/trade)`);
-            }
-            else if (r && r.ok) {
-              if (r.rec.gate && r.rec.gate.accepted) stats.accepted = (stats.accepted || 0) + 1; else stats.rejected = (stats.rejected || 0) + 1;
-              log(`[CAPTURE] ${sym} ${tf} ${r.rec.k} dir=${r.rec.sig.dir} grade=${r.rec.sig.grade || "-"} volRel2=${r.rec.sig.volRel2} surprise=${String(r.rec.sig.surprise).slice(0, 6)} gap=${(r.rec.sig.learn && r.rec.sig.learn.gap) || "-"} ${r.rec.gate.accepted ? "DITERIMA" : "DITOLAK:" + (r.rec.gate.reject || "-")}`);
-            }
-          } catch (e) { stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] gagal ${sym} ${tf}: ${e && e.message}`); }
+          // (1) capture kanonik 2 detik
+          if (off >= 3500 && off <= 20000) {
+            if (!mark(key, "")) continue;
+            try {
+              const r = await captureOne(sym, tf, t0 / 1000);
+              if (r && r.skipped) { stats.skipped++; log(`[CAPTURE] ${sym} ${tf} dilewati: ${r.skipped}`); }
+              else if (r && r.ok && r.flat) {
+                stats.flat = (stats.flat || 0) + 1;
+                log(`[CAPTURE] ${sym} ${tf} ${r.rec.k} FLAT (informasional, tanpa sinyal/trade)`);
+              } else if (r && r.ok) {
+                if (r.rec.gate && r.rec.gate.accepted) stats.accepted = (stats.accepted || 0) + 1; else stats.rejected = (stats.rejected || 0) + 1;
+                log(`[CAPTURE] ${sym} ${tf} ${r.rec.k} dir=${r.rec.sig.dir} grade=${r.rec.sig.grade || "-"} volRel2=${r.rec.sig.volRel2} surprise=${String(r.rec.sig.surprise).slice(0, 6)} gap=${(r.rec.sig.learn && r.rec.sig.learn.gap) || "-"} ${r.rec.gate.accepted ? "DITERIMA" : "DITOLAK:" + (r.rec.gate.reject || "-")}`);
+              }
+            } catch (e) { stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] gagal ${sym} ${tf}: ${e && e.message}`); }
+            continue;
+          }
+          // (2) rekam late 60s
+          if (REC_LATE && off >= 56000 && off <= 75000) {
+            if (!mark(key, "_L60")) continue;
+            try { await captureLate(sym, tf, t0 / 1000, 60); } catch (e) { stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] late60 gagal ${sym} ${tf}: ${e && e.message}`); }
+            continue;
+          }
+          // (3) rekam late 90s
+          if (REC_LATE && off >= 86000 && off <= 105000) {
+            if (!mark(key, "_L90")) continue;
+            try { await captureLate(sym, tf, t0 / 1000, 90); } catch (e) { stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] late90 gagal ${sym} ${tf}: ${e && e.message}`); }
+            continue;
+          }
         }
       }
     } finally { busy = false; }
@@ -613,7 +645,7 @@ function createCapture(deps) {
   function start() {
     if (process.env.CAPTURE === "0") { stats.enabled = false; log("[CAPTURE] dinonaktifkan (CAPTURE=0)"); return; }
     setInterval(() => tick().catch(() => {}), 1000);
-    log(`[CAPTURE] aktif — snapshot kanonik 2 detik untuk ${Object.keys(DUR_S).join(", ")}`);
+    log(`[CAPTURE] aktif — snapshot kanonik 2 detik untuk ${Object.keys(DUR_S).join(", ")}${REC_LATE ? " · rekam late 60s/90s" : ""}`);
   }
   return { start, tick, captureOne, status: () => stats };
 }

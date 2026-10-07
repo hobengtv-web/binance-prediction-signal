@@ -108,6 +108,8 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       histStrength: typeof s.histStrength === "number" ? s.histStrength : null,
       rsi: typeof s.rsi === "number" ? s.rsi : null,
       mv2: typeof s.mv2 === "number" ? s.mv2 : null,   // gerak dari LOCK ke close detik-2 (%) — untuk ambang per-key
+      late60: r.late60 || null,                        // snapshot 60s {mv,dir,px,...} (untuk fallback late-signal)
+      late90: r.late90 || null,                        // snapshot 90s
       // bucket RSI (untuk mining berbasis mean-$ yang bisa diterapkan live; r.rsi di atas = nilai mentah)
       rsiB: bRsi(typeof s.rsi === "number" ? s.rsi : null),
       // apakah profil gate yang SEDANG BERLAKU akan menerima sesi ini (diisi capture/klien)

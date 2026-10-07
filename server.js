@@ -619,6 +619,20 @@ const capture = createCapture({
   log: console.log,
 });
 capture.start();
+// ===== MEMORY GUARD =====
+// Ledger menyimpan `bot.path` (hingga ~240 titik) per record -> tumbuh seiring waktu (penyebab OOM).
+// Trim path record LAMA (>2 hari) — learner hanya butuh path recent; ini membatasi memori. Plus log RSS.
+setInterval(() => {
+  try {
+    const now = Date.now() / 1000;
+    let trimmed = 0;
+    for (const rec of ledger.values()) {
+      if (rec && rec.t0 && (now - rec.t0) > 2 * 86400 && rec.bot && rec.bot.path) { delete rec.bot.path; trimmed++; }
+    }
+    const m = process.memoryUsage();
+    console.log(`[MEM] rss=${(m.rss / 1048576).toFixed(0)}MB heap=${(m.heapUsed / 1048576).toFixed(0)}MB ledger=${ledger.size}${trimmed ? ` · trimmed path ${trimmed}` : ""}`);
+  } catch (_) {}
+}, 5 * 60000);
 
 // ---- ENGINE sinyal server-side: satu sumber kebenaran untuk semua device ----
 const { createEngine } = require("./engine.js");

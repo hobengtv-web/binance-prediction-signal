@@ -29,6 +29,41 @@ function pctile(arr, p) {
 const rsiBucket = (r) => (r == null ? "na" : r < 30 ? "<30" : r < 40 ? "30-40" : r < 60 ? "40-60" : r < 70 ? "60-70" : ">70");
 const strBucket = (s) => (s == null ? "na" : s < 35 ? "<35" : s <= 50 ? "35-50" : ">50");
 
+/* ===== ANTI-SNOWBALL: ADAPTIVE COVERAGE FLOOR (ACF) =====
+   Mencegah efek snowball (blok menumpuk -> sinyal habis -> data habis -> makin memblok).
+   Melacak rasio PENERIMAAN per key dari sesi-sesi terakhir. Bila cakupan jatuh di bawah lantai,
+   filter dilonggarkan BERTINGKAT & DINAMIS, lalu pulih otomatis saat cakupan kembali normal:
+     level 1 : matikan learn-block + selective-score gate
+     level 2 : + matikan VETO (rsi/vol/reward/liq/jam + key-EV/regime)
+     level 3 : + buang syarat TIER/threshold (eksplorasi: terima bila arah ada & !liqLow)
+   Key tanpa profil (no-key-profile) langsung level 3 (eksplorasi) agar bisa mengumpulkan $ akun.
+   Kill-switch: ACF=0. Tuning: ACF_WINDOW (default 24), ACF_MIN (min sesi sebelum aktif, 8). */
+const ACF_ON = process.env.ACF !== "0";
+const ACF_WINDOW = Math.max(8, parseInt(process.env.ACF_WINDOW || "24", 10));
+const ACF_MIN = Math.max(6, parseInt(process.env.ACF_MIN || "8", 10));
+const _acf = (() => {
+  const hist = {};   // key -> [{t0, a}]
+  function level(key, noProfile) {
+    if (!ACF_ON) return 0;
+    if (noProfile) return 3;
+    const h = hist[key] || [];
+    const recent = h.slice(-ACF_WINDOW);
+    if (recent.length < ACF_MIN) return 0;
+    const acc = recent.reduce((s, x) => s + x.a, 0);
+    if (acc === 0) return 3;
+    const rate = acc / recent.length;
+    return rate < 0.02 ? 3 : rate < 0.05 ? 2 : rate < 0.12 ? 1 : 0;
+  }
+  function record(key, t0, accepted) {
+    const h = hist[key] || (hist[key] = []);
+    const last = h[h.length - 1];
+    if (last && last.t0 === t0) { last.a = accepted ? 1 : 0; return; }   // dedupe (engine & capture)
+    h.push({ t0, a: accepted ? 1 : 0 });
+    if (h.length > 400) h.splice(0, h.length - 400);
+  }
+  return { level, record, debug: () => hist };
+})();
+
 /* ===== VETO "NO-EDGE" (default ON; matikan dengan env TA_VETO=0) =====
    Analisa 2.542 sesi live: sesi tanpa edge ber-WR ~48-50% (≈ koin). Veto membuangnya
    (accepted=false) agar BOT tidak entry. Ambang bisa diubah via env tanpa ubah kode. */
@@ -58,7 +93,11 @@ function computeSignal(o) {
   // BUKAN memakai ambang global. Refit (<=1 jam) membuat profil per key dari data key itu sendiri.
   const _allProf = o.profile || null;
   let profile = (_allProf && _allProf.byKey) ? (_allProf.byKey[_key] || null) : null;
-  if (!profile) return { skipped: "no-key-profile" };
+  // ANTI-SNOWBALL: key tanpa profil TIDAK ditolak total -> mode EKSPLORASI (level 3) supaya bisa
+  // mengumpulkan $ akun. Semua filter tetap per-key (bukan ambang global). Refit lalu membangun profil.
+  const noProfile = !profile;
+  if (noProfile) profile = {};
+  const explore = _acf.level(_key, noProfile);   // 0..3 (dinamis; naik saat cakupan rendah, turun saat pulih)
   const tfSec = DUR_S[tf];
   if (!tfSec) return { skipped: "bad-tf" };
   if (!SignalCore) return { skipped: "no-core" };
@@ -209,6 +248,7 @@ function computeSignal(o) {
   // Backtest (hold-to-settle): "veto-saja" compound paling tinggi (bal 382 vs 238 selektif).
   const REQUIRE_GRADE = process.env.GATE_REQUIRE_GRADE !== "0";
   let accepted0 = (REQUIRE_GRADE ? !!grade : true) && !liqLow && thOK && rsiOK;
+  if (explore >= 3) accepted0 = !liqLow && rsiOK;   // ACF: eksplorasi (buang syarat tier/threshold)
   // ===== VETO no-edge: buang cohort WR~50% (reward kecil, RSI 30-40, vol choppy, jam buruk, liqud tipis)
   let veto = null;
   const pv = { reward: false, rsi: false, vol: false, hour: false, liq: false, rewardMin: 0, liqMin: 0, rsiBadRanges: null, volBadRanges: null, offHours: null }; // KOSMETIK: salinan status kriteria utk power bar
@@ -265,10 +305,11 @@ function computeSignal(o) {
       const _prev = grade;
       grade = grade === "STRONG" ? "STRONG" : grade === "GOOD" ? "STRONG" : grade === "FAIR" ? "GOOD" : "FAIR";
       accepted0 = (REQUIRE_GRADE ? !!grade : true) && !liqLow && thOK && rsiOK;
+      if (explore >= 3) accepted0 = !liqLow && rsiOK;   // ACF: eksplorasi
       if (grade !== _prev) confirmed = Object.assign({}, confirmed, { from: _prev || null, to: grade });
     }
   }
-  let accepted = accepted0 && !veto;
+  let accepted = accepted0 && (explore >= 2 ? true : !veto);   // ACF>=2: abaikan veto (termasuk key-EV/regime)
   let reject = accepted ? null : (veto || (!rsiOK ? "rsi-out" : (!thOK ? "threshold" : !grade ? "tier" : "liq-low")));
 
   const d2 = ((C2 - lock) / lock) * 100;
@@ -328,10 +369,7 @@ function computeSignal(o) {
       });
     }
   } catch (_) {}
-  // ===== TERAPKAN MODEL YANG DIPROMOSIKAN LEARNER =====
-  // Sebelumnya `learn.blocking` hanya label (tak memblokir). Sekarang bila model terpromosi
-  // menandai konteks ini (mis. gap<0.005) -> tolak sinyal, supaya pembelajaran benar-benar menajamkan.
-  if (learn && learn.blocking && accepted) { accepted = false; reject = reject || "learn-block"; }
+  // (learn-block diterapkan SETELAH loosen/flatEntry/rsi1m — lihat bawah — agar mengikat; ACF>=1 mematikannya.)
 
   // ===== RECLAIM: konteks "tanpa sinyal" yang NYATA WIN (validasi Wilson-LB learner) -> ON-kan kembali.
   // Meng-override veto/tier HANYA bila arah ada & bukan liqLow. Menyeimbangkan veto agar produksi tak menutup.
@@ -397,6 +435,8 @@ function computeSignal(o) {
        || (ind1m.stochK != null && ind1m.stochK >= Number(process.env.RSI1M_OB_STOCH || 80)))) {
     accepted = false; reject = "rsi1m-overbought"; rsi1mGated = true;
   }
+  // ===== LEARN-BLOCK (authoritative) — dimatikan saat ACF explore>=1 (anti-snowball) =====
+  if (explore < 1 && learn && learn.blocking && accepted) { accepted = false; reject = reject || "learn-block"; }
   // ===== MODEL LANJUTAN (B) per key — diteruskan ke engine/BOT (tanpa ambang global) =====
   let extras = {};
   try {
@@ -412,9 +452,11 @@ function computeSignal(o) {
   } catch (_) {}
   // SELECTIVE ENTRY (B17): skor sinyal live di bawah ambang per-key -> tolak.
   let scoreGated = false;
-  if (extras.minScorePct != null && power && typeof power.pct === "number" && power.pct < extras.minScorePct) {
+  if (explore < 1 && extras.minScorePct != null && power && typeof power.pct === "number" && power.pct < extras.minScorePct) {
     accepted = false; reject = "score-low"; scoreGated = true;
   }
+  // ACF: rekam keputusan akhir sesi ini (untuk lantai cakupan adaptif / anti-snowball)
+  _acf.record(_key, t0, (flatReason && !flatEntry) ? false : !!accepted);
   return {
     ok: true,
     skipped: (flatReason && !flatEntry) ? flatReason : undefined,
@@ -449,6 +491,7 @@ function computeSignal(o) {
       // ===== MODEL LANJUTAN (B) per key =====
       spreadMaxPct: extras.spreadMaxPct, minScorePct: extras.minScorePct,
       stakeMult: extras.stakeMult, taTrailCbPct: extras.taTrailCbPct, scoreGated: scoreGated || undefined,
+      explore: explore || undefined,
       // Fitur EKSTERNAL (Batch 1, observasional): funding/OIΔ/LSR/basis/depthImb dari cache server.
       ext: (() => { try { return (typeof EXT.get === "function") ? EXT.get(sym) : null; } catch (_) { return null; } })(),
     },

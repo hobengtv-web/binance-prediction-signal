@@ -377,7 +377,7 @@ function incumbentModel() {          // bentuk {metrics, gate:{rules}, touch:{ru
 }
 let refitting = false;
 async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit HANYA 1 coin×TF
-  if (refitting) return { ok: false, why: "re-fit sedang berjalan" };
+  if (refitting) return { ok: false, why: "re-fit sedang berjalan", busy: true };
   refitting = true;
   try {
     const records = [...ledger.values()];
@@ -532,7 +532,7 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     try {
       const PER = {};
       for (const k of Object.keys(taMap)) { const b = taMap[k] && taMap[k].best; if (b && b.cb > 0) PER[k] = { TRAIL_CB_PCT: b.cb }; }
-      require("./ta-config.js").PER_KEY = PER;
+      setTaPerKey(PER);
     } catch (_) {}
     write("meta.json", { version: ver, promotedAt: new Date().toISOString(), trigger, byKey: metaMap });
     // ===== GATE EKSPERIMENTAL (OBSERVASIONAL) — tidak mengubah accepted/reject produksi =====
@@ -570,15 +570,29 @@ function scheduleOnlineRefit(k) {
   if (process.env.ONLINE_REFIT !== "1") return;
   const key = keyFromRec(k); if (!key) return;
   if (_onlineRefit[key]) return;
-  _onlineRefit[key] = setTimeout(() => { _onlineRefit[key] = null; try { refit("online", key).catch(() => {}); } catch (_) {} }, Number(process.env.ONLINE_REFIT_MS || 20000));
+  const run = () => {
+    _onlineRefit[key] = null;
+    try {
+      // Bila refit lain sedang berjalan (busy), JADWALKAN ULANG (jangan sampai hilang).
+      Promise.resolve(refit("online", key)).then((r) => { if (r && r.busy) scheduleOnlineRefit(k); }).catch(() => {});
+    } catch (_) {}
+  };
+  _onlineRefit[key] = setTimeout(run, Number(process.env.ONLINE_REFIT_MS || 20000));
 }
 ensureModelDirs(); loadModelMeta();
-// Muat tuning exit TA PER KEY (learn_ta.json) ke modul trade-plan — dibaca live oleh engine.
+// Terapkan tuning exit TA PER KEY ke modul trade-plan (dibaca live engine) + refresh VER.
+function setTaPerKey(PER) {
+  try {
+    const ta = require("./ta-config.js");
+    ta.PER_KEY = PER || {};
+    ta.VER = "ta" + require("crypto").createHash("md5").update(JSON.stringify(ta)).digest("hex").slice(0, 8);
+  } catch (_) {}
+}
 try {
   const taM = readModelPart("ta") || {};
   const PER = {};
   for (const k of Object.keys(taM.byKey || {})) { const b = taM.byKey[k] && taM.byKey[k].best; if (b && b.cb > 0) PER[k] = { TRAIL_CB_PCT: b.cb }; }
-  require("./ta-config.js").PER_KEY = PER;
+  setTaPerKey(PER);
   if (Object.keys(PER).length) console.log(`[TA] per-key exit tuning dimuat: ${Object.keys(PER).join(", ")}`);
 } catch (_) {}
 

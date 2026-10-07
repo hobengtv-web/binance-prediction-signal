@@ -2311,7 +2311,12 @@ function renderLearnerStatus() {
   const pctv = Math.round((L.pct || 0) * 1000) / 10;
   const need = Math.max(0, (L.target || 300) - (L.canonicalWithRes || 0));
   const ctxReady = (L.canonicalWithRes || 0) >= (L.targetCtx || 120);
-  const learned = g.mode === "learned";
+  // 'learned' = ada key yang berhasil mempromosikan AMBANG NUMERIK (thresholds) di jendela uji.
+  // (mode kini selalu "perkey"; JANGAN pakai g.mode==="learned" -> itu membuat badge selalu 'belum menang'.)
+  const _bkG = (g && g.byKey) || {};
+  const _thrKeys = Object.keys(_bkG).filter((k) => Array.isArray(_bkG[k] && _bkG[k].thresholds) && _bkG[k].thresholds.length);
+  const _allThr = Object.keys(_bkG).length > 0 && _thrKeys.length === Object.keys(_bkG).length;
+  const learned = _thrKeys.length > 0;
   // ---- hasil perbaikan (terukur pada jendela uji) ----
   const gm = g.metrics || null;
   const baseT = (g.baselineTest && g.baselineTest.takenWinrate != null) ? g.baselineTest.takenWinrate
@@ -2408,7 +2413,7 @@ function renderLearnerStatus() {
       <div class="lstat-line">Yang dipelajari sistem: <b>(a) konteks</b> — kombinasi tier/aset/jam/interval yang historis lemah ditahan, yang kuat diunggulkan; <b>(b) ambang</b> — batas numerik (volRel2, surprise, gap, likuiditas) disesuaikan dari data nyata.</div>
       <div class="lstat-line">metode: mining konteks berbasis <b>mean-$ kontinu</b> (bukan WR) dengan uji selisih-means, split <b>70/30 berurutan waktu</b>; hanya aturan <b>single-feature</b> yang benar-benar bisa diterapkan live. Rule diterapkan hanya bila <b>tidak merusak $</b> vs baseline take-all. Keputusan pakai/tidak berbasis jendela uji $.</div>
       <div class="lstat-line">status MODEL konteks (aturan penahan): ${M.source === "learned" ? '<span class="lstat-badge ok">DIPAKAI</span>' : '<span class="lstat-badge def">DITAHAN</span>'} · diterapkan: ${([...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])].length) ? [...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])].map((k) => `<code>${esc(k)}</code>`).join(" · ") : '<span class="lstat-dim">belum ada penahan aktif</span>'}</div>
-      <div class="lstat-line">status AMBANG numerik (TERPISAH dari model konteks di atas): ${learned ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR AKTIF</span>' : '<span class="lstat-badge sup">AMBANG PER-KEY (belum semua key menang di jendela uji)</span>'} \u00b7 <span class="lstat-dim">tidak ada ambang global</span></div>
+      <div class="lstat-line">status AMBANG numerik (TERPISAH dari model konteks di atas): ${_allThr ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR AKTIF (semua key)</span>' : learned ? `<span class="lstat-badge ok">AMBANG NUMERIK AKTIF di ${_thrKeys.length}/${Object.keys(_bkG).length} key</span>` : '<span class="lstat-badge sup">AMBANG PER-KEY (belum ada key menang di jendela uji)</span>'} \u00b7 <span class="lstat-dim">tidak ada ambang global</span></div>
       ${jamInfo}
       <div class="lstat-line">ambang aktif: ${(g.thresholds && g.thresholds.length) ? g.thresholds.map((t) => `<code>${esc(t.f)} ${esc(t.op)} ${esc(t.t)}</code>`).join(" · ") : '<span class="lstat-dim">belum ada (memakai tier ladder saja)</span>'}</div>
       <div class="lstat-line lstat-dim">tier: STRONG volRel2≥${g.tiers ? g.tiers.STRONG.volRel2 : "—"}${g.tiers && g.tiers.STRONG.surprise ? " & surprise≥" + g.tiers.STRONG.surprise : ""} · GOOD ≥${g.tiers ? g.tiers.GOOD.volRel2 : "—"} · FAIR ≥${g.tiers && g.tiers.FAIR ? g.tiers.FAIR.volRel2 : "—"} · floor likuiditas ×${g.liqFloorMul != null ? g.liqFloorMul : "—"} · batas telat ${g.lateFrac != null ? (g.lateFrac * 100).toFixed(0) + "%" : "—"}${learned && g.promotedAt ? ` · dipromosikan ${new Date(g.promotedAt).toLocaleString()}` : ""}</div>

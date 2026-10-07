@@ -341,7 +341,7 @@ const GATES_DEF = require("./gates.js");
 const EXP_GATE = require("./exp-gate.js");
 const EXT = require("./ext-features.js");   // sumber data eksternal (Batch 1) — observasional
 const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json", exp: "exp.json", rolling: "learn_rolling.json" };
-let gatesMeta = { mode: GATES_DEF.BOOTSTRAP.mode, promotedAt: null };
+let gatesMeta = { mode: "perkey", promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
 
 function ensureModelDirs() { try { fs.mkdirSync(MODEL_CUR, { recursive: true }); } catch (_) {} }
@@ -363,10 +363,10 @@ function readGates() {
     const p = path.join(MODEL_CUR, "gates.json");
     if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
   } catch (_) {}
-  // Belum ada ambang hasil belajar. Default = bootstrap (dilonggarkan, untuk mengumpulkan data);
-  // set GATES_MODE=strict untuk kembali ke ambang konservatif TANPA deploy ulang.
-  const mode = String(process.env.GATES_MODE || "bootstrap").toLowerCase();
-  return mode === "strict" ? GATES_DEF.STRICT : GATES_DEF.BOOTSTRAP;
+  // STRICT per-key: TIDAK ada profil global (BOOTSTRAP/STRICT) sebagai fallback.
+  // Bila gates.json belum ada -> profil kosong; semua key ditolak ("no-key-profile") sampai
+  // refit otomatis (<=1 jam) menulis gates.json per coin×TF.
+  return { mode: "nokey", byKey: {}, note: "belum ada profil per-key — jalankan refit" };
 }
 function incumbentModel() {          // bentuk {metrics, gate:{rules}, touch:{rules}} untuk perbandingan
   const g = readModelPart("gate"), t = readModelPart("touch");
@@ -550,9 +550,9 @@ const engine = createEngine({
   onEvent: (ev) => broadcastTA(ev),
 });
 engine.start();
-// Jadwal: re-fit otomatis tiap REFIT_INTERVAL_HOURS (default 6 jam) — lebih responsif dari 1x/hari.
-const REFIT_INTERVAL_H = Math.max(1, parseFloat(process.env.REFIT_INTERVAL_HOURS || "3"));   // refit tiap 3 jam (default)
-const REFIT_CHECK_MIN = Math.max(1, parseInt(process.env.REFIT_CHECK_MIN || "10", 10));
+// Jadwal: re-fit otomatis tiap REFIT_INTERVAL_HOURS (default 1 jam) — adaptif (<=3 jam).
+const REFIT_INTERVAL_H = Math.max(1, parseFloat(process.env.REFIT_INTERVAL_HOURS || "1"));   // refit tiap 1 jam (default)
+const REFIT_CHECK_MIN = Math.max(1, parseInt(process.env.REFIT_CHECK_MIN || "5", 10));
 // Kapan re-fit terakhir berjalan? Dibaca dari promote.jsonl supaya tahan restart container.
 function lastRefitTime() {
   try {

@@ -2078,12 +2078,13 @@ let _learnChipBound = false;
 function updateLearnChip() {
   const c = document.getElementById("learn-chip"); if (!c) return;
   const L = LEARNER_STATUS && LEARNER_STATUS.ledger, G = LEARNER_STATUS && LEARNER_STATUS.gates;
-  const learned = G && G.mode === "learned";
-  const boot = G && G.mode === "bootstrap";
+  const mode = G && G.mode;
+  const learned = mode === "learned" || mode === "perkey";
+  const boot = mode === "bootstrap";
   c.className = "learn-chip" + (learned ? " learned" : boot ? " bootstrap" : "");
   // Teks dipersingkat (LRN n/target) karena topbar mobile sempit: nama mode cukup lewat
   // warna chip (hijau = belajar, merah = bootstrap) + tooltip, bukan teks panjang.
-  const modeTxt = learned ? "AMBANG BELAJAR" : boot ? "BOOTSTRAP" : "KONSERVATIF";
+  const modeTxt = learned ? "AMBANG PER-KEY" : boot ? "BOOTSTRAP" : "PER-KEY (belum ada)";
   c.textContent = L
     ? `LRN ${L.canonicalWithRes || 0}/${L.target || 120}`
     : "LRN —";
@@ -2106,7 +2107,7 @@ function renderGateLine() {
   const a = document.getElementById("help-gates"); if (a) a.textContent = sum;
   const b = document.getElementById("help-gate-mode"); if (b) b.textContent = GATES.mode;
   const c = document.getElementById("gate-line");
-  const html = `${GATES.mode === "learned" ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR</span>' : (GATES.mode === "strict" ? '<span class="lstat-badge def">AMBANG KONSERVATIF</span>' : '<span class="lstat-badge sup">BOOTSTRAP (DILONGGARKAN)</span>')} <b>AMBANG AKTIF:</b> ${sum}`;
+  const html = `${(GATES.mode === "learned" || GATES.mode === "perkey") ? '<span class="lstat-badge ok">AMBANG PER-KEY</span>' : (GATES.mode === "strict" ? '<span class="lstat-badge def">AMBANG KONSERVATIF</span>' : '<span class="lstat-badge sup">PER-KEY BELUM ADA</span>')} <b>AMBANG AKTIF:</b> ${sum}`;
   if (c) c.innerHTML = html;   // hanya versi mobile (section.confidence)
 }
 // Terapkan threshold hasil belajar (lapisan kedua setelah tier ladder).
@@ -2401,7 +2402,7 @@ function renderLearnerStatus() {
       <div class="lstat-line">Yang dipelajari sistem: <b>(a) konteks</b> — kombinasi tier/aset/jam/interval yang historis lemah ditahan, yang kuat diunggulkan; <b>(b) ambang</b> — batas numerik (volRel2, surprise, gap, likuiditas) disesuaikan dari data nyata.</div>
       <div class="lstat-line">metode: mining konteks berbasis <b>mean-$ kontinu</b> (bukan WR) dengan uji selisih-means, split <b>70/30 berurutan waktu</b>; hanya aturan <b>single-feature</b> yang benar-benar bisa diterapkan live. Rule diterapkan hanya bila <b>tidak merusak $</b> vs baseline take-all. Keputusan pakai/tidak berbasis jendela uji $.</div>
       <div class="lstat-line">status MODEL konteks (aturan penahan): ${M.source === "learned" ? '<span class="lstat-badge ok">DIPAKAI</span>' : '<span class="lstat-badge def">DITAHAN</span>'} · diterapkan: ${([...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])].length) ? [...((S.blockers || {}).gate || []), ...((S.blockers || {}).touch || [])].map((k) => `<code>${esc(k)}</code>`).join(" · ") : '<span class="lstat-dim">belum ada penahan aktif</span>'}</div>
-      <div class="lstat-line">status AMBANG numerik (TERPISAH dari model konteks di atas): ${learned ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR AKTIF</span>' : (g.mode === "strict" ? '<span class="lstat-badge def">AMBANG KONSERVATIF</span>' : '<span class="lstat-badge sup">BOOTSTRAP AKTIF (ambang belajar belum menang)</span>')}</div>
+      <div class="lstat-line">status AMBANG numerik (TERPISAH dari model konteks di atas): ${learned ? '<span class="lstat-badge ok">AMBANG HASIL BELAJAR AKTIF</span>' : '<span class="lstat-badge sup">AMBANG PER-KEY (belum semua key menang di jendela uji)</span>'} \u00b7 <span class="lstat-dim">tidak ada ambang global</span></div>
       ${jamInfo}
       <div class="lstat-line">ambang aktif: ${(g.thresholds && g.thresholds.length) ? g.thresholds.map((t) => `<code>${esc(t.f)} ${esc(t.op)} ${esc(t.t)}</code>`).join(" · ") : '<span class="lstat-dim">belum ada (memakai tier ladder saja)</span>'}</div>
       <div class="lstat-line lstat-dim">tier: STRONG volRel2≥${g.tiers ? g.tiers.STRONG.volRel2 : "—"}${g.tiers && g.tiers.STRONG.surprise ? " & surprise≥" + g.tiers.STRONG.surprise : ""} · GOOD ≥${g.tiers ? g.tiers.GOOD.volRel2 : "—"} · FAIR ≥${g.tiers && g.tiers.FAIR ? g.tiers.FAIR.volRel2 : "—"} · floor likuiditas ×${g.liqFloorMul != null ? g.liqFloorMul : "—"} · batas telat ${g.lateFrac != null ? (g.lateFrac * 100).toFixed(0) + "%" : "—"}${learned && g.promotedAt ? ` · dipromosikan ${new Date(g.promotedAt).toLocaleString()}` : ""}</div>

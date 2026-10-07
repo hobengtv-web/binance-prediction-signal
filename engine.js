@@ -62,7 +62,7 @@ function createEngine(deps) {
     if (!tfc0.some((c) => c.time === t0)) return false;    // candle sesi belum tersedia
     _locking[lk] = true;
     try {
-      const profile = (typeof getGates === "function" ? getGates() : null) || GATES_DEF.BOOTSTRAP;
+      const profile = (typeof getGates === "function" ? getGates() : null) || { mode: "nokey", byKey: {} };   // STRICT per-key (tanpa fallback global)
       const tfc = market[sym].tf[tf] || [];
       const idx = tfc.findIndex((c) => c.time === t0);
       let ones = market[sym].ones;

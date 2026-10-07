@@ -53,9 +53,12 @@ const TA_VETO = {
 function computeSignal(o) {
   const { sym, tf, t0, tfc, idx, ones, five5m, one1m, getModel, SignalCore, nowSec } = o;
   const _key = sym + "_" + tf;
-  // PER coin × TF: pakai profil (tiers+thresholds) MILIK key ini (independen), fallback bootstrap.
-  let profile = o.profile || GATES_DEF.BOOTSTRAP;
-  if (profile && profile.byKey) profile = Object.assign({}, GATES_DEF.BOOTSTRAP, profile.byKey[_key] || {});
+  // PER coin × TF — STRICT: profil HANYA milik key ini (TIDAK ada fallback global/BOOTSTRAP).
+  // Bila key belum punya profil hasil belajar -> sesi DITOLAK (belum ada bukti untuk key ini),
+  // BUKAN memakai ambang global. Refit (<=1 jam) membuat profil per key dari data key itu sendiri.
+  const _allProf = o.profile || null;
+  let profile = (_allProf && _allProf.byKey) ? (_allProf.byKey[_key] || null) : null;
+  if (!profile) return { skipped: "no-key-profile" };
   const tfSec = DUR_S[tf];
   if (!tfSec) return { skipped: "bad-tf" };
   if (!SignalCore) return { skipped: "no-core" };
@@ -186,7 +189,7 @@ function computeSignal(o) {
   // melaporkan LOWVOL walau ladder tier lolos. Populasi yang dipakai = ladder tier 2 detik
   // yang terdokumentasi (early2s.json) + gate likuiditas; mode/conf seperti sinyal TREND.
   const mode = "TREND", conf = 65;
-  const T = profile.tiers || GATES_DEF.BOOTSTRAP.tiers;
+  const T = profile.tiers || {};   // STRICT per-key: tanpa fallback tier global (key tanpa tier -> ditolak sbg "tier")
   const gateNow = Math.abs((C2 - lock) / lock) * 100;
   // GUARD: profil per-key (dari learner/keyTiers) bisa TIDAK punya semua tier (STRONG/GOOD/FAIR).
   // Tanpa guard ini -> "Cannot read properties of undefined (reading 'volRel2')" mematikan capture
@@ -212,14 +215,14 @@ function computeSignal(o) {
   const wibH = Math.floor(((t0 + 7 * 3600) % 86400) / 3600);                     // jam WIB (dipakai veto & reclaim)
   let P = { rewardMin: 0, liqMin: 0, rsiBad: [], volBad: [], reclaim: [] };      // profil veto key (diisi bila TA_VETO on)
   if (TA_VETO.on) {
-    // Jam OFF ADAPTIF dari learner (bila ada); fallback ke default kode.
+    // Jam OFF ADAPTIF dari learner (per key). STRICT: tanpa jam OFF global.
     const vetoM = (() => { try { return (typeof getModel === "function" ? getModel("veto") : null); } catch (_) { return null; } })();
-    // Jam OFF PER coin×TF (objektif). Bila file ada tapi key ini belum punya cukup sampel -> [] (jangan blokir).
+    // Jam OFF PER coin×TF (objektif). Bila key ini belum punya cukup sampel -> [] (jangan blokir).
     const km = vetoM && vetoM.keys && vetoM.keys[`${sym}_${tf}`];
-    const vetoHours = vetoM ? ((km && Array.isArray(km.hours)) ? km.hours : []) : TA_VETO.hours;
-    // VETO THRESHOLD PER coin×TF (dari data key ini). Fallback global hanya bila key belum punya profil.
+    const vetoHours = (km && Array.isArray(km.hours)) ? km.hours : [];
+    // VETO THRESHOLD PER coin×TF (dari data key ini). STRICT: tanpa veto global (key belum punya profil -> netral).
     const kp = vetoM && vetoM.prof && vetoM.prof.keys && vetoM.prof.keys[`${sym}_${tf}`];
-    P = kp || { rewardMin: TA_VETO.rewardMin, liqMin: TA_VETO.liqMin, rsiBad: [[TA_VETO.rsiLo, TA_VETO.rsiHi]], volBad: [[TA_VETO.volLo, TA_VETO.volHi]], reclaim: [] };
+    P = kp || { rewardMin: 0, liqMin: 0, rsiBad: [], volBad: [], reclaim: [] };
     // KOSMETIK: salin status kriteria (kondisi SAMA, tidak mengubah rantai veto di bawah)
     pv.rewardMin = P.rewardMin || 0; pv.liqMin = P.liqMin || 0; pv.rsiBadRanges = P.rsiBad; pv.volBadRanges = P.volBad; pv.offHours = vetoHours;
     pv.reward = (P.rewardMin || 0) > 0 && gateNow < P.rewardMin;
@@ -445,7 +448,7 @@ function createCapture(deps) {
     try { five5m = await getKlines(sym, "5m", nowSec - 1, 60); } catch (_) {}
     let one1m = [];
     try { one1m = await getKlines(sym, "1m", nowSec - 1, 60); } catch (_) {}   // RECORDER 1m RSI+Stoch
-    const profile = (typeof getGates === "function" ? getGates() : null) || GATES_DEF.BOOTSTRAP;   // profil gate yang BERLAKU (bootstrap/learned)
+    const profile = (typeof getGates === "function" ? getGates() : null) || { mode: "nokey", byKey: {} };   // STRICT per-key (tanpa fallback global)
     // Alignment multi-TF (arah tren tf lain SEBELUM t0) — fitur model arah U/D (jalur capture juga)
     let align = null;
     try {

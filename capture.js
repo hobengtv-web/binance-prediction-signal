@@ -364,7 +364,7 @@ function computeSignal(o) {
   let flatEntry = false;
   if (process.env.FLAT_ENTRY === "1" && flatReason === "flat-noise" && (currentDir === "up" || currentDir === "down")
       && !liqLow && rsi != null && rsi < Number(process.env.FLAT_ENTRY_RSI || 40) && P.flatOk === true) {
-    flatEntry = true; accepted = true;
+    flatEntry = true; accepted = true; reject = null;   // FIX: accept path harus bersihkan reject (cegah record accepted=true + reject=veto-* yang kontradiktif)
   }
   // ===== LOOSEN ke arah MOM (EKSPERIMEN) — kill switch GATE_LOOSEN_MOM (default OFF) =====
   // MOM = terima SEMUA sesi berarah NON-FLAT (bypass tier/veto), kecuali (opsional) likuiditas tipis.

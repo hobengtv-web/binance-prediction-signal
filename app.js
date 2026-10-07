@@ -827,7 +827,8 @@ function applyType() {
         rec.className = "signal-rec flat";
       } else {
         const dirWord = o.verdict === "up" ? "UP" : "DOWN";
-        rec.textContent = `Recommendation: ${dirWord}` + (o.flatEntry ? " · FLAT-ENTRY" : "");
+        const stageTag = (o.stage === "late60" || o.stage === "late90") ? ` · ${o.stage === "late90" ? "90s" : "60s"}` : "";
+        rec.textContent = `Recommendation: ${dirWord}${stageTag}` + (o.flatEntry ? " · FLAT-ENTRY" : "");
         rec.className = "signal-rec " + (o.verdict === "up" ? "up" : o.verdict === "down" ? "down" : "flat");
       }
     }
@@ -1187,6 +1188,7 @@ function applyType() {
       calcStatus,
       recStatus,
       recStatusClass,
+      stage: (srvSigNow && srvSigNow.stage) || null,   // late60/late90 (sinyal fallback) -> label di kartu
       roundStart: sessionStart,     // dipakai updateSignal utk dedupe alarm per sesi
       analyzing,
     });
@@ -2969,10 +2971,18 @@ function renderDual(force) {
     if (hEl) hEl.textContent = chg != null ? `24h ${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%` : "";
     const rEl = g("rec");
     if (rEl) {
-      rEl.textContent = graded
-        ? `Recommendation: ${String(dir || "").toUpperCase()}${sig.grade ? ` · ${sig.grade}${sig.expectedWR != null ? " " + (sig.expectedWR * 100).toFixed(0) + "%" : ""}` : ""}${sig.minuteIn ? ` · min ${sig.minuteIn}` : ""}`
+      // LATE-SIGNAL: kartu dual memakai analyzeCoin (lokal). Bila SERVER punya sinyal late (60s/90s),
+      // tampilkan sebagai Recommendation dgn label "60s"/"90s" supaya bisa dipantau (TA dibiarkan apa adanya).
+      const srvSig = (typeof LIVE !== "undefined") ? LIVE.signalFor(a, tf) : null;
+      const lateStage = (srvSig && (srvSig.stage === "late60" || srvSig.stage === "late90")) ? srvSig.stage : null;
+      const srvDir = (srvSig && srvSig.accepted && (srvSig.dir === "up" || srvSig.dir === "down")) ? srvSig.dir : null;
+      const effDir = (lateStage && srvDir) ? srvDir : dir;
+      const effGraded = graded || !!(lateStage && srvDir);
+      const tag = lateStage ? ` · ${lateStage === "late90" ? "90s" : "60s"}` : (sig.grade ? ` · ${sig.grade}${sig.expectedWR != null ? " " + (sig.expectedWR * 100).toFixed(0) + "%" : ""}` : (sig.minuteIn ? ` · min ${sig.minuteIn}` : ""));
+      rEl.textContent = effGraded
+        ? `Recommendation: ${String(effDir || "").toUpperCase()}${tag}`
         : (liveMode ? `No entry · ${liveMode}` : "Menunggu…");
-      rEl.className = "dc-rec " + (graded ? dir : "flat");
+      rEl.className = "dc-rec " + (effGraded ? effDir : "flat");
     }
     // POWER SINYAL U/D — TERKUNCI per sesi (nilai saat sinyal dihasilkan, tidak berubah sampai sesi berakhir)
     {

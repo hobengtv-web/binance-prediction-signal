@@ -541,8 +541,10 @@ let ws = null, wsRetry = 0, wsHostIdx = 0, wsGotData = false, usingTV = false, t
 function connectWS() {
   if (usingTV) return;
   const streams = [];
-  for (const sym of Object.keys(SYMBOLS)) { streams.push(`${sym}@kline_1s`); for (const tf of INTERVALS) streams.push(`${sym}@kline_${tf}`); }
-  for (const sym of Object.keys(SYMBOLS)) streams.push(`${sym}@ticker`);
+  // PENTING: nama stream Binance = symbol LOWERCASE (mis. "bnbusdt@kline_1s"). Sebelumnya memakai
+  // KEY ("BNB@kline_1s") yang TIDAK valid -> WS Tak pernah kirim data (chart kosong/rusak).
+  for (const sym of Object.keys(SYMBOLS)) { const s = SYMBOLS[sym]; streams.push(`${s}@kline_1s`); for (const tf of INTERVALS) streams.push(`${s}@kline_${tf}`); }
+  for (const sym of Object.keys(SYMBOLS)) streams.push(`${SYMBOLS[sym]}@ticker`);
   const host = WS_HOSTS[wsHostIdx % WS_HOSTS.length];
   setSrc(host.replace("wss://", ""));
   setStatus(`Menghubungkan ke Binance (${host.replace("wss://", "")})…`);

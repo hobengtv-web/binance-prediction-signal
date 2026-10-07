@@ -1061,8 +1061,10 @@ function applyType() {
     const mob = _mobilePredSession;
     const mobLocked = !!(mob && mob.prediction !== "flat" && mob.mode !== "MENUNGGU" && mob.mode !== "LOADING" && mob.mode !== "—");
     const calcStatus = uni
-      ? `Signal locked ${elapsedSec - Math.round((now - (uni.lockedAt || now)) / 1000)}s after session open · mode ${uni.mode}`
-      : `Evaluating session, open +${elapsedSec}s · ${liveSig ? liveSig.mode : "collecting data"}`;
+      ? (uni.stage
+        ? `Sinyal ${uni.stage === "late90" ? "LATE 90s" : "LATE 60s"} · arah ${String(uni.dir || "").toUpperCase()}${uni.mv2 != null ? ` · mv ${uni.mv2}%` : ""}`
+        : `Signal locked ${elapsedSec - Math.round((now - (uni.lockedAt || now)) / 1000)}s after session open · mode ${uni.mode || "—"}`)
+      : `Evaluating session, open +${elapsedSec}s · ${liveSig ? (liveSig.mode || "collecting data") : "collecting data"}`;
     if (uni && uni.verdict !== "flat") {
       finalVerdict = uni.verdict;
       mode = uni.mode || "—";          // sinyal late (60s/90s) tak punya `mode` -> default "—"

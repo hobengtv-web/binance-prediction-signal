@@ -555,7 +555,8 @@ function buildPlan(input) {
   const lockTouch = taUp ? (C >= O) : (C <= O);
   const armOnLock = TA.TRAIL_ARM_ON_LOCK ? lockTouch : false;   // default: arm hanya bila capture>=ARM
   state.capPeak = state.capPeak || {};
-  state.capPeak[key] = Math.max(state.capPeak[key] == null ? -Infinity : state.capPeak[key], capturedPct2);  // puncak capture (%)
+  // CAP puncak capture (<=200%) — juga menormalkan nilai BASI yang ter-persist (mis. 1292%).
+  state.capPeak[key] = Math.min(200, Math.max(state.capPeak[key] == null ? -Infinity : state.capPeak[key], capturedPct2));
   const trailArmed = state.trailArmed[key] || (capturedPct2 >= TA.TRAIL_ARM_PCT) || armOnLock;
   state.trailArmed[key] = trailArmed;
   if (!state.trailSince) state.trailSince = {};

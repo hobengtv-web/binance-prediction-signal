@@ -806,6 +806,8 @@ const BN_REST_HOSTS = ["https://data-api.binance.vision", "https://api.binance.c
 // Cache + koalesensi + backoff 418/429 (proxy ini dipakai klien DAN fallback relay -> jangan boros).
 const _pxCache = new Map(), _pxInflight = new Map();
 let _pxBanUntil = 0;
+function _capMap(m, max) { if (m.size > max) { const over = m.size - max; let i = 0; for (const k of m.keys()) { m.delete(k); if (++i >= over) break; } } }
+const _PX_CACHE_MAX = Number(process.env.PX_CACHE_MAX || 300);
 function _pxTtl(p) { return p.includes("klines") ? 3000 : p.includes("ticker") ? 5000 : p.includes("depth") ? 3000 : p.includes("time") ? 2000 : 2000; }
 async function proxyBinanceV3(pathname, search) {
   const key = pathname + (search || "");
@@ -822,7 +824,7 @@ async function proxyBinanceV3(pathname, search) {
         const body = await r.text();
         if (r.status === 418 || r.status === 429) { const ra = Number(r.headers.get("retry-after") || 0); _pxBanUntil = Date.now() + Math.max(60000, ra * 1000); }
         const res = { status: r.status, body, ctype: r.headers.get("content-type") || "application/json" };
-        if (r.ok) _pxCache.set(key, { t: Date.now(), r: res });
+        if (r.ok) { _pxCache.set(key, { t: Date.now(), r: res }); _capMap(_pxCache, _PX_CACHE_MAX); }
         return res;
       } catch (e) { lastErr = e; }
     }

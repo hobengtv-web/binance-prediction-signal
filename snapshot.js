@@ -27,6 +27,10 @@ const FUTURES_REST = [
 const _cache = new Map();        // path -> { t, v }
 const _inflight = new Map();     // path -> Promise (dedupe request bersamaan)
 let _banUntil = 0;               // cooldown global saat Binance balas 418/429
+// BATAS CACHE (cegah OOM): path memuat endTime/before -> tiap window lazy-history menambah entri baru.
+// Tanpa eviction, Map tumbuh tak terbatas (masing-masing menyimpan array klines) -> heap habis.
+const _CACHE_MAX = Number(process.env.CACHE_MAX || 400);
+function _capMap(m, max) { if (m.size > max) { const over = m.size - max; let i = 0; for (const k of m.keys()) { m.delete(k); if (++i >= over) break; } } }
 function ttlFor(path) {
   if (path.includes("/klines")) return 3000;
   if (path.includes("/ticker")) return 5000;
@@ -55,7 +59,7 @@ async function getJSON(path) {
         }
         if (!r.ok) throw new Error("HTTP " + r.status);
         const v = await r.json();
-        _cache.set(path, { t: Date.now(), v });
+        _cache.set(path, { t: Date.now(), v }); _capMap(_cache, _CACHE_MAX);
         return v;
       } catch (e) { lastErr = e; }
     }
@@ -78,7 +82,7 @@ async function getFuturesJSON(path) {
       const r = await fetch(h + path, { signal: AbortSignal.timeout(8000) });
       if (!r.ok) throw new Error("HTTP " + r.status);
       const v = await r.json();
-      _futCache.set(path, { t: Date.now(), v });
+      _futCache.set(path, { t: Date.now(), v }); _capMap(_futCache, 100);
       return v;
     } catch (e) { lastErr = e; }
   }

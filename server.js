@@ -787,7 +787,7 @@ function fallbackPoll() {
         const t = s.ticker[k]; broadcast("ticker", { sym: k, chg: t.chg, last: t.last });
       }
     } catch (_) {}
-  }, 1000);
+  }, 3000);   // cadence santai (cache snapshot.js menahan beban; cegah 418)
 }
 
 /* ===== PROXY REST + RELAY WS BINANCE =====

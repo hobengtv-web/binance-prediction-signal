@@ -53,10 +53,18 @@ try {
   window.addEventListener("unhandledrejection", (e) => { try { const rs = e.reason; const r = { at: new Date().toISOString(), type: "promise", msg: (rs && (rs.message || rs)) + "", stack: rs && rs.stack }; window.__JS_ERRORS.push(r); console.error("[JS PROMISE ERROR]", r.msg, r.stack || ""); } catch (_) {} });
 } catch (_) {}
 
-// SEMUA REST lewat SERVER (same-origin /api/v3/*). Klien TIDAK memanggil Binance langsung.
-const REST_HOSTS = [""];
-// WS klien kini memakai RELAY SERVER (/api/market-stream), bukan WS Binance langsung.
-const WS_HOSTS = ["server"];
+// DATA PASAR MENTAH diambil LANGSUNG dari Binance oleh browser (IP tiap user) -> server tak menanggung
+// beban pasar (cegah 418). LOGIKA (sinyal/gate/learner/TA/prediksi) tetap 100% di server.
+const REST_HOSTS = [
+  "https://api.binance.com",
+  "https://data-api.binance.vision",
+  "https://api1.binance.com",
+];
+const WS_HOSTS = [
+  "wss://stream.binance.com:9443",
+  "wss://data-stream.binance.vision",
+  "wss://stream1.binance.com:9443",
+];
 
 const state = {
   asset: "BTC",
@@ -83,8 +91,8 @@ function serverNow() { return Date.now() + serverTimeOffset; }
 function ensureTimeSync() { const now = Date.now(); if (!lastTimeSync || now - lastTimeSync > 3000) { lastTimeSync = now; fetchBinanceTime(); } }
 async function fetchBinanceTime() {
   try {
-    const r = await fetch("/api/v3/time", { cache: "no-store" });   // via server (tidak langsung ke Binance)
-    if (r.ok) { const j = await r.json(); if (j.serverTime) { serverTimeOffset = j.serverTime - Date.now(); lastTimeSync = Date.now(); } }
+    const j = await fetchJSON("/api/v3/time");   // Binance langsung (IP user); fallback proxy server
+    if (j && j.serverTime) { serverTimeOffset = j.serverTime - Date.now(); lastTimeSync = Date.now(); }
   } catch (_) {}
 }
 
@@ -129,20 +137,26 @@ function setStatus(msg) {
 }
 function hideStatus() { setStatus(null); }
 
-async function fetchJSON(url, tries = REST_HOSTS.length) {
+async function fetchJSON(url) {
+  // Path "/api/v3/..." -> coba HOST BINANCE langsung dulu (IP user), lalu fallback ke proxy SERVER
+  // (same-origin) bila semua host Binance gagal (geo-block). Logika tetap server.
+  const path = url.replace(/^https?:\/\/[^/]+/, "");
   let lastErr;
-  for (let i = 0; i < REST_HOSTS.length; i++) {
-    const u = url.replace(/^https?:\/\/[^/]+/, REST_HOSTS[i]);
+  for (const h of REST_HOSTS) {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 6000);
     try {
-      const r = await fetch(u, { signal: ctrl.signal });
+      const r = await fetch(h + path, { signal: ctrl.signal });
       clearTimeout(to);
       if (!r.ok) throw new Error("HTTP " + r.status);
-      setSrc(REST_HOSTS[i] ? REST_HOSTS[i].replace("https://", "").replace("wss://", "") : "server");
+      setSrc(h.replace("https://", ""));
       return await r.json();
     } catch (e) { clearTimeout(to); lastErr = e; }
   }
+  try {
+    const r = await fetch(path, { signal: AbortSignal.timeout(8000) });   // fallback: proxy server
+    if (r.ok) { setSrc("server-proxy"); return await r.json(); }
+  } catch (e) { lastErr = e; }
   throw lastErr;
 }
 
@@ -452,25 +466,26 @@ async function fetchOlder(sym, beforeSec, limit) {
     const gap = candles[1].time - candles[0].time;
     return gap > 1 ? expandTo1s(candles) : candles;
   };
-  // 1) proxy server (same-origin)
+  // 1) LANGSUNG dari Binance (IP user) — utamakan agar server tak menanggung beban pasar.
+  try {
+    const rows = await fetchJSON(`/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=1s&limit=${histLimit}&endTime=${beforeSec * 1000 - 1000}`);
+    if (Array.isArray(rows) && rows.length) {
+      const candles = rows.map((r) => ({
+        time: Math.floor(r[0] / 1000), open: +r[1], high: +r[2], low: +r[3], close: +r[4],
+        vol: +r[5], trades: +r[8], openTime: r[0], closeTime: r[6],
+      }));
+      return toOnes(candles);
+    }
+  } catch (e) { console.warn("[HISTORY] direct Binance fetch failed:", e && e.message); }
+  // 2) fallback: proxy server (same-origin)
   try {
     const r = await fetch(`/api/klines?symbol=${sym}&tf=1s&before=${beforeSec}&limit=${histLimit}`);
     if (r.ok) {
       const j = await r.json();
       if (j && Array.isArray(j.candles) && j.candles.length) return toOnes(j.candles);
     }
-  } catch (e) { console.warn("[HISTORY] proxy fetch failed:", e); }
-  // 2) fallback: direct Binance
-  try {
-    const rows = await fetchJSON(`/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=1s&limit=${histLimit}&endTime=${beforeSec * 1000 - 1000}`);
-    const candles = rows.map((r) => ({
-      time: Math.floor(r[0] / 1000),
-      open: +r[1], high: +r[2], low: +r[3], close: +r[4],
-      vol: +r[5], trades: +r[8],
-      openTime: r[0], closeTime: r[6],
-    }));
-    return toOnes(candles);
-  } catch (e) { console.warn("[HISTORY] direct Binance fetch failed:", e); throw e; }
+  } catch (e) { console.warn("[HISTORY] proxy fetch failed:", e && e.message); }
+  throw new Error("history 1s gagal (binance & proxy)");
 }
 
 // Expand 1m candles into 60 one-second candles (same OHLC per second within the minute)
@@ -524,51 +539,39 @@ function setReach() {
 /* ----------------------- Stream pasar via SERVER (bukan WS Binance) ----------------------- */
 let ws = null, wsRetry = 0, wsHostIdx = 0, wsGotData = false, usingTV = false, tvClient = null, binanceTries = 0;
 function connectWS() {
-  if (usingTV) return; // (fallback TV dihapus; 100% server)
-  // 100% server-based: klien TIDAK membuka WS ke Binance. Server me-relay WS Binance -> SSE.
-  setSrc("server");
-  setStatus("Menghubungkan ke stream server…");
+  if (usingTV) return;
+  const streams = [];
+  for (const sym of Object.keys(SYMBOLS)) { streams.push(`${sym}@kline_1s`); for (const tf of INTERVALS) streams.push(`${sym}@kline_${tf}`); }
+  for (const sym of Object.keys(SYMBOLS)) streams.push(`${sym}@ticker`);
+  const host = WS_HOSTS[wsHostIdx % WS_HOSTS.length];
+  setSrc(host.replace("wss://", ""));
+  setStatus(`Menghubungkan ke Binance (${host.replace("wss://", "")})…`);
   showErr(null);
-  let es;
-  try { es = new EventSource("/api/market-stream"); }
+  try { ws = new WebSocket(`${host}/stream?streams=${streams.join("/")}`); }
   catch (e) { scheduleWSRetry(); return; }
-  ws = es;
-  const openTimer = setTimeout(() => { try { es.close(); } catch (_) {} }, 5000);
+  const openTimer = setTimeout(() => { try { ws.close(); } catch (_) {} }, 5000);
   let dataTimer = null;
-  es.onopen = () => {
-    clearTimeout(openTimer);
-    state.connected = true; wsRetry = 0; wsGotData = false;
-    setConn(true);
-    dataTimer = setTimeout(() => { if (!wsGotData) { try { es.close(); } catch (_) {} } }, 6000);
-  };
-  es.onmessage = (ev) => {
-    if (dataTimer) clearTimeout(dataTimer);
-    wsGotData = true;
-    let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; }
-    const d = msg.data;
-    if (!d) return;
-    if (d.e === "kline") handleKline(d);
-    else if (d.e === "24hrTicker") handleTicker(d);
-  };
-  es.onerror = () => {
-    clearTimeout(openTimer);
-    if (dataTimer) clearTimeout(dataTimer);
-    state.connected = false; setConn(false);
-    try { es.close(); } catch (_) {}
-    scheduleWSRetry();
-  };
+  ws.onopen = () => { clearTimeout(openTimer); state.connected = true; wsRetry = 0; wsGotData = false; setConn(true); dataTimer = setTimeout(() => { if (!wsGotData) { try { ws.close(); } catch (_) {} } }, 6000); };
+  ws.onmessage = (ev) => { if (dataTimer) clearTimeout(dataTimer); wsGotData = true; let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; } const d = msg.data; if (!d) return; if (d.e === "kline") handleKline(d); else if (d.e === "24hrTicker") handleTicker(d); };
+  ws.onclose = () => { clearTimeout(openTimer); if (dataTimer) clearTimeout(dataTimer); state.connected = false; setConn(false); scheduleWSRetry(); };
+  ws.onerror = () => { try { ws.close(); } catch (_) {} };
 }
 function scheduleWSRetry() {
-  wsRetry++;
-  binanceTries++;
-  // 100% SERVER-based: TIDAK ada fallback TradingView (klien hanya boleh bicara ke server kita).
-  if (!wsGotData) setStatus("Stream server gagal. Mencoba lagi…");
+  wsRetry++; binanceTries++;
+  // Fallback ke RELAY SERVER hanya bila semua host Binance gagal berkali-kali (mis. geo-block).
+  if (!wsGotData && binanceTries >= WS_HOSTS.length * 2) { connectRelay(); return; }
+  if (!wsGotData) setStatus(`Binance (${WS_HOSTS[wsHostIdx % WS_HOSTS.length].replace("wss://", "")}) gagal — coba endpoint lain…`);
+  if (wsRetry % WS_HOSTS.length === 1) wsHostIdx++;
   setTimeout(connectWS, Math.min(1500 * wsRetry, 6000));
 }
-
-function startTV() {
-  // Dihapus: fallback TradingView membuka koneksi EKSTERNAL dari klien. 100% server-based -> no-op.
-  setStatus("Stream server tidak tersedia — menunggu koneksi server…");
+// Fallback: relay SERVER (dipakai HANYA bila browser tak bisa WS ke Binance). Logika tetap 100% server.
+function connectRelay() {
+  setSrc("server-relay"); setStatus("Binance langsung tak terjangkau — memakai relay server…");
+  let es; try { es = new EventSource("/api/market-stream"); } catch (_) { return; }
+  ws = es;
+  es.onopen = () => { state.connected = true; setConn(true); };
+  es.onmessage = (ev) => { wsGotData = true; let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; } const d = msg.data; if (!d) return; if (d.e === "kline") handleKline(d); else if (d.e === "24hrTicker") handleTicker(d); };
+  es.onerror = () => { try { es.close(); } catch (_) {} state.connected = false; setConn(false); setTimeout(connectRelay, 5000); };
 }
 function setConn(on) {
   state.connected = !!on;   // single source of truth for every transport (WS, SSE, polling)
@@ -576,8 +579,9 @@ function setConn(on) {
   el.className = "conn " + (on ? "conn--on" : "conn--off");
 }
 
+function symKeyOf(s) { const u = String(s || "").toUpperCase(); return u === "BTCUSDT" ? "BTC" : u === "BNBUSDT" ? "BNB" : u === "ETHUSDT" ? "ETH" : null; }
 function handleKline(d) {
-  const symKey = d.s === "btcusdt" ? "BTC" : "ETH";
+  const symKey = symKeyOf(d.s); if (!symKey) return;   // FIX: dukung BTC/ETH/BNB (uppercase/lowercase)
   const tf = d.k.i;
   const k = d.k;
   const candle = {
@@ -604,7 +608,7 @@ function feedCandle(symKey, tf, candle) {
 }
 
 function handleTicker(d) {
-  const symKey = d.s === "btcusdt" ? "BTC" : "ETH";
+  const symKey = symKeyOf(d.s); if (!symKey) return;   // FIX: BTC/ETH/BNB
   state.prevPrice[symKey] = state.ticker[symKey] ? state.ticker[symKey].last : null;
   state.ticker[symKey] = { last: +d.c, chg: +d.P };
   hideStatus();
@@ -1363,10 +1367,8 @@ function applyType() {
           const binanceSym = OB_SYMBOLS[sym];
           if (!binanceSym) return;
           try {
-            const r = await fetch(`/api/v3/depth?symbol=${binanceSym}&limit=5`, { cache: "no-store" });
-            if (!r.ok) return;
-            const ob = await r.json();
-            if (ob.bids && ob.asks) state.orderbook[sym] = { bids: ob.bids, asks: ob.asks, at: Date.now() };
+            const ob = await fetchJSON(`/api/v3/depth?symbol=${binanceSym}&limit=5`);
+            if (ob && ob.bids && ob.asks) state.orderbook[sym] = { bids: ob.bids, asks: ob.asks, at: Date.now() };
           } catch (_) {}
         }));
         // Elemen single-coin (ob-ask/ob-bid/…) TIDAK punya prefiks aset -> hanya ditulis utk koin AKTIF.
@@ -1453,13 +1455,8 @@ async function probeProxy() {
     // Sync Binance server time BEFORE snapshot (so updateProjection uses correct offset)
     let timeSynced = false;
     try {
-      const timeResp = await fetch("/api/v3/time", { signal: ctrl.signal });
-      if (timeResp.ok) {
-        const t = await timeResp.json();
-        serverTimeOffset = t.serverTime - Date.now();
-        lastTimeSync = Date.now();
-        timeSynced = true;
-      }
+      const t = await fetchJSON("/api/v3/time");
+      if (t && t.serverTime) { serverTimeOffset = t.serverTime - Date.now(); lastTimeSync = Date.now(); timeSynced = true; }
     } catch (_) {}
     const r = await fetch("/api/snapshot?history=1", { signal: ctrl.signal });
     clearTimeout(to);
@@ -1518,14 +1515,13 @@ async function pollProxy() {
     // while Vercel fetches all candles).
     let timeSynced = false;
     try {
-      const timeResp = await fetch("/api/v3/time", { cache: "no-store" });
-      if (timeResp.ok) {
-        const timeJ = await timeResp.json();
+      const timeJ = await fetchJSON("/api/v3/time");
+      if (timeJ && timeJ.serverTime) {
         serverTimeOffset = timeJ.serverTime - Date.now();
         lastTimeSync = Date.now();
         timeSynced = true;
       }
-    } catch (_) { /* may be blocked by CORS/ad-block — fall back below */ }
+    } catch (_) { /* Binance langsung gagal — fallback di bawah */ }
     const r = await fetch("/api/snapshot", { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const j = await r.json();
@@ -1638,8 +1634,8 @@ function trySSE() {
      const ones = snap.candles && snap.candles.BTC && snap.candles.BTC["1s"];
      if (ones && ones.length) { serverTimeOffset = (ones[ones.length - 1].time + 1) * 1000 - Date.now(); }
      // Refine with authoritative Binance time (more accurate, may fail if blocked)
-     fetch("/api/v3/time", { cache: "no-store" })
-       .then(r => r.ok && r.json()).then(t => { if (t && t.serverTime) { serverTimeOffset = t.serverTime - Date.now(); lastTimeSync = Date.now(); } })
+     fetchJSON("/api/v3/time")
+       .then(t => { if (t && t.serverTime) { serverTimeOffset = t.serverTime - Date.now(); lastTimeSync = Date.now(); } })
        .catch(() => {});
      applySnapshot(snap, true); hideStatus();
     if (!trendTimer) trendTimer = setInterval(refreshTrends, 10000);
@@ -1667,19 +1663,16 @@ function trySSE() {
   es.onerror = () => { if (!got) { try { es.close(); } catch (_) {} startPolling(); } };
 }
 function startPolling() {
-    setStatus("Connecting to proxy (1s)…");
-  probeProxy().then((snap) => {
-    if (snap) {
-      state.viaProxy = true; setConn(true); setSrc("proxy ↻ 1s"); applySnapshot(snap, true); hideStatus();
-      setInterval(pollProxy, 4000);   // 100% server-based: kurangi beban Binance proxy (cegah 418)
-    } else {
-      setSrc("server (relay)");
-      loadHistory().then(connectWS).catch(connectWS);
-    }
-  }).catch(() => {
-    setSrc("server (relay)");
-    loadHistory().then(connectWS).catch(connectWS);
-  });
+  // Utamakan DATA PASAR LANGSUNG dari Binance (WS/REST di IP user). Server hanya untuk LOGIKA + fallback.
+  setSrc("langsung (Binance)");
+  loadHistory().then(connectWS).catch(connectWS);
+  // Fallback ringan: bila tak ada koneksi setelah 12s, pakai proxy snapshot SERVER.
+  setTimeout(() => {
+    if (state.connected) return;
+    probeProxy().then((snap) => {
+      if (snap) { state.viaProxy = true; setConn(true); setSrc("proxy ↻ server"); applySnapshot(snap, true); hideStatus(); setInterval(pollProxy, 4000); }
+    }).catch(() => {});
+  }, 12000);
 }
 
 /* ============ CONFIDENCE ACCURACY LOGGER (debug) ============ */

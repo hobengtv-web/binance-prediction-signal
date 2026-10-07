@@ -422,6 +422,7 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
         // data tak cukup -> JANGAN simpan config lama (snowball). Hapus agar key bebas dari blocker usang.
         keyRes[key] = { n: kr.length, ok: false, why: cand.reason };
         delete gateMap[key]; delete touchMap[key]; delete applyMap[key]; delete metaMap[key]; delete gatesMap[key];
+        delete pnlMap[key]; delete lessonsMap[key];   // cegah data $/$pelajaran BASI (proxy lama) tampil di panel
         continue;
       }
       // PENTING: jendela uji HARUS sejajar dengan split model (baris ber-$ saja). Sebelumnya memakai

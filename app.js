@@ -3496,6 +3496,10 @@ function renderConfidenceReport() {
   // Isi sisa lebar kartu (di layar lebar ~31 kolom @21px per blok koin). Kelebihannya bisa
   // di-scroll; di mobile default tampil dari KIRI = sesi TERBARU karena urutannya terbaru->lama.
   const PER_COIN = 40;
+  // WINDOW WAKTU: history DITAMPILKAN hanya 34 jam terakhir; W/L & S/F DIHITUNG hanya dari 24 jam terakhir (WIB).
+  const nowMs = Date.now();
+  const DISP_WINDOW_MS = 34 * 3600e3;
+  const STAT_WINDOW_MS = 24 * 3600e3;
 
   // Satu sesi = SATU KOLOM berisi 3 baris: signal (U/D), entry (E), early close (C).
   // Warna memakai konvensi yang sudah ada: hijau = benar/sukses, merah = salah/gagal,
@@ -3531,19 +3535,24 @@ function renderConfidenceReport() {
   let totalShown = 0;
   let html = `<div class="sa-cols">`;
   for (const sym of COINS) {
-    const data = rounds.filter((r) => r.asset === sym && r.interval === tf);
-    const evald = data.filter((r) => r.won !== undefined);
+    const all = rounds.filter((r) => r.asset === sym && r.interval === tf);
+    const inWin = (r, ms) => (r.t0Sec == null) ? true : (r.t0Sec * 1000 >= nowMs - ms);   // record tanpa t0 (fallback lokal) tetap tampil
+    // Baris yang DITAMPILKAN: 34 jam terakhir.
+    const dispData = all.filter((r) => inWin(r, DISP_WINDOW_MS));
+    // W/L & S/F: DIHITUNG hanya dari 24 jam terakhir (WIB).
+    const statData = all.filter((r) => inWin(r, STAT_WINDOW_MS));
+    const evald = statData.filter((r) => r.won !== undefined);
     const wins = evald.reduce((a, r) => a + r.won, 0);
     const wr = evald.length ? Math.round(wins / evald.length * 100) : null;
     // Ringkasan TRADE ASSISTANT: S = entry sukses & early close sukses; F = ada posisi (entry
     // terjadi) tetapi tidak keduanya sukses. Sesi tanpa posisi tidak dinilai (tidak ada yang
     // bisa sukses/gagal) sehingga tidak masuk hitungan S/F.
-    const withPos = data.filter((r) => r.tradeState === "ok" && r.e !== undefined);
+    const withPos = statData.filter((r) => r.tradeState === "ok" && r.e !== undefined);
     const sOk = withPos.filter((r) => r.e === 1 && r.c === 1).length;
     const fBad = withPos.length - sOk;
     // TERBARU -> TERLAMA (kiri = sesi paling baru). Di mobile scroll default dari kiri = terbaru.
-    const tail = data.slice(-PER_COIN).reverse();
-    totalShown += data.length;
+    const tail = dispData.slice(-PER_COIN).reverse();
+    totalShown += dispData.length;
     const statCls = wr == null ? "" : (wr >= 50 ? "cd-win" : "cd-lose");
     const sfPct = withPos.length ? Math.round(sOk / withPos.length * 100) : null;   // % sukses entry+close
     const sfCls = sfPct == null ? "" : (sfPct >= 50 ? "cd-win" : "cd-lose");
@@ -3565,10 +3574,10 @@ function renderConfidenceReport() {
         : `<div class="cd-empty">${sym === "BNB" && tf !== "5m" ? "BNB hanya 5m" : "belum ada sesi"}</div>`}
     </div>`;
   }
-  html += `</div><div class="sa-legend">tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal (dengan % sukses) · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> = entry &amp; apakah target LOCK tercapai · baris 3 <b>C</b> = early close ter-signal (hijau = ya · merah = tidak · abu = tidak ada entry/posisi)</div>`;
+  html += `</div><div class="sa-legend">window: history <b>34 jam terakhir</b> · <b>W/L &amp; S/F dihitung dari 24 jam terakhir (WIB)</b> · tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal (dengan % sukses) · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> = entry &amp; apakah target LOCK tercapai · baris 3 <b>C</b> = early close ter-signal (hijau = ya · merah = tidak · abu = tidak ada entry/posisi)</div>`;
 
-  if (head) head.textContent = "DESKTOP SIGNAL ACCURACY · per sesi (signal · entry · early close) · ";
-  if (countEl) countEl.textContent = `${totalShown} sesi ${tf} · sumber ${srcLabel}`
+  if (head) head.textContent = "DESKTOP SIGNAL ACCURACY · per sesi (signal · entry · early close) · 34 jam ";
+  if (countEl) countEl.textContent = `${totalShown} sesi ${tf} (34 jam · W/L & S/F 24 jam WIB) · sumber ${srcLabel}`
     + `${GATE_STATUS === "ok" ? "" : ` · gate ${GATE_STATUS}`}${TIER_STATUS === "ok" ? "" : ` · tiers ${TIER_STATUS}`}`;
   body.innerHTML = html;
 }

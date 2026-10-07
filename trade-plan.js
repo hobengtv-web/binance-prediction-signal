@@ -68,6 +68,15 @@ const ENTRY_RETRACE_PCT = TA.ENTRY_RETRACE_PCT; // entry peak: retrace minimal d
 const ENTRY_MIN_EXTREME_PCT = TA.ENTRY_MIN_EXTREME_PCT; // kedalaman ekstrem contra minimal sebelum retrace-entry
 const DWELL_AVG_MS = TA.DWELL_AVG_MS;     // averaging: hold (be more careful adding)
 const DWELL_CLOSE_MS = TA.DWELL_CLOSE_MS;   // close: fade must hold
+// Prioritas nilai TA: PER_KEY[coin×TF] > PER_TF[tf] > global. PER_KEY diisi server dari learn_ta.json
+// (hasil tuning exit per key — improvement B14). Dipakai untuk parameter exit yang bisa disetel per key.
+function taVal(name, tf, key) {
+  const pk = (TA.PER_KEY && key) ? TA.PER_KEY[key] : null;
+  if (pk && pk[name] != null) return pk[name];
+  const tv = (TA.PER_TF && tf && TA.PER_TF[tf]) ? TA.PER_TF[tf] : null;
+  if (tv && tv[name] != null) return tv[name];
+  return TA[name];
+}
 function turnEvidence(isUp, ctx) {
   const p = {};
   p.momentum = ctx.slope != null && (isUp ? ctx.slope > 0 : ctx.slope < 0);
@@ -177,8 +186,7 @@ function computeTradePlan(bias, ctx) {
   const _simple = !!TA.SIMPLE;   // mode test: entry depth+retrace, exit trailing saja
   const MIN_REMAIN_TF = (TA.PER_TF && TA.PER_TF[ctx.tf] && TA.PER_TF[ctx.tf].ENTRY_MIN_REMAIN_SEC != null)
     ? TA.PER_TF[ctx.tf].ENTRY_MIN_REMAIN_SEC : TA.ENTRY_MIN_REMAIN_SEC;
-  const MIN_HOLD_TF = (TA.PER_TF && TA.PER_TF[ctx.tf] && TA.PER_TF[ctx.tf].TRAIL_MIN_HOLD_MS != null)
-    ? TA.PER_TF[ctx.tf].TRAIL_MIN_HOLD_MS : TA.TRAIL_MIN_HOLD_MS;
+  const MIN_HOLD_TF = taVal("TRAIL_MIN_HOLD_MS", ctx.tf, ctx.key);
   // Evidence the move against the bias is about to turn back toward it.
   // Confirmation: >=2 independent evidence parts AND a minimum dwell time, so a single
   // noisy tick cannot trigger (too fast) and waiting never drags on (too late).
@@ -336,26 +344,27 @@ function computeTradePlan(bias, ctx) {
     if (_simple) {
       const hybEarly = TA.HYBRID && ((capturedPct >= TA.HYB_MIN_CAP_PCT) || (trailRetracePct != null && trailRetracePct >= TA.HYB_MIN_RETRACE_PCT));
       const beHit = TA.BE_STOP && trailArmed && capturedPct <= 0;   // break-even stop (proteksi)
-      const tpHit = TA.TP_CAP_PCT > 0 && trailArmed && capturedPct >= TA.TP_CAP_PCT;  // hard take-profit
+      const tpCap = taVal("TP_CAP_PCT", ctx.tf, ctx.key);
+      const tpHit = tpCap > 0 && trailArmed && capturedPct >= tpCap;  // hard take-profit
       // ===== AMBANG TRAILING =====
       // CB dasar boleh di-override per-TF (mis. 15m lebih lebar dari 5m) dan/atau dibuat ADAPTIF
       // terhadap volatilitas: ambang = max(CB, k x std) dalam % harga. std berasal dari window 5m
       // (satuan harga) -> dikonversi ke % harga dengan /C*100.
-      const cbBase = (TA.PER_TF && ctx.tf && TA.PER_TF[ctx.tf] && TA.PER_TF[ctx.tf].TRAIL_CB_PCT != null) ? TA.PER_TF[ctx.tf].TRAIL_CB_PCT : TA.TRAIL_CB_PCT;
+      const cbBase = taVal("TRAIL_CB_PCT", ctx.tf, ctx.key);
       const _std = ctx.std || 0, _px = ctx.price || 0;
       const cbStd = (TA.TRAIL_STD_K > 0 && _std > 0 && _px > 0) ? (TA.TRAIL_STD_K * _std / _px * 100) : 0;
       const cbEff = Math.max(cbBase, cbStd);
       // GIVE-BACK BUDGET: keluar bila harga memberi balik >= X% dari PUNCAK PROFIT (bukan % harga).
       // Puncak profit (satuan harga) diturunkan dari definisi trailRetracePct: (peak-favor)/C*100.
       const peakFavNow = (trailRetracePct != null && _px) ? (favor + trailRetracePct * _px / 100) : null;
-      const gbHit = !!(TA.TRAIL_GIVEBACK_PCT > 0 && peakFavNow != null && peakFavNow > 0 && favor < peakFavNow
-        && ((peakFavNow - favor) / peakFavNow) * 100 >= TA.TRAIL_GIVEBACK_PCT);
+      const gbPct = taVal("TRAIL_GIVEBACK_PCT", ctx.tf, ctx.key);
+      const gbHit = !!(gbPct > 0 && peakFavNow != null && peakFavNow > 0 && favor < peakFavNow
+        && ((peakFavNow - favor) / peakFavNow) * 100 >= gbPct);
       // MODE GAP: keluar bila capture turun >= TRAIL_GAP_PP poin dari PUNCAK capture (mis. 50%->35%).
       const capPeakV = ctx.capPeak != null ? ctx.capPeak : capturedPct;
       const capNowV = ctx.capNow != null ? ctx.capNow : capturedPct;   // FIX: bandingkan gap pada DERET YANG SAMA (capturedPct2)
       // GAP per-TF (hasil harness: 15m untung pakai gap, 5m RUGI -> 5m tetap pakai callback harga)
-      const gapPp = (TA.PER_TF && ctx.tf && TA.PER_TF[ctx.tf] && TA.PER_TF[ctx.tf].TRAIL_GAP_PP != null)
-        ? TA.PER_TF[ctx.tf].TRAIL_GAP_PP : TA.TRAIL_GAP_PP;
+      const gapPp = taVal("TRAIL_GAP_PP", ctx.tf, ctx.key);
       const gapHit = gapPp > 0 && trailArmed && (capPeakV - capNowV) >= gapPp;
       const trailHitCond = (tpHit || gbHit || gapHit || (gapPp <= 0 && trailRetracePct != null && trailRetracePct >= cbEff));
       // STOP LOSS TA: harga bergerak MELAWAN entry >= ambang (cegah plan "tahan ke 0")
@@ -365,8 +374,8 @@ function computeTradePlan(bias, ctx) {
         state = "CLOSE"; cls = "exit";
         action = stopHit ? `STOP LOSS — harga ${advFromEntryPct.toFixed(3)}% melawan entry (ambang ${TA.STOP_LOSS_ENTRY_PCT}%)`
           : gapHit ? `TRAIL EXIT (GAP) — puncak ${capPeakV.toFixed(0)}% -> sekarang ${capNowV.toFixed(0)}% (gap -${(capPeakV - capNowV).toFixed(0)}pp, ambang ${gapPp}pp)`
-          : tpHit ? `TRAIL EXIT (TP ${TA.TP_CAP_PCT}%) — profit ${capturedPct}% dari potensi`
-          : gbHit ? `TRAIL EXIT (give-back ${TA.TRAIL_GIVEBACK_PCT}% dari puncak profit) — profit ${capturedPct}% dari potensi`
+          : tpHit ? `TRAIL EXIT (TP ${tpCap}%) — profit ${capturedPct}% dari potensi`
+          : gbHit ? `TRAIL EXIT (give-back ${gbPct}% dari puncak profit) — profit ${capturedPct}% dari potensi`
           : `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${cbEff.toFixed(3)}%${cbStd > cbBase ? ` · adaptif k=${TA.TRAIL_STD_K}` : ""}) · profit ${capturedPct}% dari potensi`;
       } else {
         state = "HOLD"; cls = "entry";
@@ -429,12 +438,13 @@ function computeTradePlan(bias, ctx) {
       if (TA.TRAIL_MODE && trailArmed) {
         // EXIT TRAILING: jual (100%) saat harga mundur >= CB% dari puncak; selama belum -> TAHAN (ikuti puncak).
         const hybEarly2 = TA.HYBRID && ((capturedPct >= TA.HYB_MIN_CAP_PCT) || (trailRetracePct != null && trailRetracePct >= TA.HYB_MIN_RETRACE_PCT));
-        if (trailRetracePct != null && trailRetracePct >= TA.TRAIL_CB_PCT && (trailHeldMs >= TA.TRAIL_MIN_HOLD_MS || hybEarly2)) {
+        const cb2 = taVal("TRAIL_CB_PCT", ctx.tf, ctx.key), mh2 = taVal("TRAIL_MIN_HOLD_MS", ctx.tf, ctx.key);
+        if (trailRetracePct != null && trailRetracePct >= cb2 && (trailHeldMs >= mh2 || hybEarly2)) {
           state = "CLOSE"; cls = "exit";
-          action = `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${TA.TRAIL_CB_PCT}%) · profit ${capturedPct}% dari potensi`;
+          action = `TRAIL EXIT — mundur ${trailRetracePct.toFixed(3)}% dari puncak (cb ${cb2}%) · profit ${capturedPct}% dari potensi`;
         } else {
           state = "HOLD"; cls = "entry";
-          action = `TAHAN (TRAIL armed ${(trailHeldMs/1000).toFixed(0)}s) — ikuti puncak; jual bila tahan >=${TA.TRAIL_MIN_HOLD_MS/1000}s & mundur ${TA.TRAIL_CB_PCT}%`;
+          action = `TAHAN (TRAIL armed ${(trailHeldMs/1000).toFixed(0)}s) — ikuti puncak; jual bila tahan >=${mh2/1000}s & mundur ${cb2}%`;
         }
       } else if (exitLeg === 0) {
         // LEG-1: jual SEBAGIAN (50%) hanya bila profit sudah >= ambang ATAU reversal NYATA.
@@ -557,7 +567,7 @@ function buildPlan(input) {
   state.capPeak = state.capPeak || {};
   // CAP puncak capture (<=200%) — juga menormalkan nilai BASI yang ter-persist (mis. 1292%).
   state.capPeak[key] = Math.min(200, Math.max(state.capPeak[key] == null ? -Infinity : state.capPeak[key], capturedPct2));
-  const trailArmed = state.trailArmed[key] || (capturedPct2 >= TA.TRAIL_ARM_PCT) || armOnLock;
+  const trailArmed = state.trailArmed[key] || (capturedPct2 >= taVal("TRAIL_ARM_PCT", input.tf, key)) || armOnLock;
   state.trailArmed[key] = trailArmed;
   if (!state.trailSince) state.trailSince = {};
   if (trailArmed && !state.trailSince[key]) state.trailSince[key] = now;
@@ -581,7 +591,7 @@ function buildPlan(input) {
   const entered = !!(state.entered[key] && state.entered[key].entered);
   const trail = trailOfCloses(input.sessionCloses || [], O, taUp);
   const plan = computeTradePlan(bias, {
-    tf: input.tf, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
+    tf: input.tf, key: input.key, lock: O, price: C, std, slope, slopeRecent, rsi, z, ofi, ofiShort, retreat, health,
     entered, turn, fade, trail, retreatStd, retraceFromPeakPct, extremeDepthPct,
     exitLeg, newPeakHigher, retrace2Pct, trailArmed, trailRetracePct, trailHeldMs, capPeak: state.capPeak[key], capNow: capturedPct2,
     durMs: input.durMs, remainMs: input.remainMs,   // gate waktu entry
@@ -638,12 +648,12 @@ function buildPlan(input) {
     else if (entered) {
       if (trailArmed) {
         next = "TRAIL EXIT";
-        const gapPp = (TA.PER_TF && input.tf && TA.PER_TF[input.tf] && TA.PER_TF[input.tf].TRAIL_GAP_PP != null) ? TA.PER_TF[input.tf].TRAIL_GAP_PP : TA.TRAIL_GAP_PP;
+        const gapPp = taVal("TRAIL_GAP_PP", input.tf, input.key);
         const capPeakV = (state.capPeak && state.capPeak[key] != null) ? state.capPeak[key] : capturedPct2;
         if (gapPp > 0) { const g = Math.round(capPeakV - capturedPct2); parts.push({ label: "gap " + g + "/-" + gapPp + "pp", ratio: cl((capPeakV - capturedPct2) / gapPp), met: (capPeakV - capturedPct2) >= gapPp }); }
-        else { const cb = TA.TRAIL_CB_PCT || 0.03; parts.push({ label: "mundur " + (retraceFromPeakPct || 0).toFixed(3) + "%/" + cb + "%", ratio: cl((retraceFromPeakPct || 0) / cb), met: (retraceFromPeakPct || 0) >= cb }); }
+        else { const cb = taVal("TRAIL_CB_PCT", input.tf, input.key) || 0.03; parts.push({ label: "mundur " + (retraceFromPeakPct || 0).toFixed(3) + "%/" + cb + "%", ratio: cl((retraceFromPeakPct || 0) / cb), met: (retraceFromPeakPct || 0) >= cb }); }
       } else {
-        next = "ARM"; const arm = TA.TRAIL_ARM_PCT || 40;
+        next = "ARM"; const arm = taVal("TRAIL_ARM_PCT", input.tf, input.key) || 40;
         parts.push({ label: "menuju-arm " + Math.round(capturedPct2 || 0) + "/" + arm + "%", ratio: cl((capturedPct2 || 0) / arm), met: (capturedPct2 || 0) >= arm });
       }
     } else {

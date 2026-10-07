@@ -328,6 +328,8 @@ function mergeRecord(r) {
   ledger.set(r.k, merged);
   appendLedger(merged);
   ledgerDirty++;
+  // B18: adaptasi online — refit key ini (debounced) saat ada $ akun baru.
+  if (r.bot && typeof r.bot.roiPct === "number") { try { scheduleOnlineRefit(r.k); } catch (_) {} }
   return true;
 }
 
@@ -340,7 +342,7 @@ const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
 const GATES_DEF = require("./gates.js");
 const EXP_GATE = require("./exp-gate.js");
 const EXT = require("./ext-features.js");   // sumber data eksternal (Batch 1) — observasional
-const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json", exp: "exp.json", rolling: "learn_rolling.json" };
+const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json", exp: "exp.json", rolling: "learn_rolling.json", spread: "learn_spread.json", score: "learn_score.json", sizing: "learn_sizing.json", ta: "learn_ta.json" };
 let gatesMeta = { mode: "perkey", promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
 
@@ -404,6 +406,15 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     const lessonsMap = keepOnly(Object.assign({}, prevLessons.byKey || {}));
     const pnlMap = keepOnly(Object.assign({}, prevPnl.byKey || {}));
     const metaMap = keepOnly(Object.assign({}, prevMeta.byKey || {}));
+    // ===== IMPROVEMENT LANJUTAN (B): peta model baru per key =====
+    const prevSpread = readModelPart("spread") || {};
+    const spreadMap = keepOnly(Object.assign({}, prevSpread.byKey || {}));
+    const prevScore = readModelPart("score") || {};
+    const scoreMap = keepOnly(Object.assign({}, prevScore.byKey || {}));
+    const prevSizing = readModelPart("sizing") || {};
+    const sizingMap = keepOnly(Object.assign({}, prevSizing.byKey || {}));
+    const prevTa = readModelPart("ta") || {};
+    const taMap = keepOnly(Object.assign({}, prevTa.byKey || {}));
     const keys = onlyKey ? [onlyKey] : allKeys;   // per-key trigger -> proses key itu saja
     const minApplyCov = Number(process.env.MIN_APPLY_COV != null ? process.env.MIN_APPLY_COV : 0.15);
     const keyRes = {}; let anyPromote = false, anyGates = false;
@@ -413,23 +424,28 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     const rolling = LEARNER.rollingStats(rows, { now: nowRef, windows: [3 * 3600, 6 * 3600, 12 * 3600, 24 * 3600] });
     for (const key of keys) {
       const kr = rows.filter((r) => r.symbol + "_" + r.interval === key);
+      const tfNow = key.slice(key.indexOf("_") + 1);
+      const poolRows = rows.filter((r) => r.interval === tfNow);   // B16: pool antar-coin utk TF yg sama
       const cand = LEARNER.buildModel(kr, {
         minTrain: Number(process.env.LEARN_MIN_TRAIN || 12), minTest: Number(process.env.LEARN_MIN_TEST || 6), minRows: Number(process.env.LEARN_MIN_ROWS || 15),
         pnlMinN: Number(process.env.LEARN_PNL_MIN_N || 8), pnlMinDelta: Number(process.env.LEARN_PNL_MIN_DELTA || 3),
-        windowSec: learnWindow, now: nowRef,
+        windowSec: learnWindow, now: nowRef, poolRows,
       });
       if (!cand.ok) {
         // data tak cukup -> JANGAN simpan config lama (snowball). Hapus agar key bebas dari blocker usang.
         keyRes[key] = { n: kr.length, ok: false, why: cand.reason };
         delete gateMap[key]; delete touchMap[key]; delete applyMap[key]; delete metaMap[key]; delete gatesMap[key];
         delete pnlMap[key]; delete lessonsMap[key];   // cegah data $/$pelajaran BASI (proxy lama) tampil di panel
+        delete spreadMap[key]; delete scoreMap[key]; delete taMap[key];
         continue;
       }
-      // PENTING: jendela uji HARUS sejajar dengan split model (baris ber-$ saja). Sebelumnya memakai
-      // `kr` mentah (termasuk baris tanpa $) -> uji tidak selaras dengan latih -> metrik menyesatkan.
+      // PENTING: jendela uji HARUS sejajar dengan split model (baris ber-$ saja). Bila model di-POOL,
+      // uji juga memakai himpunan pool agar selaras dgn splitIdx model.
       const krPnl = kr.filter((r) => r.dwin != null);
-      const splitIdxNow = (cand.splitIdx != null) ? cand.splitIdx : Math.floor(krPnl.length * 0.7);
-      const testNow = krPnl.slice(splitIdxNow);
+      const poolPnl = poolRows.filter((r) => r.dwin != null);
+      const srcPnl = (krPnl.length >= Number(process.env.LEARN_MIN_ROWS || 15)) ? krPnl : poolPnl;
+      const splitIdxNow = (cand.splitIdx != null) ? cand.splitIdx : Math.floor(srcPnl.length * 0.7);
+      const testNow = srcPnl.slice(splitIdxNow);
       const inc = gateMap[key] ? { gate: { rules: gateMap[key].rules || [] }, touch: { rules: (touchMap[key] && touchMap[key].rules) || [] }, metrics: (metaMap[key] && metaMap[key].metrics) || null } : null;
       const candEval = LEARNER.evalModelRolling(testNow, cand.gate.rules, cand.touch.rules, 3);
       const incEval = inc ? LEARNER.evalModelRolling(testNow, inc.gate.rules, inc.touch.rules, 3) : null;
@@ -472,6 +488,11 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       if (gatesPromoted) { gEntry.thresholds = th.thresholds; gEntry.thMetrics = th.test; gEntry.train = th.train; gEntry.baselineTest = th.baselineTest; anyGates = true; }
       gatesMap[key] = gEntry;
       pnlMap[key] = Object.assign({ test: cand.pnlTest }, cand.pnl);
+      // ===== IMPROVEMENT LANJUTAN (B) per key =====
+      spreadMap[key] = LEARNER.mineSpread(kr);            // B12 batas spread (per key)
+      scoreMap[key] = LEARNER.mineScore(kr);              // B17 ambang skor selektif
+      sizingMap[key] = LEARNER.mineSizing(rolling, key);  // B19 stake mult dari edge $
+      taMap[key] = LEARNER.learnTA(kr);                   // B14 tuning exit TA (replay path akun)
       // LESSONS ditulis SELALU (informatif), terlepas dari promote. Dulu hanya saat `dec.promote` true ->
       // karena tak ada key yang promote, panel "pelajaran" selalu kosong. Lessons = insight konteks,
       // TIDAK bergantung adopsi model.
@@ -493,6 +514,17 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     // ===== METRIK JENDELA BERGULIR (regime, berbasis $) =====
     // per key: mean-$/WR pada 3h/6h/12h/24h terakhir. Dipakai kill-switch & panel.
     write("learn_rolling.json", Object.assign({ generated: new Date().toISOString(), version: ver, learnWindow }, rolling));
+    // ===== MODEL LANJUTAN (B) =====
+    write("learn_spread.json", { generated: new Date().toISOString(), version: ver, byKey: spreadMap });
+    write("learn_score.json", { generated: new Date().toISOString(), version: ver, byKey: scoreMap });
+    write("learn_sizing.json", { generated: new Date().toISOString(), version: ver, byKey: sizingMap });
+    write("learn_ta.json", { generated: new Date().toISOString(), version: ver, byKey: taMap });
+    // Terapkan tuning exit TA PER KEY ke modul trade-plan (dibaca live oleh engine).
+    try {
+      const PER = {};
+      for (const k of Object.keys(taMap)) { const b = taMap[k] && taMap[k].best; if (b && b.cb > 0) PER[k] = { TRAIL_CB_PCT: b.cb }; }
+      require("./ta-config.js").PER_KEY = PER;
+    } catch (_) {}
     write("meta.json", { version: ver, promotedAt: new Date().toISOString(), trigger, byKey: metaMap });
     // ===== GATE EKSPERIMENTAL (OBSERVASIONAL) — tidak mengubah accepted/reject produksi =====
     try { write("exp.json", EXP_GATE.evaluate(records)); } catch (e) { console.log("[EXP] gagal evaluasi:", e.message); }
@@ -521,7 +553,25 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     return res;
   } finally { refitting = false; }
 }
+// ===== B18: ADAPTASI ONLINE — refit PER-KEY (debounced) begitu BOT melaporkan $ akun baru =====
+// Kill-switch ONLINE_REFIT. Debounce ONLINE_REFIT_MS agar refit tidak beruntun; tetap per key (tanpa global).
+const _onlineRefit = {};
+function keyFromRec(k) { const m = /^([A-Za-z0-9]+)_([0-9a-z]+)_\d+$/.exec(String(k || "")); return m ? `${m[1]}_${m[2]}` : null; }
+function scheduleOnlineRefit(k) {
+  if (process.env.ONLINE_REFIT !== "1") return;
+  const key = keyFromRec(k); if (!key) return;
+  if (_onlineRefit[key]) return;
+  _onlineRefit[key] = setTimeout(() => { _onlineRefit[key] = null; try { refit("online", key).catch(() => {}); } catch (_) {} }, Number(process.env.ONLINE_REFIT_MS || 20000));
+}
 ensureModelDirs(); loadModelMeta();
+// Muat tuning exit TA PER KEY (learn_ta.json) ke modul trade-plan — dibaca live oleh engine.
+try {
+  const taM = readModelPart("ta") || {};
+  const PER = {};
+  for (const k of Object.keys(taM.byKey || {})) { const b = taM.byKey[k] && taM.byKey[k].best; if (b && b.cb > 0) PER[k] = { TRAIL_CB_PCT: b.cb }; }
+  require("./ta-config.js").PER_KEY = PER;
+  if (Object.keys(PER).length) console.log(`[TA] per-key exit tuning dimuat: ${Object.keys(PER).join(", ")}`);
+} catch (_) {}
 
 // ---- Capture kanonik server-side: snapshot 2 detik tiap sesi 5m/15m tanpa perlu browser ----
 const capture = createCapture({

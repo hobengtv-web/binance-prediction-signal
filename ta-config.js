@@ -71,6 +71,7 @@ CFG.PER_TF = {
 };
 
 // Versi ringkas (hash) — berubah otomatis bila salah satu nilai berubah.
+CFG.PER_KEY = {};   // OVERRIDE PER coin×TF (diisi SERVER dari learn_ta.json — hasil tuning exit TA). Prioritas tertinggi.
 CFG.VER = "ta" + crypto.createHash("md5").update(JSON.stringify(CFG)).digest("hex").slice(0, 8);
 
 

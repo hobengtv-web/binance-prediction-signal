@@ -152,9 +152,24 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       mAgree: (s.micro && s.micro.bodyAgree != null) ? (s.micro.bodyAgree ? 1 : 0) : null,
       mRanPos: (s.micro && typeof s.micro.ranPos === "number") ? +s.micro.ranPos.toFixed(3) : null,
       mAlign: alignScore(s.micro, dir),
+      // ===== FITUR TAMBAHAN (B) =====
+      spreadPct: (r.bot && typeof r.bot.entrySpreadPct === "number") ? +r.bot.entrySpreadPct.toFixed(3) : null,   // spread ASK-BID saat entry (akun)
+      botEntryPx: (r.bot && typeof r.bot.entryPrice === "number") ? r.bot.entryPrice : null,                       // harga token akun saat entry
+      powerPct: (s.power && typeof s.power.pct === "number") ? s.power.pct : null,                                 // skor sinyal live (selective entry)
+      mAlignB: (alignScore(s.micro, dir) == null) ? "na" : String(alignScore(s.micro, dir)),
+      mAgreeB: (s.micro && s.micro.bodyAgree != null) ? (s.micro.bodyAgree ? "agree" : "disagree") : "na",
+      mRanZone: (s.micro && typeof s.micro.ranPos === "number") ? (s.micro.ranPos < 0.2 ? "low" : s.micro.ranPos > 0.8 ? "high" : "mid") : "na",
+      mBody: (function () { const v = microNum(s.micro, "o2BodyS", s.micro && s.micro.sigma1s); return v == null ? "na" : (v > 0.5 ? "strong+" : v < -0.5 ? "strong-" : "weak"); })(),
+      path: (r.bot && Array.isArray(r.bot.path)) ? r.bot.path : null,                                              // lintasan harga akun (untuk tuning exit TA)
     });
   }
   out.sort((a, b) => a.t0 - b.t0);
+  // ===== BOBOT RECENCY (B): makin baru makin besar. halfLifeSec=0 -> bobot 1 (tanpa decay). =====
+  const hl = opts.halfLifeSec || 0;
+  if (hl > 0 && out.length) {
+    const ref = opts.refT0 || out[out.length - 1].t0;
+    for (const r of out) r.w = +Math.pow(0.5, Math.max(0, (ref - r.t0) / hl)).toFixed(4);
+  } else for (const r of out) r.w = 1;
   out.skipped = skipped;
   return out;
 }
@@ -230,22 +245,29 @@ function mineRules(train, test, FEATS, PAIRS, base, metric, opts) {
 // Aturan penahan yang dipakai app: gate -> HANYA aturan interval tunggal; touch -> HANYA gap tunggal.
 // Kunci fitur yang DIKENAL saat lock (bisa diterapkan live oleh capture.js). Harus sama dgn
 // yang dievaluasi di sini, supaya metrik model = apa yang benar-benar diterapkan.
-const APPLY_KEYS = new Set(["interval", "symbol", "dir", "hour", "gap", "mode", "rsi", "vol", "hist", "trend", "minute"]);
+const APPLY_KEYS = new Set(["interval", "symbol", "dir", "hour", "gap", "mode", "rsi", "vol", "hist", "trend", "minute", "mAlignB", "mAgreeB", "mRanZone", "mBody"]);
 // Peta fitur -> nilai pada baris (dipakai decide). Bucket HARUS sama dengan yang dihitung live di capture.js.
 const DECIDE_FIELD = {
   gap: (r) => r.gap, interval: (r) => r.interval, symbol: (r) => r.symbol, hour: (r) => r.hour,
   dir: (r) => r.dir, mode: (r) => r.mode, rsi: (r) => r.rsiB, vol: (r) => r.vol,
   hist: (r) => r.hist, trend: (r) => r.trend, minute: (r) => r.minute,
+  mAlignB: (r) => r.mAlignB, mAgreeB: (r) => r.mAgreeB, mRanZone: (r) => r.mRanZone, mBody: (r) => r.mBody,
 };
+// Parse rule "f=v" atau "f1=v1&f2=v2" (interaksi).
+function ruleParts(k) {
+  return String(k).split("&").map((p) => { const i = p.indexOf("="); return i < 0 ? null : { f: p.slice(0, i), v: p.slice(i + 1) }; }).filter(Boolean);
+}
 function blockersOf(rules, metric) {
-  return rules.filter((r) => r.verdict === "suppress" && r.k.indexOf("&") === -1 &&
-    APPLY_KEYS.has(r.k.slice(0, r.k.indexOf("="))));
+  return rules.filter((r) => {
+    if (!r || r.verdict !== "suppress") return false;
+    const ps = ruleParts(r.k);
+    return ps.length > 0 && ps.every((p) => APPLY_KEYS.has(p.f));
+  });
 }
 function decide(row, blockers) {
   return !blockers.some((b) => {
-    const i = b.k.indexOf("="), f = b.k.slice(0, i), v = b.k.slice(i + 1);
-    const get = DECIDE_FIELD[f];
-    return get ? get(row) === v : false;
+    const ps = ruleParts(b.k);
+    return ps.length > 0 && ps.every((p) => { const get = DECIDE_FIELD[p.f]; return get ? String(get(row)) === p.v : false; });
   });
 }
 // skor = winrate dari sinyal yang DIAMBIL x akar(cakupan) — filternya harus berguna,
@@ -715,7 +737,12 @@ function pnlContexts(rows, FEATS) {
 const PN_FEATS = {
   hour: (r) => r.hour, rsi: (r) => r.rsiB, vol: (r) => r.vol, hist: (r) => r.hist,
   trend: (r) => r.trend, dir: (r) => r.dir, gap: (r) => r.gap, mode: (r) => r.mode, minute: (r) => r.minute,
+  // mikro-struktur (B): aktif otomatis saat cukup data punya field ini
+  mAlignB: (r) => r.mAlignB, mAgreeB: (r) => r.mAgreeB, mRanZone: (r) => r.mRanZone, mBody: (r) => r.mBody,
 };
+// Interaksi antar-fitur (B) — hanya diterapkan bila SEMUA bagian termasuk APPLY_KEYS.
+const PN_PAIRS = [["hour", "dir"], ["dir", "vol"], ["dir", "rsi"], ["hour", "vol"], ["trend", "dir"],
+  ["gap", "dir"], ["mAlignB", "dir"], ["mAgreeB", "dir"], ["hist", "dir"], ["dir", "minute"]];
 function stderr(a) { const n = a.length; if (n < 2) return 0; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) * (x - m), 0) / (n - 1)) / Math.sqrt(n); }
 function minePnl(rows, opts = {}) {
   const o = Object.assign({ minN: 8, minDelta: 3, zMin: 1.0, windowSec: 0, now: 0 }, opts);
@@ -724,19 +751,99 @@ function minePnl(rows, opts = {}) {
   if (base0.length < o.minN * 2) return { base: null, n: base0.length, rules: [] };
   const all = mean(base0.map((r) => r.pnlReal));
   const out = [];
-  for (const f of Object.keys(PN_FEATS)) {
-    const g = groupBy(base0, PN_FEATS[f]);
+  const run = (feats) => {
+    const keyf = (r) => feats.map((f) => `${f}=${PN_FEATS[f](r)}`).join("&");
+    const g = groupBy(base0, keyf);
     for (const [k, arr] of g) {
       if (arr.length < o.minN) continue;
       const vals = arr.map((r) => r.pnlReal);
       const m = mean(vals), d = m - all, s = stderr(vals);
       const sig = s <= 0 || Math.abs(d) >= o.zMin * s;
-      if (d <= -o.minDelta && sig) out.push({ k: `${f}=${k}`, f, n: arr.length, meanPnl: +m.toFixed(4), delta: +d.toFixed(4), verdict: "suppress", metric: "dwin" });
-      else if (d >= o.minDelta && sig) out.push({ k: `${f}=${k}`, f, n: arr.length, meanPnl: +m.toFixed(4), delta: +d.toFixed(4), verdict: "boost", metric: "dwin" });
+      if (d <= -o.minDelta && sig) out.push({ k, f: feats.join("&"), n: arr.length, meanPnl: +m.toFixed(4), delta: +d.toFixed(4), verdict: "suppress", metric: "dwin" });
+      else if (d >= o.minDelta && sig) out.push({ k, f: feats.join("&"), n: arr.length, meanPnl: +m.toFixed(4), delta: +d.toFixed(4), verdict: "boost", metric: "dwin" });
     }
-  }
+  };
+  for (const f of Object.keys(PN_FEATS)) run([f]);
+  for (const p of PN_PAIRS) if (p.every((x) => PN_FEATS[x])) run(p);
   out.sort((a, b) => a.meanPnl - b.meanPnl);
   return { base: +all.toFixed(4), n: base0.length, rules: out };
+}
+
+/* ============================================================================
+   IMPROVEMENT LANJUTAN (B)
+   ============================================================================ */
+
+/* B12: EV SADAR-SPREAD per key — batas spread ASK-BID maksimum saat entry di mana rata-rata $ masih >= 0.
+   Dipakai BOT untuk skip entry bila spread > batas ini (per key, bukan ambang global). */
+function mineSpread(rows, opts = {}) {
+  const o = Object.assign({ minN: 6, thrPct: 0 }, opts);
+  const a = rows.filter((r) => r.pnlReal != null && typeof r.spreadPct === "number");
+  if (a.length < o.minN) return { ok: false, n: a.length, spreadMaxPct: null, note: "data spread kurang" };
+  const grid = [0.03, 0.05, 0.08, 0.1, 0.12, 0.15, 0.2, 0.3];
+  let best = null;
+  for (const X of grid) {
+    const sub = a.filter((r) => r.spreadPct <= X);
+    if (sub.length < o.minN) continue;
+    const m = mean(sub.map((r) => r.pnlReal));
+    if (m >= o.thrPct) best = { X, n: sub.length, meanPnl: +m.toFixed(3), cov: +(sub.length / a.length).toFixed(3) };
+  }
+  return { ok: !!best, n: a.length, spreadMaxPct: best ? best.X : null, kept: best || null,
+    note: best ? `spread<=${best.X}%: $ ${best.meanPnl}% (n ${best.n}/${a.length})` : "tidak ada batas spread dgn $>=0" };
+}
+
+/* B17: SELECTIVE ENTRY by SKOR sinyal (power.pct) — ambang minimum skor agar $ >= 0. */
+function mineScore(rows, opts = {}) {
+  const o = Object.assign({ minN: 6, thrPct: 0 }, opts);
+  const a = rows.filter((r) => r.pnlReal != null && typeof r.powerPct === "number");
+  if (a.length < o.minN) return { ok: false, n: a.length, minPct: null, note: "data skor kurang" };
+  const grid = [0, 20, 30, 40, 50, 60, 70, 80];
+  let best = null;
+  for (const X of grid) {
+    const sub = a.filter((r) => r.powerPct >= X);
+    if (sub.length < o.minN) continue;
+    const m = mean(sub.map((r) => r.pnlReal));
+    if (m >= o.thrPct) best = { X, n: sub.length, meanPnl: +m.toFixed(3) };
+  }
+  return { ok: !!best, n: a.length, minPct: best ? best.X : null, kept: best || null };
+}
+
+/* B19: SIZING per key dari edge $ jendela 24h — mult stake dibatasi 0.5..1.5 (konservatif). */
+function mineSizing(rolling, key, opts = {}) {
+  const o = Object.assign({ min: 0.5, max: 1.5, window: 24 * 3600, ref: 10 }, opts);
+  const kd = rolling && rolling.keys && rolling.keys[key];
+  const w = kd && kd[o.window];
+  if (!w || w.n < 8 || w.meanPnl == null) return { mult: 1, n: w ? w.n : 0, why: "data kurang" };
+  const mult = Math.max(o.min, Math.min(o.max, 1 + (w.meanPnl / o.ref)));
+  return { mult: +mult.toFixed(3), meanPnl: w.meanPnl, n: w.n, why: `24h $ ${w.meanPnl}%` };
+}
+
+/* B14: TUNING EXIT TA per key — replay lintasan harga TOKEN akun (bot.path {t,px}) + entry price.
+   Simulasikan trailing giveback CB% dari puncak; pilih CB yang memaksimalkan rata-rata ROI $ token. */
+function learnTA(rows, opts = {}) {
+  const o = Object.assign({ minN: 5, grid: [0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.1, 0.12] }, opts);
+  const a = rows.filter((r) => Array.isArray(r.path) && r.path.length > 3 && typeof r.botEntryPx === "number" && r.botEntryPx > 0);
+  const out = { ok: false, n: a.length, best: null, results: [] };
+  if (a.length < o.minN) return out;
+  for (const cb of o.grid) {
+    let sum = 0, n = 0;
+    for (const r of a) {
+      const ep = r.botEntryPx; let peak = -Infinity, exitPx = null;
+      for (const pt of r.path) {
+        const px = pt && (typeof pt === "number" ? pt : (pt.px != null ? pt.px : pt.price));
+        if (typeof px !== "number") continue;
+        const favor = px - ep;                       // token: >0 = untung
+        if (favor > peak) peak = favor;
+        if (peak > 0 && (peak - favor) / ep * 100 >= cb) { exitPx = px; break; }
+      }
+      const roi = exitPx != null ? ((exitPx - ep) / ep * 100) : (r.botRoi != null ? r.botRoi : null);
+      if (roi == null) continue;
+      sum += roi; n++;
+    }
+    if (n >= o.minN) out.results.push({ cb, meanRoi: +(sum / n).toFixed(3), n });
+  }
+  out.results.sort((x, y) => y.meanRoi - x.meanRoi);
+  if (out.results.length) { out.ok = true; out.best = out.results[0]; }
+  return out;
 }
 
 /* ---------- METRIK JENDELA BERGULIR (regime) ----------
@@ -779,9 +886,14 @@ function buildModel(rows, opts = {}) {
   // KEPUTUSAN 100% BERBASIS $ NYATA: hanya belajar dari baris yang punya $ nyata (dwin != null).
   // Bila $ belum cukup -> model tidak dibangun (netral), bukan memakai WR.
   rows = rows.filter((r) => r.dwin != null);
-  if (rows.length < o.minRows) return { ok: false, reason: `butuh >= ${o.minRows} hasil ber-$, ada ${rows.length}`, rows: rows.length };
-  const splitIdx = Math.floor(rows.length * 0.7);
-  const train = rows.slice(0, splitIdx), test = rows.slice(splitIdx);
+  // POOLING (B16): bila key kekurangan data, mine/evaluasi pada kumpulan baris ber-$ TF YANG SAMA
+  // (antar coin) — tetap per-key saat diterapkan, tapi mengatasi kelangkaan $ akun.
+  const poolAll = Array.isArray(opts.poolRows) ? opts.poolRows.filter((r) => r.dwin != null) : [];
+  const pooled = rows.length < o.minRows && poolAll.length >= o.minRows;
+  const src = pooled ? poolAll : rows;
+  if (src.length < o.minRows) return { ok: false, reason: `butuh >= ${o.minRows} hasil ber-$, ada ${rows.length} (pool ${poolAll.length})`, rows: rows.length };
+  const splitIdx = Math.floor(src.length * 0.7);
+  const train = src.slice(0, splitIdx), test = src.slice(splitIdx);
   const dirBase = mean(test.map((r) => r.dwin)), touchBase = dirBase;   // objek = $ (dwin), bukan arah
   const dirTrain = mean(train.map((r) => r.dwin));
   const gateBuckets = bucketsOf(train, test, GATE_FEATS);
@@ -798,7 +910,7 @@ function buildModel(rows, opts = {}) {
   const touchSuppress = touchRules.filter((r) => r.verdict === "suppress").map((r) => r.k);
   const metrics = evalModel(test, gateRules, touchRules);
   return {
-    ok: true, rows: rows.length, splitIdx,
+    ok: true, rows: rows.length, splitIdx, pooled, srcN: src.length,
     baseline: { dirTrain: +dirTrain.toFixed(4), dirTest: +dirBase.toFixed(4), touchTest: +touchBase.toFixed(4) },
     gate: { buckets: gateBuckets, rules: gateRules, suppress: gateSuppress, boost: gateRules.filter((r) => r.verdict === "boost").map((r) => r.k), pnlBase: pnlMine.base, pnlN: pnlMine.n },
     touch: { buckets: touchBuckets, rules: touchRules, suppress: touchSuppress, boost: touchRules.filter((r) => r.verdict === "boost").map((r) => r.k) },
@@ -955,4 +1067,4 @@ function shouldPromote(candidate, incumbent, opts = {}) {   // opts: {minTake,mi
   return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}%` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, minePnl, rollingStats, regimePause, stderr, shouldPromote, blockersOf, APPLY_KEYS, DECIDE_FIELD, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, PN_FEATS, mineTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, minePnl, rollingStats, regimePause, stderr, shouldPromote, blockersOf, APPLY_KEYS, DECIDE_FIELD, ruleParts, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, PN_FEATS, PN_PAIRS, mineTA, mineSpread, mineScore, mineSizing, learnTA, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

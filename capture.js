@@ -302,16 +302,24 @@ function computeSignal(o) {
       const applyBlockers = !applyM || applyM.apply !== false;
       const blocking = (!applyBlockers) ? false : (() => {
         const rules = [].concat((g && g.suppress) || [], (t && t.suppress) || []);
+        const _al = align || {};
+        const _mO2 = (sigma1s > 0) ? (o2BodyS / sigma1s) : null;
         const featVal = {
           interval: tf, symbol: sym, dir: currentDir, hour: hourB, gap: gapB, mode,
           rsi: LEARNER_BUCKETS.bRsi(rsi), vol: LEARNER_BUCKETS.bVol(volRel2),
           hist: LEARNER_BUCKETS.bHist(histTrend.strength), trend: trend || "na", minute: LEARNER_BUCKETS.bMinute(1),
+          // mikro-struktur (B): sama dgn bucketing di learner.DECIDE_FIELD
+          mAlignB: String(["5m", "15m", "1h"].filter((t) => _al[t] === currentDir).length),
+          mAgreeB: (bodyAgree != null) ? (bodyAgree ? "agree" : "disagree") : "na",
+          mRanZone: (ranPos != null) ? (ranPos < 0.2 ? "low" : ranPos > 0.8 ? "high" : "mid") : "na",
+          mBody: (_mO2 == null) ? "na" : (_mO2 > 0.5 ? "strong+" : _mO2 < -0.5 ? "strong-" : "weak"),
         };
+        // Dukung rule tunggal MAUPUN interaksi "f1=v1&f2=v2" (B13).
         return rules.some((k) => {
-          if (typeof k !== "string" || k.indexOf("&") !== -1) return false;
-          const i = k.indexOf("="); if (i < 0) return false;
-          const f = k.slice(0, i);
-          return featVal[f] != null && String(featVal[f]) === k.slice(i + 1);
+          if (typeof k !== "string") return false;
+          const parts = k.split("&").map((p) => { const i = p.indexOf("="); return i < 0 ? null : { f: p.slice(0, i), v: p.slice(i + 1) }; }).filter(Boolean);
+          if (!parts.length) return false;
+          return parts.every((p) => featVal[p.f] != null && String(featVal[p.f]) === p.v);
         });
       })();
       learn = Object.assign(learn, {
@@ -389,6 +397,24 @@ function computeSignal(o) {
        || (ind1m.stochK != null && ind1m.stochK >= Number(process.env.RSI1M_OB_STOCH || 80)))) {
     accepted = false; reject = "rsi1m-overbought"; rsi1mGated = true;
   }
+  // ===== MODEL LANJUTAN (B) per key — diteruskan ke engine/BOT (tanpa ambang global) =====
+  let extras = {};
+  try {
+    const _gm = (p) => { try { return (typeof getModel === "function") ? getModel(p) : null; } catch (_) { return null; } };
+    const _byk = (m) => (m && m.byKey) ? (m.byKey[_key] || null) : null;
+    const _sp = _byk(_gm("spread")), _sc = _byk(_gm("score")), _sz = _byk(_gm("sizing")), _ta = _byk(_gm("ta"));
+    extras = {
+      spreadMaxPct: (_sp && _sp.ok) ? _sp.spreadMaxPct : null,     // B12 (batas spread per key -> dipakai BOT)
+      minScorePct: (_sc && _sc.ok) ? _sc.minPct : null,            // B17 (ambang skor selektif)
+      stakeMult: _sz ? _sz.mult : null,                            // B19 (mult stake per key -> dipakai BOT)
+      taTrailCbPct: (_ta && _ta.best) ? _ta.best.cb : null,        // B14 (callback trailing per key)
+    };
+  } catch (_) {}
+  // SELECTIVE ENTRY (B17): skor sinyal live di bawah ambang per-key -> tolak.
+  let scoreGated = false;
+  if (extras.minScorePct != null && power && typeof power.pct === "number" && power.pct < extras.minScorePct) {
+    accepted = false; reject = "score-low"; scoreGated = true;
+  }
   return {
     ok: true,
     skipped: (flatReason && !flatEntry) ? flatReason : undefined,
@@ -420,6 +446,9 @@ function computeSignal(o) {
       exp: (!flatReason && (currentDir === "up" || currentDir === "down"))
         ? EXP_GATE.cohortOfSignal({ dir: currentDir, mv2, ind }, t0) : [],
       rsi1mGated: rsi1mGated || undefined,
+      // ===== MODEL LANJUTAN (B) per key =====
+      spreadMaxPct: extras.spreadMaxPct, minScorePct: extras.minScorePct,
+      stakeMult: extras.stakeMult, taTrailCbPct: extras.taTrailCbPct, scoreGated: scoreGated || undefined,
       // Fitur EKSTERNAL (Batch 1, observasional): funding/OIΔ/LSR/basis/depthImb dari cache server.
       ext: (() => { try { return (typeof EXT.get === "function") ? EXT.get(sym) : null; } catch (_) { return null; } })(),
     },

@@ -53,18 +53,10 @@ try {
   window.addEventListener("unhandledrejection", (e) => { try { const rs = e.reason; const r = { at: new Date().toISOString(), type: "promise", msg: (rs && (rs.message || rs)) + "", stack: rs && rs.stack }; window.__JS_ERRORS.push(r); console.error("[JS PROMISE ERROR]", r.msg, r.stack || ""); } catch (_) {} });
 } catch (_) {}
 
-// Endpoint fallbacks — `binance.vision` is Binance's public data service,
-// usually not geo-blocked and CORS-friendly (common fix for ID/region blocks).
-const REST_HOSTS = [
-  "https://api.binance.com",
-  "https://data-api.binance.vision",
-  "https://api1.binance.com",
-];
-const WS_HOSTS = [
-  "wss://stream.binance.com:9443",
-  "wss://data-stream.binance.vision",
-  "wss://stream1.binance.com:9443",
-];
+// SEMUA REST lewat SERVER (same-origin /api/v3/*). Klien TIDAK memanggil Binance langsung.
+const REST_HOSTS = [""];
+// WS klien kini memakai RELAY SERVER (/api/market-stream), bukan WS Binance langsung.
+const WS_HOSTS = ["server"];
 
 const state = {
   asset: "BTC",
@@ -91,7 +83,7 @@ function serverNow() { return Date.now() + serverTimeOffset; }
 function ensureTimeSync() { const now = Date.now(); if (!lastTimeSync || now - lastTimeSync > 3000) { lastTimeSync = now; fetchBinanceTime(); } }
 async function fetchBinanceTime() {
   try {
-    const r = await fetch("https://data-api.binance.vision/api/v3/time", { cache: "no-store" });
+    const r = await fetch("/api/v3/time", { cache: "no-store" });   // via server (tidak langsung ke Binance)
     if (r.ok) { const j = await r.json(); if (j.serverTime) { serverTimeOffset = j.serverTime - Date.now(); lastTimeSync = Date.now(); } }
   } catch (_) {}
 }
@@ -147,7 +139,7 @@ async function fetchJSON(url, tries = REST_HOSTS.length) {
       const r = await fetch(u, { signal: ctrl.signal });
       clearTimeout(to);
       if (!r.ok) throw new Error("HTTP " + r.status);
-      setSrc(REST_HOSTS[i].replace("https://", "").replace("wss://", ""));
+      setSrc(REST_HOSTS[i] ? REST_HOSTS[i].replace("https://", "").replace("wss://", "") : "server");
       return await r.json();
     } catch (e) { clearTimeout(to); lastErr = e; }
   }
@@ -411,7 +403,7 @@ async function loadHistory() {
   for (const sym of Object.keys(SYMBOLS)) {
     for (const tf of INTERVALS) {
       fetches.push(
-        fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=${tf}&limit=${HISTORY}`)
+        fetchJSON(`/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=${tf}&limit=${HISTORY}`)
           .then((rows) => {
             const candles = rows.map((r) => ({
               time: Math.floor(r[0] / 1000),
@@ -470,7 +462,7 @@ async function fetchOlder(sym, beforeSec, limit) {
   } catch (e) { console.warn("[HISTORY] proxy fetch failed:", e); }
   // 2) fallback: direct Binance
   try {
-    const rows = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=1s&limit=${histLimit}&endTime=${beforeSec * 1000 - 1000}`);
+    const rows = await fetchJSON(`/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=1s&limit=${histLimit}&endTime=${beforeSec * 1000 - 1000}`);
     const candles = rows.map((r) => ({
       time: Math.floor(r[0] / 1000),
       open: +r[1], high: +r[2], low: +r[3], close: +r[4],
@@ -529,108 +521,54 @@ function setReach() {
   };
 }
 
-/* ----------------------- WebSocket ----------------------- */
-let ws, wsRetry = 0, wsHostIdx = 0, wsGotData = false, usingTV = false, tvClient = null, binanceTries = 0;
+/* ----------------------- Stream pasar via SERVER (bukan WS Binance) ----------------------- */
+let ws = null, wsRetry = 0, wsHostIdx = 0, wsGotData = false, usingTV = false, tvClient = null, binanceTries = 0;
 function connectWS() {
   if (usingTV) return; // TradingView fallback already active
-  const streams = [];
-  for (const sym of Object.keys(SYMBOLS)) {
-    streams.push(`${sym}@kline_1s`);
-    for (const tf of INTERVALS) streams.push(`${sym}@kline_${tf}`);
-  }
-  for (const sym of Object.keys(SYMBOLS)) streams.push(`${sym}@ticker`);
-
-  const host = WS_HOSTS[wsHostIdx % WS_HOSTS.length];
-  const url = `${host}/stream?streams=${streams.join("/")}`;
-  setSrc(host.replace("wss://", ""));
-    setStatus(`Connecting to Binance (${host.replace("wss://", "")})…`);
+  // 100% server-based: klien TIDAK membuka WS ke Binance. Server me-relay WS Binance -> SSE.
+  setSrc("server");
+  setStatus("Menghubungkan ke stream server…");
   showErr(null);
-  try { ws = new WebSocket(url); }
-  catch (e) {
-    scheduleWSRetry();
-    return;
-  }
-
-  // open timeout: blackholed connections never fire onopen/onclose
-  const openTimer = setTimeout(() => { try { ws.close(); } catch (_) {} }, 5000);
-  // data timeout: opened but silent (no kline/ticker delivered)
+  let es;
+  try { es = new EventSource("/api/market-stream"); }
+  catch (e) { scheduleWSRetry(); return; }
+  ws = es;
+  const openTimer = setTimeout(() => { try { es.close(); } catch (_) {} }, 5000);
   let dataTimer = null;
-
-  ws.onopen = () => {
+  es.onopen = () => {
     clearTimeout(openTimer);
     state.connected = true; wsRetry = 0; wsGotData = false;
     setConn(true);
-    dataTimer = setTimeout(() => { if (!wsGotData) { try { ws.close(); } catch (_) {} } }, 6000);
+    dataTimer = setTimeout(() => { if (!wsGotData) { try { es.close(); } catch (_) {} } }, 6000);
   };
-  ws.onmessage = (ev) => {
+  es.onmessage = (ev) => {
     if (dataTimer) clearTimeout(dataTimer);
     wsGotData = true;
-    const msg = JSON.parse(ev.data);
+    let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; }
     const d = msg.data;
     if (!d) return;
     if (d.e === "kline") handleKline(d);
     else if (d.e === "24hrTicker") handleTicker(d);
   };
-  ws.onclose = () => {
+  es.onerror = () => {
     clearTimeout(openTimer);
     if (dataTimer) clearTimeout(dataTimer);
     state.connected = false; setConn(false);
+    try { es.close(); } catch (_) {}
     scheduleWSRetry();
-  };
-  ws.onerror = () => {
-    try { ws.close(); } catch (_) {}
   };
 }
 function scheduleWSRetry() {
   wsRetry++;
   binanceTries++;
-  if (wsRetry % WS_HOSTS.length === 1) wsHostIdx++; // rotate host each full cycle
-  if (usingTV) return; // already on TradingView fallback
-  // After trying each Binance host with no data, fall back to TradingView
-  if (!wsGotData && binanceTries >= WS_HOSTS.length) {
-    startTV();
-    return;
-  }
-  if (!wsGotData) {
-    setStatus(`Binance gagal (${WS_HOSTS[wsHostIdx % WS_HOSTS.length].replace("wss://", "")}). Mencoba endpoint lain…`);
-  }
+  // 100% SERVER-based: TIDAK ada fallback TradingView (klien hanya boleh bicara ke server kita).
+  if (!wsGotData) setStatus("Stream server gagal. Mencoba lagi…");
   setTimeout(connectWS, Math.min(1500 * wsRetry, 6000));
 }
 
 function startTV() {
-  usingTV = true;
-  setSrc("tradingview (BINANCE)");
-    setStatus("Binance blocked. Connecting to TradingView (BINANCE)…");
-  showErr(null);
-  let tvGotData = false;
-  tvClient = connectTradingView({
-    onStatus: (s) => setSrc(s),
-    onHistory: (symKey, tf, candles) => {
-      tvGotData = true; hideStatus();
-      state.cache[symKey][tf].candles = candles;
-      state.cache[symKey][tf].meta = candles[candles.length - 1] || null;
-   if (tf === "1s") rebuild5s(symKey);
-   hideStatus();
-
-      if (symKey === state.asset && tf === "1s") { renderActive(); }
-      updateGap();
-    },
-    onUpdate: (symKey, tf, candle) => {
-      tvGotData = true; hideStatus();
-      feedCandle(symKey, tf, candle);
-    },
-    onQuote: (symKey, info) => {
-      tvGotData = true; hideStatus();
-      state.prevPrice[symKey] = state.ticker[symKey] ? state.ticker[symKey].last : null;
-      state.ticker[symKey] = { last: info.last, chg: info.chgPct };
-      updateHeader();
-      updateGap();
-    },
-  });
-  // If TradingView also fails (blackholed), surface it after a grace period
-  setTimeout(() => {
-    if (!tvGotData) showErr("TradingView also failed to connect. Network blocks both sources — try VPN, or check internet connection.");
-  }, 9000);
+  // Dihapus: fallback TradingView membuka koneksi EKSTERNAL dari klien. 100% server-based -> no-op.
+  setStatus("Stream server tidak tersedia — menunggu koneksi server…");
 }
 function setConn(on) {
   state.connected = !!on;   // single source of truth for every transport (WS, SSE, polling)
@@ -1425,7 +1363,7 @@ function applyType() {
           const binanceSym = OB_SYMBOLS[sym];
           if (!binanceSym) return;
           try {
-            const r = await fetch(`https://data-api.binance.vision/api/v3/depth?symbol=${binanceSym}&limit=5`, { cache: "no-store" });
+            const r = await fetch(`/api/v3/depth?symbol=${binanceSym}&limit=5`, { cache: "no-store" });
             if (!r.ok) return;
             const ob = await r.json();
             if (ob.bids && ob.asks) state.orderbook[sym] = { bids: ob.bids, asks: ob.asks, at: Date.now() };
@@ -1515,7 +1453,7 @@ async function probeProxy() {
     // Sync Binance server time BEFORE snapshot (so updateProjection uses correct offset)
     let timeSynced = false;
     try {
-      const timeResp = await fetch("https://data-api.binance.vision/api/v3/time", { signal: ctrl.signal });
+      const timeResp = await fetch("/api/v3/time", { signal: ctrl.signal });
       if (timeResp.ok) {
         const t = await timeResp.json();
         serverTimeOffset = t.serverTime - Date.now();
@@ -1580,7 +1518,7 @@ async function pollProxy() {
     // while Vercel fetches all candles).
     let timeSynced = false;
     try {
-      const timeResp = await fetch("https://data-api.binance.vision/api/v3/time", { cache: "no-store" });
+      const timeResp = await fetch("/api/v3/time", { cache: "no-store" });
       if (timeResp.ok) {
         const timeJ = await timeResp.json();
         serverTimeOffset = timeJ.serverTime - Date.now();
@@ -1700,7 +1638,7 @@ function trySSE() {
      const ones = snap.candles && snap.candles.BTC && snap.candles.BTC["1s"];
      if (ones && ones.length) { serverTimeOffset = (ones[ones.length - 1].time + 1) * 1000 - Date.now(); }
      // Refine with authoritative Binance time (more accurate, may fail if blocked)
-     fetch("https://data-api.binance.vision/api/v3/time", { cache: "no-store" })
+     fetch("/api/v3/time", { cache: "no-store" })
        .then(r => r.ok && r.json()).then(t => { if (t && t.serverTime) { serverTimeOffset = t.serverTime - Date.now(); lastTimeSync = Date.now(); } })
        .catch(() => {});
      applySnapshot(snap, true); hideStatus();
@@ -1934,54 +1872,16 @@ function gateKey(tf, mode, dir, rsi, strength) {
 }
 function gateLookup(key) { return GATE_MAP.get(key) || null; }
 async function loadGate() {
-  try {
-    const res = await fetch("/backtest/out/gate.json", { cache: "no-store" });
-    if (!res.ok) { GATE_STATUS = "missing"; console.warn("[GATE] gate.json not available — all signals will be marked watchlist"); renderConfidenceReport(); return; }
-    GATE = await res.json();
-    GATE_MAP.clear();
-    for (const g of (GATE.gate || [])) GATE_MAP.set(g.key, g);
-    GATE_STATUS = "ok";
-    console.log(`[GATE] loaded ${GATE_MAP.size} high-confidence conditions · baseline ${(GATE.baseline * 100).toFixed(1)}% · ${GATE.days}d`);
-    renderConfidenceReport();
-  } catch (e) { GATE_STATUS = "error"; console.warn("[GATE] load failed — all signals will be marked watchlist:", e.message); renderConfidenceReport(); }
+  // 100% server-based: TIDAK memuat file statis /backtest/out. Ambang aktif berasal dari
+  // server (/api/model/gates & /api/learner). Tanpa data server -> ditandai "missing".
+  try { GATE_STATUS = "missing"; } catch (_) {}
+  try { renderConfidenceReport(); } catch (_) {}
 }
 
-/* ===== Calibration tables (see backtest/out/early_tiers.json, tiers.json) =====
-   TABEL HISTORIS: dipakai hanya sebagai angka pembanding, dan key-nya masih memakai
-   definisi kalibrasi lama. Ambang yang BENAR-BENAR berlaku sekarang ada di
-   gates.js / /api/model/gates (profil bootstrap / learned) — lihat gatesSummary().
-   Tiers yang dipakai live: STRONG / GOOD / FAIR dari profil gate tersebut. */
+/* ===== Kalibrasi historis DIHAPUS (100% server-based). Tiers aktif = profil per-key dari /api/model/gates. ===== */
 let TIERS = null;
-let TIER_STATUS = "loading";
-async function loadTiers() {
-  try {
-    const res = await fetch("/backtest/out/early_tiers.json", { cache: "no-store" });
-    if (!res.ok) { TIER_STATUS = "missing"; return; }
-    TIERS = await res.json();
-    // Per-minute accuracy: entries that appear later in the session are measurably better.
-    try {
-      const r2 = await fetch("/backtest/out/tier_by_minute.json", { cache: "no-store" });
-      if (r2.ok) { const j = await r2.json(); TIERS.byMinute = j.tiers || null; }
-    } catch (_) {}
-    // Continuation potential: how much further price typically runs after touching the lock.
-    try {
-      const r3 = await fetch("/backtest/out/continuation.json", { cache: "no-store" });
-      if (r3.ok) { const j = await r3.json(); TIERS.continuation = j || null; }
-    } catch (_) {}
-    // 2-second signal tiers (7d of 1s klines).
-    try {
-      const r4 = await fetch("/backtest/out/early2s.json", { cache: "no-store" });
-      if (r4.ok) { const j = await r4.json(); TIERS.early2s = j || null; }
-    } catch (_) {}
-    // LOCK-TOUCH strategy calibration (the ~90% winrate path).
-    try {
-      const r5 = await fetch("/backtest/out/locktouch.json", { cache: "no-store" });
-      if (r5.ok) { const j = await r5.json(); TIERS.locktouch = j || null; }
-    } catch (_) {}
-    TIER_STATUS = "ok";
-    console.log(`[TIERS] early tiers loaded · ${TIERS.windowDays}d window · byMinute ${TIERS.byMinute ? "yes" : "no"}`);
-  } catch (e) { TIER_STATUS = "error"; console.warn("[TIERS] load failed:", e.message); }
-}
+let TIER_STATUS = "missing";
+async function loadTiers() { TIER_STATUS = "missing"; }
 
 /* ===== LIVE: sinyal dari SERVER (satu sumber kebenaran untuk semua device) =====
    Sebelumnya sinyal dihitung di tiap browser -> device bisa beda (data pasar, offset jam,
@@ -2122,82 +2022,20 @@ function gateThresholdsOK(f) {
   return true;
 }
 
-/* ===== PHASE 1 LEARNER — "belajar dari sinyal yang sudah berlalu" =====
-   Tabel konteks tervalidasi walk-forward: dilatih pada 70% data paling awal, diuji pada
-   30% data paling akhir (bukan random split), dinilai dengan Wilson lower/upper bound —
-   lihat backtest/learn.js (arah, 90d), learn_touch90.js (peluang kembali ke lock, 90d),
-   dan lessons.json (ringkasan "kenapa sinyal salah").
-   Dipakai untuk: (a) menampilkan winrate jujur per konteks, (b) memperingatkan konteks
-   yang historis lemah, (c) opsional menahan sinyal pada konteks tersebut (LEARN_BLOCK). */
+/* ===== PANEL "PELAJARAN"/KONTEKS — 100% dari SERVER =====
+   Klien TIDAK menghitung konteks/keputusan apa pun. Model gate/touch/lessons & seluruh
+   keputusan learner diproses di SERVER (ledger produksi, per coin×TF, $ akun Binance). */
 let LEARN = { gate: null, touch: null, lessons: null, status: "loading" };
-let LEARN_BLOCK = false;   // default MATI — tidak mengubah sinyal sampai diaktifkan
-// fitur yang maknanya identik antara backtest dan live (vol dikecualikan: definisinya beda)
-const LEARN_SAFE = new Set(["interval", "symbol", "mode", "minute", "rsi", "hour", "hist", "trend", "gap", "dir"]);
 async function loadLearn() {
   const get = (u) => fetch(u, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   try {
-    // Model yang sedang dipakai disajikan server (hasil re-fit dari ledger produksi bila ada);
-    // bila belum tersedia, jatuh ke tabel statis (hasil backtest 90d).
-    let [g, t, l] = await Promise.all([get("/api/model/gate"), get("/api/model/touch"), get("/api/model/lessons")]);
-    const src = (g && t) ? "model server" : "tabel statis";
-    if (!g) g = await get("/backtest/out/learn_gate.json");
-    if (!t) t = await get("/backtest/out/learn_touch90.json");
-    if (!l) l = await get("/backtest/out/lessons.json");
-    LEARN.gate = g; LEARN.touch = t; LEARN.lessons = l; LEARN.src = src;
+    const [g, t, l] = await Promise.all([get("/api/model/gate"), get("/api/model/touch"), get("/api/model/lessons")]);
+    LEARN.gate = g; LEARN.touch = t; LEARN.lessons = l; LEARN.src = "server";
     LEARN.meta = await get("/api/model/meta");
     LEARN.status = g ? "ok" : "missing";
-    console.log(`[LEARN] ${src} · gate ${g ? "ok" : "-"} · touch ${t ? "ok" : "-"} · lessons ${l ? "ok" : "-"}`);
+    console.log(`[LEARN] server · gate ${g ? "ok" : "-"} · touch ${t ? "ok" : "-"} · lessons ${l ? "ok" : "-"}`);
     renderLessons();
   } catch (e) { LEARN.status = "error"; console.warn("[LEARN] load failed:", e.message); }
-}
-// Bucket HARUS identik dengan backtest/learn.js & learn_touch90.js — jangan diubah sendiri.
-function learnBuckets(o) {
-  const vr = (o.volRel == null) ? NaN : o.volRel;
-  const h = o.hour == null ? 0 : o.hour;
-  return {
-    interval: String(o.tf), symbol: String(o.symbol), mode: String(o.mode || ""),
-    minute: o.minutesIn <= 1 ? "1" : o.minutesIn <= 3 ? "2-3" : o.minutesIn <= 6 ? "4-6" : "7+",
-    rsi: o.rsi == null ? "na" : o.rsi < 30 ? "<30" : o.rsi < 40 ? "30-40" : o.rsi < 60 ? "40-60" : o.rsi < 70 ? "60-70" : ">70",
-    vol: !isFinite(vr) ? "na" : vr < 0.7 ? "<0.7" : vr < 1.0 ? "0.7-1" : vr < 1.5 ? "1-1.5" : vr < 2.5 ? "1.5-2.5" : ">2.5",
-    hour: h < 4 ? "0-3" : h < 8 ? "4-7" : h < 12 ? "8-11" : h < 16 ? "12-15" : h < 20 ? "16-19" : "20-23",
-    hist: o.histStrength == null ? "na" : o.histStrength < 10 ? "<10" : o.histStrength < 20 ? "10-20" : ">20",
-    trend: String(o.trend), dir: String(o.dir),
-    gap: o.gapPct < 0.005 ? "<0.005" : o.gapPct < 0.01 ? "0.005-0.01" : o.gapPct < 0.02 ? "0.01-0.02" : o.gapPct < 0.035 ? "0.02-0.035" : ">0.035",
-  };
-}
-function learnMatch(key, ctx) {
-  return key.split("&").every((p) => {
-    const i = p.indexOf("="), f = p.slice(0, i), v = p.slice(i + 1);
-    return LEARN_SAFE.has(f) && ctx[f] === v;
-  });
-}
-function learnLookup(o) {
-  const ctx = learnBuckets(o);
-  const res = { ctx, dirWR: null, dirLb: null, dirN: 0, intervalWR: null, touch: null, touchLb: null, touchN: 0, weak: [], strong: [], blockable: [], label: "NETRAL" };
-  const G = LEARN.gate, T = LEARN.touch;
-  if (G && G.buckets) {
-    // Ambang 200: di bawah itu interval kepercayaan terlalu lebar untuk ditampilkan jujur.
-    const mi = G.buckets.minute && G.buckets.minute[ctx.minute];
-    if (mi && mi.nTest >= 200) { res.dirWR = mi.wrTest; res.dirLb = mi.lbTest; res.dirN = mi.nTest; }
-    const iv = G.buckets.interval && G.buckets.interval[ctx.interval];
-    if (iv && iv.nTest >= 200) res.intervalWR = { wr: iv.wrTest, lb: iv.lbTest, n: iv.nTest };
-    // hanya aturan interval TUNGGAL (mis. "interval=1h") yang boleh menahan sinyal —
-    // aturan gabungan seperti "interval=5m&minute=1" terlalu umum (semua sinyal 2s cocok).
-    for (const k of G.suppress || []) if (k.indexOf("interval=") === 0 && k.indexOf("&") === -1 && learnMatch(k, ctx)) res.blockable.push(k);
-  }
-  if (T && T.buckets) {
-    const gb = T.buckets.gap && T.buckets.gap[ctx.gap];
-    // tabel statis menyimpan lb sentuh di lbTest; model server di touchLbTest -> dukung keduanya
-    if (gb && gb.nTest >= 200) { res.touch = gb.touchTest; res.touchLb = (gb.touchLbTest != null ? gb.touchLbTest : gb.lbTest); res.touchN = gb.nTest; }
-    // gap = faktor dominan play reversion; hanya aturan gap TUNGGAL yang boleh menahan sinyal
-    for (const k of T.suppress || []) if (k.indexOf("gap=") === 0 && k.indexOf("&") === -1 && learnMatch(k, ctx)) res.blockable.push(k);
-  }
-  if (res.intervalWR && res.intervalWR.wr < 0.66) res.weak.push(`interval ${ctx.interval} historis ${(res.intervalWR.wr * 100).toFixed(0)}%`);
-  if (res.touch != null && res.touch < 0.62) res.weak.push(`kembali-ke-lock ${(res.touch * 100).toFixed(0)}% (gap ${ctx.gap})`);
-  if (res.touch != null && res.touch >= 0.72) res.strong.push(`kembali-ke-lock ${(res.touch * 100).toFixed(0)}%`);
-  if (res.dirWR != null && res.dirWR >= 0.70) res.strong.push(`arah-close ${(res.dirWR * 100).toFixed(0)}%`);
-  res.label = res.weak.length && !res.strong.length ? "LEMAH" : res.strong.length && !res.weak.length ? "KUAT" : res.weak.length ? "CAMPURAN" : "NETRAL";
-  return res;
 }
 function learnNote(L) {
   if (!L) return "";
@@ -2258,14 +2096,12 @@ function renderLessons() {
     sec("⚠ Konteks arah lemah", flat.filter((x) => x.type === "suppress"), "c-sup") +
     sec("🔎 Penyebab sinyal salah", flat.filter((x) => x.type === "cause"), "c-cause");
 }
-window.setLearnBlock = (v) => { LEARN_BLOCK = !!v; console.log("[LEARN] tahan konteks lemah =", LEARN_BLOCK); return LEARN_BLOCK; };
-window.learnStatus = () => ({ status: LEARN.status, block: LEARN_BLOCK, gateRules: rulesCount(LEARN.gate), touchRules: rulesCount(LEARN.touch) });
+window.learnStatus = () => ({ status: LEARN.status, gateRules: rulesCount(LEARN.gate), touchRules: rulesCount(LEARN.touch) });   // 100% server-based (tanpa flag blokir klien)
 
 /* ===== STATUS LEARNER (panel UI): progress, pelajaran, penahan aktif, riwayat penyesuaian =====
    Dihitung dari /api/learner (server) + penghitung sesi ini di browser. Tujuannya agar user bisa
    memantau: (1) sudah berapa data belajar terkumpul, (2) pelajaran apa yang didapat,
    (3) penyesuaian apa yang sedang berlaku pada sinyal. */
-const LEARN_STATS = { signals: 0, strong: 0, mixed: 0, weak: 0, wouldBlock: 0 };
 let LEARNER_STATUS = null;
 let LEARNER_ERR = null;
 let _lastModelVersion = null;
@@ -2424,7 +2260,7 @@ function renderLearnerStatus() {
     </div>
     <div class="lstat-sec">
       <b>4 · EFEK DI BROWSER INI (sejak halaman dibuka)</b>
-      <div class="lstat-line">sinyal diamati <b>${LEARN_STATS.signals}</b> · konteks kuat <b>${LEARN_STATS.strong}</b> · campuran <b>${LEARN_STATS.mixed}</b> · lemah <b>${LEARN_STATS.weak}</b> · <span class="${LEARN_STATS.wouldBlock ? "lstat-warn" : "lstat-dim"}">akan ditahan <b>${LEARN_STATS.wouldBlock}</b></span>${LEARN_BLOCK ? ' <span class="lstat-badge sup">TAHAN AKTIF</span>' : ' <span class="lstat-badge def">TAHAN MATI</span>'}</div>
+      <div class="lstat-line">Seluruh perhitungan konteks/keputusan learner dijalankan <b>di server</b> (per coin×TF, $ akun Binance). Klien hanya menampilkan hasil — lihat bagian <b>MODEL &amp; AMBANG per coin</b> di atas.</div>
     </div>
     <div class="lstat-sec">
       <b>5 · RIWAYAT PENYESUAIAN MODEL</b> <span class="lstat-dim">(build JS: ${BUILD})</span>

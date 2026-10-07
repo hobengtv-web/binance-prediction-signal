@@ -791,6 +791,41 @@ function fallbackPoll() {
   }, 1000);
 }
 
+/* ===== PROXY REST + RELAY WS BINANCE =====
+   Agar KLIEN tidak pernah memanggil Binance langsung — semua data pasar lewat SERVER (100% server-based).
+   - /api/v3/*      : proxy transparan REST Binance (time/klines/depth/ticker) dgn fallback host.
+   - /api/market-stream : relay WS Binance (kline/ticker) -> SSE; satu upstream dibagi ke semua klien. */
+const BN_REST_HOSTS = ["https://data-api.binance.vision", "https://api.binance.com", "https://api1.binance.com"];
+async function proxyBinanceV3(pathname, search) {
+  let lastErr = null;
+  for (const h of BN_REST_HOSTS) {
+    try {
+      const r = await fetch(h + pathname + (search || ""), { cache: "no-store" });
+      const body = await r.text();
+      return { status: r.status, body, ctype: r.headers.get("content-type") || "application/json" };
+    } catch (e) { lastErr = e; }
+  }
+  return { status: 502, body: JSON.stringify({ error: "proxy gagal: " + String(lastErr) }), ctype: "application/json" };
+}
+const BN_WS_HOSTS = ["wss://stream.binance.com:9443", "wss://data-stream.binance.vision"];
+let _mstreamClients = new Set(), _mstreamWs = null, _mstreamIdx = 0;
+function _mstreamUrl() {
+  const streams = [];
+  for (const s of ["btcusdt", "ethusdt", "bnbusdt"]) {
+    streams.push(`${s}@kline_1s`);
+    for (const tf of ["5m", "15m", "1h"]) streams.push(`${s}@kline_${tf}`);
+    streams.push(`${s}@ticker`);
+  }
+  return `${BN_WS_HOSTS[_mstreamIdx % BN_WS_HOSTS.length]}/stream?streams=${streams.join("/")}`;
+}
+function _startMstream() {
+  if (_mstreamWs || typeof WebSocket === "undefined") return;
+  try { _mstreamWs = new WebSocket(_mstreamUrl()); } catch (_) { _mstreamIdx++; setTimeout(_startMstream, 2000); return; }
+  _mstreamWs.onmessage = (ev) => { for (const c of _mstreamClients) { try { c.write(`data: ${ev.data}\n\n`); } catch (_) {} } };
+  _mstreamWs.onclose = () => { _mstreamWs = null; if (_mstreamClients.size) setTimeout(_startMstream, 1500); };
+  _mstreamWs.onerror = () => { try { _mstreamWs.close(); } catch (_) {} };
+}
+
 // Jam ON/OFF utk panel UI — diambil dari hasil learner terbaru (learn_veto.json), BUKAN hardcode.
 function tradeHoursNow() {
   const v = readModelPart("veto");
@@ -859,6 +894,31 @@ http.createServer(async (req, res) => {
       res.writeHead(502, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: String(e) }));
     }
+    return;
+  }
+
+  // PROXY REST BINANCE — klien memakai /api/v3/* (same-origin), bukan memanggil Binance langsung.
+  if (u.pathname.startsWith("/api/v3/")) {
+    const pr = await proxyBinanceV3(u.pathname, u.search);
+    res.writeHead(pr.status, { "Content-Type": pr.ctype, "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" });
+    res.end(pr.body);
+    return;
+  }
+  // RELAY WS BINANCE -> SSE — klien tidak membuka WS ke Binance.
+  if (u.pathname === "/api/market-stream") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+      "X-Accel-Buffering": "no",
+    });
+    res.write("retry: 2000\n\n");
+    _mstreamClients.add(res);
+    _startMstream();
+    const ka = setInterval(() => { try { res.write(": ka\n\n"); } catch (_) {} }, 20000);
+    const stop = () => { clearInterval(ka); _mstreamClients.delete(res); };
+    req.on("close", stop); req.on("error", stop); res.on("close", stop);
     return;
   }
 

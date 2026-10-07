@@ -589,214 +589,7 @@
       return await r.json();
     }
 
-    async function analyzeHistoricalPatterns(asset, tf) {
-      try {
-        const sym = asset === 'BTC' ? 'BTCUSDT' : 'ETHUSDT';
-        const cacheKey = `patterns_${asset}_${tf}`;
-        const cached = sessionStorage.getItem(cacheKey);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Date.now() - parsed.ts < 300000) return parsed.data;
-        }
-
-        const data = await fetchKlines(sym, '5m', 30);
-        const candles5m = data.candles || [];
-        if (candles5m.length < 5) return null;
-
-        const patterns = [];
-        for (let i = 0; i < candles5m.length - 1; i++) {
-          const session = candles5m[i];
-          patterns.push({
-            outcome: session.close >= session.open ? 'up' : 'down',
-            firstCandleDir: session.close > session.open ? 'bullish' :
-                            session.close < session.open ? 'bearish' : 'doji'
-          });
-        }
-
-        const bullishFirst = patterns.filter(p => p.firstCandleDir === 'bullish');
-        const bearishFirst = patterns.filter(p => p.firstCandleDir === 'bearish');
-
-        const bullishWinRate = bullishFirst.length > 0
-          ? bullishFirst.filter(p => p.outcome === 'up').length / bullishFirst.length
-          : 0.5;
-        const bearishWinRate = bearishFirst.length > 0
-          ? bearishFirst.filter(p => p.outcome === 'down').length / bearishFirst.length
-          : 0.5;
-
-        const result = {
-          bullishWinRate,
-          bearishWinRate,
-          totalSessions: patterns.length,
-          recentTrend: patterns.slice(-5).filter(p => p.outcome === 'up').length / 5
-        };
-
-        try { sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: result })); } catch (_) {}
-        return result;
-      } catch (e) {
-        console.error('Pattern analysis error:', e);
-        return null;
-      }
-    }
-
-    async function predictWithPatterns(asset, tf, data) {
-      const ones = (data.candles[asset]["1s"] || []);
-      const ticker = data.ticker[asset];
-      if (!ticker) return null;
-
-      const C = ticker.last;
-      const durMs = INTERVAL_MS[tf] || 300000;
-      const now = Date.now();
-      const roundStart = Math.floor(now / durMs) * durMs;
-      const roundStartSec = Math.floor(roundStart / 1000);
-
-      const sortedOnes = ones.slice().sort((a, b) => a.time - b.time);
-      let lockPrice = null;
-
-      // Lock price = harga di boundary sesi (menit 00)
-      // Jika sudah di dalam sesi atau sangat dekat dengan boundary, gunakan harga ticker
-      // Ini akan cocok dengan Binance Prediction karena sama-sama menggunakan harga live di boundary
-      const timeSinceRoundStart = now - roundStart;
-      
-      if (timeSinceRoundStart >= -5000) {
-        // Di dalam sesi atau maksimal 5 detik sebelum sesi dimulai
-        // Gunakan harga ticker sebagai lock price
-        lockPrice = C;
-        console.log('[LOCK] using ticker price as lock price:', lockPrice, 'timeSinceRoundStart:', timeSinceRoundStart, 'ms');
-      } else {
-        // Belum dekat dengan session boundary, gunakan close candle terakhir sebelum boundary
-        const beforeLock = sortedOnes.filter(c => c.time < roundStartSec);
-        if (beforeLock.length > 0) {
-          const lastBefore = beforeLock[beforeLock.length - 1];
-          lockPrice = lastBefore.close;
-        } else {
-          lockPrice = C;
-        }
-        console.log('[LOCK] using prior candle close (before session):', lockPrice);
-      }
-
-      const patterns = await analyzeHistoricalPatterns(asset, tf);
-      const sessionOnes = sortedOnes.filter(c => c.time >= roundStartSec);
-      const firstOne = sessionOnes[0];
-      let currentFirstDir = null;
-
-      if (firstOne) {
-        const candleAge = now - (firstOne.time * 1000);
-        if (candleAge >= 1000) {
-          currentFirstDir = firstOne.close > firstOne.open ? 'bullish' :
-                            firstOne.close < firstOne.open ? 'bearish' : 'doji';
-        }
-      }
-
-      let prediction = 'flat';
-      let confidence = 50;
-      let mode = "PATTERN";
-
-      if (patterns && currentFirstDir && currentFirstDir !== 'doji') {
-        if (currentFirstDir === 'bullish') {
-          const winRate = patterns.bullishWinRate;
-          prediction = winRate > 0.5 ? 'up' : 'down';
-          confidence = Math.round(winRate * 100);
-          mode = winRate > 0.6 ? "REVERSAL↑" : "CONT↑";
-        } else if (currentFirstDir === 'bearish') {
-          const winRate = patterns.bearishWinRate;
-          prediction = winRate > 0.5 ? 'down' : 'up';
-          confidence = Math.round(winRate * 100);
-          mode = winRate > 0.6 ? "REVERSAL↓" : "CONT↓";
-        }
-      } else if (patterns && currentFirstDir === 'doji') {
-        if (patterns.recentTrend > 0.5) {
-          prediction = 'up';
-          confidence = 55;
-          mode = 'CONT↑';
-        } else if (patterns.recentTrend < 0.5) {
-          prediction = 'down';
-          confidence = 55;
-          mode = 'CONT↓';
-        }
-      }
-
-      const priceDelta = (C - lockPrice) / lockPrice;
-      const zScore = priceDelta / 0.01;
-
-      return {
-        asset,
-        tf,
-        price: C,
-        lockPrice,
-        prediction,
-        mode,
-        conf: confidence,
-        z: zScore,
-        slope: priceDelta * 100,
-        trendBias: patterns ? (patterns.recentTrend > 0.5 ? 'bullish' : 'bearish') : 'flat',
-        liquidity: 'NORMAL',
-        volRel: '1.0',
-        isTopPeak: false,
-        isBotPeak: false,
-        overbought: false,
-        oversold: false
-      };
-    }
-
-    function predictImmediately(asset, tf, data) {
-      const ticker = data.ticker[asset];
-      if (!ticker) return null;
-
-      const C = ticker.last;
-      const durMs = INTERVAL_MS[tf] || 300000;
-      const now = Date.now();
-      const roundStart = Math.floor(now / durMs) * durMs;
-      const roundStartSec = Math.floor(roundStart / 1000);
-
-      const ones = (data.candles[asset]["1s"] || []);
-      const sortedOnes = ones.slice().sort((a, b) => a.time - b.time);
-      let lockPrice = null;
-
-      // Lock price dari close candle 1s terakhir SEBELUM boundary sesi
-      const beforeLock = sortedOnes.filter(c => c.time < roundStartSec);
-      if (beforeLock.length > 0) {
-        const lastBefore = beforeLock[beforeLock.length - 1];
-        lockPrice = lastBefore.close;
-      } else {
-        lockPrice = C;
-      }
-
-      // Prediksi awal: arah harga saat ini relatif terhadap lock price
-      const priceDelta = (C - lockPrice) / lockPrice;
-      let prediction = 'flat';
-      let confidence = 50;
-      let mode = "IMMEDIATE";
-
-      if (priceDelta > 0.0005) {
-        prediction = 'up';
-        confidence = Math.min(100, Math.round(50 + priceDelta * 5000));
-        mode = 'CONT↑';
-      } else if (priceDelta < -0.0005) {
-        prediction = 'down';
-        confidence = Math.min(100, Math.round(50 + Math.abs(priceDelta) * 5000));
-        mode = 'CONT↓';
-      }
-
-      return {
-        asset,
-        tf,
-        price: C,
-        lockPrice,
-        prediction,
-        mode,
-        conf: confidence,
-        z: priceDelta / 0.01,
-        slope: priceDelta * 100,
-        trendBias: 'flat',
-        liquidity: 'NORMAL',
-        volRel: '1.0',
-        isTopPeak: false,
-        isBotPeak: false,
-        overbought: false,
-        oversold: false
-      };
-    }
-
+    /* 100% server-based: prediksi dihitung SERVER (snapshot.assets[asset].all[tf].mobilePred). Fungsi prediksi lokal DIHAPUS. */
     function aggregate5s(ones) {
       const sorted = ones.slice().sort((a, b) => a.time - b.time);
       const out = [];
@@ -1110,7 +903,8 @@
         setStatus("Mengambil data Binance...", "warn");
 
         const data = await fetchSnapshot();
-        try { const sigData = await fetchSignal(tf); updateMobilePower(sigData, asset, tf); } catch (_) {}
+        let sigData = null;
+        try { sigData = await fetchSignal(tf); updateMobilePower(sigData, asset, tf); } catch (_) {}
 
         state.candles[state.asset] = data.candles[state.asset] || {};
         state.ticker[state.asset] = data.ticker[state.asset];
@@ -1143,10 +937,11 @@
         }
 
         // Generate immediate prediction (no lag, based on current price vs lock)
-        const immediate = predictImmediately(asset, tf, data);
+        const _mp = (sigData && sigData.assets && sigData.assets[asset] && sigData.assets[asset].all && sigData.assets[asset].all[tf] && sigData.assets[asset].all[tf].mobilePred) || null;
+        const immediate = _mp ? { prediction: _mp.prediction, conf: _mp.confidence, mode: _mp.mode, lockPrice: (_mp.lockPrice != null ? _mp.lockPrice : _mp.price), roundStart: _mp.roundStart, trendBias: _mp.trendBias } : null;
         
         // Generate pattern-based prediction in background (for future use)
-        const patternPromise = predictWithPatterns(asset, tf, data);
+        const patternPromise = Promise.resolve(immediate);
 
         // Use immediate prediction first (instant)
         let finalResult = immediate;
@@ -1246,10 +1041,7 @@
       refresh();
     });
 
-    // 100% SERVER (defense-in-depth): netralkan prediktor lokal -> tak ada kalkulasi di browser,
-    // walau ada yang memanggil fungsi ini dari console sekalipun.
-    try { predictImmediately = () => null; } catch (_) {}
-    try { predictWithPatterns = async () => null; } catch (_) {}
+    // 100% SERVER: prediktor lokal sudah DIHAPUS dari berkas ini (mobilePred dihitung server).
     try { evaluatePastRound = () => null; } catch (_) {}
 
     setInterval(refresh, 5000);

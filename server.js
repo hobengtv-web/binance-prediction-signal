@@ -470,7 +470,9 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       applyMap[key] = { apply: applyBlockers, hasBlockers, improvesBaseline, nRules: gateRules.length + touchRules.length, coverage: liveEval ? liveEval.coverage : null, minApplyCov,
         candPnl: candPnl ? candPnl.meanPnl : null, basePnl: baselinePnl ? baselinePnl.meanPnl : null, candN: candPnl ? candPnl.n : null,
         note: !hasBlockers ? "tak ada aturan blocker (model ambil-semua) -> blocker TIDAK diterapkan"
-          : !improvesBaseline ? `$ model ${candPnl ? candPnl.meanPnl : "-"}% < baseline ${baselinePnl ? baselinePnl.meanPnl : "-"}% -> blocker TIDAK diterapkan (cegah perburukan)`
+          : !improvesBaseline ? ((candPnl && candPnl.n < 6)
+            ? `sampel $ model terlalu kecil (n ${candPnl.n} < 6) -> blocker belum diterapkan (bukti belum cukup)`
+            : `$ model ${candPnl ? candPnl.meanPnl : "-"}% < baseline ${baselinePnl ? baselinePnl.meanPnl : "-"}% -> blocker TIDAK diterapkan (cegah perburukan)`)
           : applyBlockers ? "blocker diterapkan"
           : `cakupan ${(100 * (liveEval ? liveEval.coverage : 0)).toFixed(0)}% < ${(minApplyCov * 100).toFixed(0)}% -> blocker TIDAK diterapkan` };
       const th = LEARNER.learnThresholds(kr);

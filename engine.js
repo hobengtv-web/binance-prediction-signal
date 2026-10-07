@@ -114,6 +114,50 @@ function createEngine(deps) {
       return true;
     } finally { _locking[lk] = false; }
   }
+  /* ===== LATE-SIGNAL (60s / 90s) =====
+     Bila sinyal 2s TIDAK dihasilkan (flat), pada detik ke-60 & ke-90 evaluasi arah MOMENTUM candle-60s
+     (px vs LOCK) dan emit sinyal bila gerak mv60 >= ambang per-key (learn_mv60) / env LATE_MV60.
+     Hasil riset (36h 1s klines): arah candle-60s → hasil akhir ~67-72% (subset flat-2s), 72-81% bila mv60>=0.02-0.03.
+     Emit `start` supaya BOT entry; TP/trailing memakai jalur BOT yang sama. */
+  async function latePass(sym, tf, nowSec, cur) {
+    if (tf !== "5m") return;                                    // 60s/90s hanya relevan utk sesi 5m
+    if (cur.signal || cur.late) return;                         // sudah ada sinyal / sudah late
+    if (!(cur.skipped === "flat-noise" || cur.skipped === "flat-price")) return;   // hanya bila 2s TIDAK menghasilkan sinyal
+    const t0 = cur.t0, off = nowSec - t0;
+    let sec = 0;
+    if (off >= 58 && off <= 76) sec = 60; else if (off >= 86 && off <= 106) sec = 90; else return;
+    const key = sym + "_" + tf;
+    const tfc = (market[sym] && market[sym].tf && market[sym].tf[tf]) || [];
+    const c0 = tfc.find((c) => c.time === t0);
+    const lock = c0 ? c0.open : (cur.plan && cur.plan.lock != null ? cur.plan.lock : null);
+    if (!lock) return;
+    const want = t0 + sec - 1;
+    let px = null;
+    const ones = market[sym].ones || [];
+    for (let i = ones.length - 1; i >= 0; i--) { if (ones[i].time <= want && ones[i].time >= t0) { px = ones[i].close; break; } }
+    if (px == null) { try { const gk = await getKlines(sym, "1s", t0 + sec + 3, 140); const c = gk.slice().reverse().find((o) => o.time <= want && o.time >= t0); px = c ? c.close : null; } catch (_) {} }
+    if (px == null) return;
+    const mv = Math.abs(px - lock) / lock * 100;
+    const byk = (p) => { try { const m = getModel(p); return (m && m.byKey && m.byKey[key]) ? m.byKey[key] : null; } catch (_) { return null; } };
+    const _m60 = byk("mv60");
+    const thr = (_m60 && typeof _m60.minMv60 === "number") ? _m60.minMv60 : Number(process.env.LATE_MV60 != null ? process.env.LATE_MV60 : 0.02);
+    if (!(mv >= thr)) return;
+    const dir = px > lock ? "up" : "down";
+    const _sp = byk("spread"), _sz = byk("sizing"), _ta = byk("ta");
+    const stage = sec >= 90 ? "late90" : "late60";
+    cur.signal = { dir, accepted: true, stage, late: true, grade: null, lock, mv2: +mv.toFixed(5),
+      spreadMaxPct: (_sp && _sp.ok) ? _sp.spreadMaxPct : null, stakeMult: _sz ? _sz.mult : null, taTrailCbPct: (_ta && _ta.best) ? _ta.best.cb : null };
+    cur.skipped = null; cur.late = stage;
+    try {
+      cur.plan = computePlan(sym, tf, t0, nowSec, cur.signal, market[sym]);
+      cur.conf = computeConf(sym, tf, t0, nowSec, cur.signal, market[sym]);
+      cur.disp = computeDisp(sym, tf, t0, nowSec, cur.signal, market[sym], cur.plan);
+    } catch (_) {}
+    if (onEvent) { try { onEvent({ type: "start", sym, tf, t0, dir, accepted: true, lock, stage, flatEntry: false,
+      spreadMaxPct: cur.signal.spreadMaxPct, stakeMult: cur.signal.stakeMult, taTrailCbPct: cur.signal.taTrailCbPct, exp: [], latMs: off * 1000, at: Date.now() }); } catch (_) {} }
+    log(`[ENGINE] ${sym} ${tf} ${stage} SINYAL dir=${dir} mv${sec}=${mv.toFixed(3)}% (>=${thr}) → emit start`);
+    saveSessions();
+  }
   /* Tick cepat: hanya bekerja saat ada sesi baru yang belum terkunci; refresh data bila candle
      sesi belum ada (dibatasi >=2s sekali per simbol) supaya tidak membanjiri API. */
   async function fastLockTick() {
@@ -501,6 +545,8 @@ function createEngine(deps) {
           const t0Live = Math.floor(nowSec / durS) * durS;
           const cur = session[sym][tf];
           if (!cur || cur.t0 !== t0Live) continue;            // belum terkunci untuk sesi ini
+          // LATE-SIGNAL: bila 2s TIDAK menghasilkan sinyal (flat), coba emit sinyal pada ~60s/90s.
+          if (process.env.LATE_SIGNAL !== "0") { try { await latePass(sym, tf, nowSec, cur); } catch (e) { stats.errors++; stats.lastErr = e && e.message; } }
           // Pastikan state sesi LAMA di-snapshot (untuk catatan entry/early close di ledger)
           // walau sesi baru tidak menghasilkan plan (mis. sinyal flat/ditolak).
           planStateFor(sym, tf, `${sym}_${tf}_${t0Live}`);

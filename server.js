@@ -341,7 +341,7 @@ const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
 const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
 const EXP_GATE = require("./exp-gate.js");
 const EXT = require("./ext-features.js");   // sumber data eksternal (Batch 1) — observasional
-const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json", exp: "exp.json", rolling: "learn_rolling.json", spread: "learn_spread.json", score: "learn_score.json", sizing: "learn_sizing.json", ta: "learn_ta.json", mv2: "learn_mv2.json" };
+const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json", exp: "exp.json", rolling: "learn_rolling.json", spread: "learn_spread.json", score: "learn_score.json", sizing: "learn_sizing.json", ta: "learn_ta.json", mv2: "learn_mv2.json", mv60: "learn_mv60.json" };
 let gatesMeta = { mode: "perkey", promotedAt: null };
 let modelMeta = { version: "default", promotedAt: null, metrics: null };
 
@@ -416,6 +416,8 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     const taMap = keepOnly(Object.assign({}, prevTa.byKey || {}));
     const prevMv2 = readModelPart("mv2") || {};
     const mv2Map = keepOnly(Object.assign({}, prevMv2.byKey || {}));
+    const prevMv60 = readModelPart("mv60") || {};
+    const mv60Map = keepOnly(Object.assign({}, prevMv60.byKey || {}));
     const keys = onlyKey ? [onlyKey] : allKeys;   // per-key trigger -> proses key itu saja
     const minApplyCov = Number(process.env.MIN_APPLY_COV != null ? process.env.MIN_APPLY_COV : 0.15);
     const keyRes = {}; let anyPromote = false, anyGates = false;
@@ -437,7 +439,7 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
         keyRes[key] = { n: kr.length, ok: false, why: cand.reason };
         delete gateMap[key]; delete touchMap[key]; delete applyMap[key]; delete metaMap[key]; delete gatesMap[key];
         delete pnlMap[key]; delete lessonsMap[key];   // cegah data $/$pelajaran BASI (proxy lama) tampil di panel
-        delete spreadMap[key]; delete scoreMap[key]; delete taMap[key]; delete mv2Map[key];
+        delete spreadMap[key]; delete scoreMap[key]; delete taMap[key]; delete mv2Map[key]; delete mv60Map[key];
         continue;
       }
       // PENTING: jendela uji HARUS sejajar dengan split model (baris ber-$ saja). Bila model di-POOL,
@@ -506,6 +508,7 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       sizingMap[key] = LEARNER.mineSizing(rolling, key);  // B19 stake mult dari edge $
       taMap[key] = LEARNER.learnTA(kr);                   // B14 tuning exit TA (replay path akun)
       mv2Map[key] = LEARNER.mineMv2(kr);                  // ADAPTIF: ambang gerak-minimum mv2 per key
+      mv60Map[key] = LEARNER.mineMv60(kr);                // ADAPTIF: ambang late-60s per key
       // LESSONS ditulis SELALU (informatif), terlepas dari promote. Dulu hanya saat `dec.promote` true ->
       // karena tak ada key yang promote, panel "pelajaran" selalu kosong. Lessons = insight konteks,
       // TIDAK bergantung adopsi model.
@@ -533,6 +536,7 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
     write("learn_sizing.json", { generated: new Date().toISOString(), version: ver, byKey: sizingMap });
     write("learn_ta.json", { generated: new Date().toISOString(), version: ver, byKey: taMap });
     write("learn_mv2.json", { generated: new Date().toISOString(), version: ver, byKey: mv2Map });   // ambang mv2 adaptif per key
+    write("learn_mv60.json", { generated: new Date().toISOString(), version: ver, byKey: mv60Map }); // ambang late-60s adaptif per key
     // Terapkan tuning exit TA PER KEY ke modul trade-plan (dibaca live oleh engine).
     try {
       const PER = {};
@@ -1257,6 +1261,7 @@ http.createServer(async (req, res) => {
       veto: readModelPart("veto"),            // {keys:{key:{hours,stats}}, ...}
       rolling: readModelPart("rolling"),      // {keys:{key:{<windowSec>:{n,meanPnl,winrate,lb}}}, windows}
       mv2: readModelPart("mv2"),              // {byKey:{key:{minMv2,wr,n,base,note}}} — ambang gerak-minimum adaptif
+      mv60: readModelPart("mv60"),            // {byKey:{key:{minMv60,wr,n,base,note}}} — ambang late-60s adaptif
       gates: (() => { const gg = readGates() || {}; return { mode: gg.mode, byKey: gg.byKey || {}, thresholds: gg.thresholds || [], liqFloorMul: gg.liqFloorMul, lateFrac: gg.lateFrac, note: gg.note }; })(),
       capture: capture.status(),
       history,

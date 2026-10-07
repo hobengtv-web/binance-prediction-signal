@@ -876,6 +876,22 @@ function mineMv2(rows, opts = {}) {
     note: `mv2>=${chosen.t}: WR ${(chosen.wr * 100).toFixed(1)}% (n ${chosen.n}) vs base ${(base * 100).toFixed(1)}%` };
 }
 
+/* AMBANG LATE-60s ADAPTIF PER KEY — untuk fallback sinyal di detik ke-60 (arah momentum candle-60s).
+   Pilih t (mv60 minimal) yg memaksimalkan WR arah (late60.dir == hasil) dgn n >= minN. */
+function mineMv60(rows, opts = {}) {
+  const o = Object.assign({ grid: [0, 0.005, 0.01, 0.015, 0.02, 0.03, 0.05], minN: 60, maxT: 0.06, minGain: 0.03 }, opts);
+  const a = rows.filter((r) => r.late60 && typeof r.late60.mv === "number" && (r.won === 0 || r.won === 1));
+  if (a.length < o.minN) return { ok: false, n: a.length, minMv60: null, note: `data late60 < ${o.minN}` };
+  const wrM = (sub) => sub.length ? mean(sub.map((r) => (r.late60.dir === r.won ? 1 : 0))) : 0;
+  const base = wrM(a);
+  let best = null;
+  for (const t of o.grid) { if (t > o.maxT) continue; const sub = a.filter((r) => r.late60.mv >= t); if (sub.length < o.minN) continue; const wr = wrM(sub); if (!best || wr > best.wr + 1e-9) best = { t, wr, n: sub.length }; }
+  if (!best) best = { t: 0, wr: base, n: a.length };
+  const chosen = (best.wr >= base + o.minGain) ? best : best;   // late: tetap pakai best (jaga ketajaman)
+  return { ok: true, n: a.length, base: +base.toFixed(4), minMv60: chosen.t, wr: +chosen.wr.toFixed(4), nAt: chosen.n,
+    note: `mv60>=${chosen.t}: WR ${(chosen.wr * 100).toFixed(1)}% (n ${chosen.n}) vs base ${(base * 100).toFixed(1)}%` };
+}
+
 /* ---------- METRIK JENDELA BERGULIR (regime) ----------
    Pasar berganti regime harian. Statistik per key dihitung pada jendela TERBARU (default 3h/6h/12h/24h)
    berbasis $ (pnlReal). Dipakai untuk: (a) kill-switch/pause per key saat $ jendela negatif,
@@ -1103,4 +1119,4 @@ function shouldPromote(candidate, incumbent, opts = {}) {   // opts: {minTake,mi
   return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}%` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, minePnl, rollingStats, regimePause, stderr, shouldPromote, blockersOf, APPLY_KEYS, DECIDE_FIELD, ruleParts, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, PN_FEATS, PN_PAIRS, mineTA, mineSpread, mineScore, mineSizing, learnTA, mineMv2, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, minePnl, rollingStats, regimePause, stderr, shouldPromote, blockersOf, APPLY_KEYS, DECIDE_FIELD, ruleParts, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, PN_FEATS, PN_PAIRS, mineTA, mineSpread, mineScore, mineSizing, learnTA, mineMv2, mineMv60, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };

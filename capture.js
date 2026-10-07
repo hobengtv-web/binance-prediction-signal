@@ -387,30 +387,7 @@ function computeSignal(o) {
     if (reclaim) { accepted = true; reject = null; }
   }
 
-  // ===== POWER SINYAL U/D (KOSMETIK — tidak mengubah accepted/reject) =====
-  // 100% = tepat di ambang minimum utk menghasilkan sinyal; >100% = melampaui; <100% = ada kriteria belum terpenuhi.
-  let power = null;
-  try {
-    const parts = [];
-    const add = (label, ratio, met) => parts.push({ label, ratio: +Math.max(0, Math.min(3, ratio)).toFixed(3), met: !!met });
-    const FV = (T && T.FAIR && T.FAIR.volRel2) || 0, FS = (T && T.FAIR && T.FAIR.surprise) || 0;
-    add("tier volRel2", FV > 0 ? volRel2 / FV : (volRel2 > 0 ? 1.001 : 1), volRel2 >= FV);
-    add("tier surprise", FS > 0 ? surprise / FS : (surprise > 0 ? 1.001 : 1), surprise >= FS);
-    const FVv = { volRel2, surprise, liqRatio, gapPct: gateNow, histStrength: histTrend.strength, rsi };
-    for (const th of (profile.thresholds || [])) { const v = FVv[th.f]; if (v == null || !(th.t > 0)) continue; const r = th.op === ">=" ? v / th.t : th.t / v; add("ambang " + th.f, r, th.op === ">=" ? v >= th.t : v <= th.t); }
-    if ((pv.rewardMin || 0) > 0) add("reward", gateNow / pv.rewardMin, gateNow >= pv.rewardMin);
-    if ((pv.liqMin || 0) > 0) add("likuiditas", liqRatio / pv.liqMin, liqRatio >= pv.liqMin);
-    add("rsi", pv.rsi ? 0 : 1, !pv.rsi);
-    add("vol choppy", pv.vol ? 0 : 1, !pv.vol);
-    add("jam sesi", pv.hour ? 0 : 1, !pv.hour);
-    add("liqLow", liqLow ? 0 : 1, !liqLow);
-    add("learner-block", (learn && learn.blocking) ? 0 : 1, !(learn && learn.blocking));
-    const psum = parts.reduce((a, x) => a + x.ratio, 0);
-    const metN = parts.filter((p) => p.met).length;
-    let pct = parts.length ? 100 * psum / parts.length : (accepted ? 100 : 0);
-    if (parts.length && metN < parts.length) pct = Math.min(pct, 100 * metN / parts.length);  // ada yg belum terpenuhi -> <100%
-    power = { pct: Math.round(pct), parts, accepted: !!accepted, allMet: metN === parts.length };
-  } catch (_) {}
+  // (POWER dihitung di AKHIR fungsi — setelah semua kriteria penolakan dievaluasi; lihat bawah.)
 
   // ===== FLAT_ENTRY: entry utk sesi TANPA signal U/D (flat-noise) dgn filter rsi =====
   // Backtest OOS: flat-noise & rsi<40 -> +42%/trade. Hanya bila env FLAT_ENTRY=1 dan key lolos gate flat ($).
@@ -455,6 +432,35 @@ function computeSignal(o) {
   if (explore < 1 && extras.minScorePct != null && power && typeof power.pct === "number" && power.pct < extras.minScorePct) {
     accepted = false; reject = "score-low"; scoreGated = true;
   }
+  // ===== POWER SINYAL U/D (KOSMETIK, dihitung di AKHIR) =====
+  // 100% = tepat di ambang minimum; >100% = melampaui; <100% = ADA kriteria belum terpenuhi.
+  // FIX: kini MEMASUKKAN semua kriteria penolakan (regime/key-EV, RSI-1m, score selektif) sehingga
+  // power TIDAK bisa >100% saat sinyal ditolak oleh kriteria tsb (dulu bisa 126-129% padahal rejected).
+  let power = null;
+  try {
+    const parts = [];
+    const add = (label, ratio, met) => parts.push({ label, ratio: +Math.max(0, Math.min(3, ratio)).toFixed(3), met: !!met });
+    const FV = (T && T.FAIR && T.FAIR.volRel2) || 0, FS = (T && T.FAIR && T.FAIR.surprise) || 0;
+    add("tier volRel2", FV > 0 ? volRel2 / FV : (volRel2 > 0 ? 1.001 : 1), volRel2 >= FV);
+    add("tier surprise", FS > 0 ? surprise / FS : (surprise > 0 ? 1.001 : 1), surprise >= FS);
+    const FVv = { volRel2, surprise, liqRatio, gapPct: gateNow, histStrength: histTrend.strength, rsi };
+    for (const th of (profile.thresholds || [])) { const v = FVv[th.f]; if (v == null || !(th.t > 0)) continue; const r = th.op === ">=" ? v / th.t : th.t / v; add("ambang " + th.f, r, th.op === ">=" ? v >= th.t : v <= th.t); }
+    if ((pv.rewardMin || 0) > 0) add("reward", gateNow / pv.rewardMin, gateNow >= pv.rewardMin);
+    if ((pv.liqMin || 0) > 0) add("likuiditas", liqRatio / pv.liqMin, liqRatio >= pv.liqMin);
+    add("rsi veto", pv.rsi ? 0 : 1, !pv.rsi);
+    add("vol veto", pv.vol ? 0 : 1, !pv.vol);
+    add("jam veto", pv.hour ? 0 : 1, !pv.hour);
+    add("liqLow", liqLow ? 0 : 1, !liqLow);
+    add("regime/key-EV", P.keyEvGated ? 0 : 1, !P.keyEvGated);                       // FIX: dulu tak dihitung
+    add("learner-block", (learn && learn.blocking) ? 0 : 1, !(learn && learn.blocking));
+    if (extras && extras.minScorePct != null) add("skor selektif", scoreGated ? 0 : 1, !scoreGated);  // FIX
+    if (process.env.RSI1M_GATE === "1") add("RSI 1m", rsi1mGated ? 0 : 1, !rsi1mGated);               // FIX
+    const psum = parts.reduce((a, x) => a + x.ratio, 0);
+    const metN = parts.filter((p) => p.met).length;
+    let pct = parts.length ? 100 * psum / parts.length : (accepted ? 100 : 0);
+    if (parts.length && metN < parts.length) pct = Math.min(pct, 100 * metN / parts.length);
+    power = { pct: Math.round(pct), parts, accepted: !!accepted, allMet: metN === parts.length };
+  } catch (_) {}
   // ACF: rekam keputusan akhir sesi ini (untuk lantai cakupan adaptif / anti-snowball)
   _acf.record(_key, t0, (flatReason && !flatEntry) ? false : !!accepted);
   return {

@@ -430,6 +430,11 @@ function computeSignal(o) {
   // Karena itu ia TIDAK dimatikan oleh ACF explore (yang tujuannya mencegah $-blocker menumpuk).
   // Hasilnya: konteks buruk tetap dibuang selama fase transisi, sampai profil $ akun terbentuk.
   if (accepted && learn && learn.wonBlock) { accepted = false; reject = "won-block"; }
+  // ===== KEY-NONTRADE (HARD, basis $ akun KRONIS) — hentikan key yg realized $-nya negatif struktural =====
+  // Pola: dir-WR key normal (~54%) tapi $ akun kronis negatif -> biaya eksekusi/likuiditas (spread besar),
+  // bukan masalah arah. Karena struktural (bukan regime sesaat), gate ini berlaku TANPA lookback-tergantung
+  // ACF/veto, dan reversibel lewat env KEY_TRADE_MIN_* .
+  if (accepted && P && P.tradeable === false) { accepted = false; reject = "key-nontrade"; }
   // ===== MODEL LANJUTAN (B) per key — diteruskan ke engine/BOT (tanpa ambang global) =====
   let extras = {};
   try {

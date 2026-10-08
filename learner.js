@@ -629,6 +629,10 @@ function keyVetoes(rows, opts = {}) {
   // per-key EV sesi FLAT-NOISE (utk FLAT_ENTRY gate) — dihitung dari baris flat-noise ber-$.
   const flatEvByKey = {};
   for (const r of rows) { if (r.skipped !== "flat-noise" || r.pnlReal == null) continue; const k = r.symbol + "_" + r.interval; (flatEvByKey[k] = flatEvByKey[k] || []).push(r.pnlReal); }
+  // TRADEABILITY (basis $ akun KRONIS) dihitung dari SEMUA baris ber-$ — TERMASUK sesi late yg `flat`
+  // (entry late punya sig.skipped=flat-noise -> jangan terbuang oleh filter `!flat` di bawah).
+  const tradeByKey = {};
+  for (const r of rows) { if (r.pnlReal == null) continue; const k = r.symbol + "_" + r.interval; (tradeByKey[k] = tradeByKey[k] || []).push(r.pnlReal); }
   rows = rows.filter((r) => !r.flat);   // veto/reclaim/invert/confirm = keputusan trade -> hanya sesi tradeable
   const groups = {};
   for (const r of rows) { if (r.won == null || !r.symbol || !r.interval) continue; const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r); }
@@ -667,11 +671,22 @@ function keyVetoes(rows, opts = {}) {
     const evRows = psKey.slice(-(opts.keyEvWin || 40));   // jendela bergulir (default 40 sesi $ terakhir)
     const keyEvInfo = evRows.length ? { n: evRows.length, meanPnl: +mean(evRows.map((r) => r.pnlReal)).toFixed(2) } : { n: 0, meanPnl: null };
     const keyEvGated = !!opts.keyEvGate && evRows.length >= evN && keyEvInfo.meanPnl != null && keyEvInfo.meanPnl < evMin;
+    // ===== TRADEABILITY (basis $ NYATA, KRONIS) =====
+    // Blokir key yg realized $ akun-nya KRONIS negatif (n memadai + rata-rata $ < ambang). Pola ini
+    // hampir selalu EKSEKUSI/LIKUIDITAS (spread besar), bukan arah (dir-WR key tetap ~54%). Karena
+    // struktural, gate ini keras & reversibel via env. Beda dgn keyEvGated (jendela bergulir/regime).
+    const tradeVals = tradeByKey[k] || [];
+    const tradeN = tradeVals.length;
+    const tradeMean = tradeN ? +mean(tradeVals).toFixed(2) : null;
+    const trMinN = opts.keyTradeMinN != null ? opts.keyTradeMinN : 15;
+    const trMinEv = opts.keyTradeMinEv != null ? opts.keyTradeMinEv : -6;
+    const tradeable = !(tradeN >= trMinN && tradeMean != null && tradeMean < trMinEv);
     out[k] = { n: a.length, rewardMin, liqMin, rsiBad: rsiR.ranges, volBad: volR.ranges,
       rsiFailOpen: rsiR.failOpen, volFailOpen: volR.failOpen,
       rsiCov: +rsiR.cov.toFixed(3), volCov: +volR.cov.toFixed(3),
       allowFrac: +frac.toFixed(3), snowball, reclaim: reclaimMap[k] || [], invert: invertMap[k] || [], confirm: confirmMap[k] || [],
       keyEv: keyEvInfo, keyEvGated: keyEvGated,
+      tradeable, tradeStat: { n: tradeN, meanPnl: tradeMean },
       flatEv: (function () { const f = flatEvByKey[k] || []; return f.length ? { n: f.length, meanPnl: +mean(f).toFixed(2) } : { n: 0, meanPnl: null }; })(),
       flatOk: (function () { const f = flatEvByKey[k] || []; return f.length >= (opts.flatEvN || 20) && mean(f) > 0; })() };
   }

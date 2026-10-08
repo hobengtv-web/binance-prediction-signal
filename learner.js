@@ -26,6 +26,7 @@ const bVol = (v) => (v == null ? "na" : v < 0.7 ? "<0.7" : v < 1.0 ? "0.7-1" : v
 const bHour = (h) => (h == null ? "na" : h < 4 ? "0-3" : h < 8 ? "4-7" : h < 12 ? "8-11" : h < 16 ? "12-15" : h < 20 ? "16-19" : "20-23");
 const bHist = (s) => (s == null ? "na" : s < 10 ? "<10" : s < 20 ? "10-20" : ">20");
 const bGap = (g) => (g == null ? "na" : g < 0.005 ? "<0.005" : g < 0.01 ? "0.005-0.01" : g < 0.02 ? "0.01-0.02" : g < 0.035 ? "0.02-0.035" : ">0.035");
+const bMv2 = (m) => (m == null ? "na" : m < 0.005 ? "<0.005" : m < 0.012 ? "0.005-0.012" : m < 0.02 ? "0.012-0.02" : ">=0.02");
 const isBucket = (v) => typeof v === "string" && /[<>\-]/.test(v);
 /* ---------- bucket khusus TRADE ASSISTANT ---------- */
 const bDepth = (v) => (v == null ? "na" : v < 0.02 ? "<0.02" : v < 0.03 ? "0.02-0.03" : v < 0.05 ? "0.03-0.05" : ">=0.05");
@@ -108,6 +109,7 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       histStrength: typeof s.histStrength === "number" ? s.histStrength : null,
       rsi: typeof s.rsi === "number" ? s.rsi : null,
       mv2: typeof s.mv2 === "number" ? s.mv2 : null,   // gerak dari LOCK ke close detik-2 (%) — untuk ambang per-key
+      mv2B: bMv2(typeof s.mv2 === "number" ? s.mv2 : null),   // bucket mv2 (untuk blocker berbasis outcome)
       late60: r.late60 || null,                        // snapshot 60s {mv,dir,px,...} (untuk fallback late-signal)
       late90: r.late90 || null,                        // snapshot 90s
       // bucket RSI (untuk mining berbasis mean-$ yang bisa diterapkan live; r.rsi di atas = nilai mentah)
@@ -892,6 +894,55 @@ function mineMv60(rows, opts = {}) {
     note: `mv60>=${chosen.t}: WR ${(chosen.wr * 100).toFixed(1)}% (n ${chosen.n}) vs base ${(base * 100).toFixed(1)}%` };
 }
 
+/* BLOCKER BERBASIS OUTCOME PER KEY — penajaman sementara saat `$` akun belum cukup.
+    Mining bucket single/interaksi dgn Wilson-UB < base, plus GUARD CAKUPAN (≤covCap) agar tidak snowball.
+    Faktual (res.won atau pnlReal bila tersedia, n besar), per-key, tanpa ambang global.
+
+    `metric`: "won" (proxy arah, default bila $ akun belum ada) | "pnlReal" ($, saat akun sudah melapor).
+    Semua kalkulasi WAJIB base dari $ bila tersedia (sesuai yang terjadi di akun Binance);
+    `won` dipakai hanya sebagai proxy sementara sampai $ akun cukup. */
+function mineWonBlockers(rows, opts = {}) {
+  const o = Object.assign({ minN: 20, minDelta: 0.08, covCap: 0.35, ubMax: 0.60, metric: "won" }, opts);
+  // Pilih metrik outcome: pnlReal ($ akun nyata) jika ada & cukup, else won (proxy).
+  const hasPnl = rows.filter((r) => r.pnlReal != null).length >= o.minN;
+  const usePnl = o.metric === "pnlReal" && hasPnl;
+  const M = usePnl ? (r) => r.pnlReal : (r) => r.won;     // nilai outcome per baris
+  const isOutcome = (r) => usePnl ? (typeof r.pnlReal === "number") : (r.won === 0 || r.won === 1);
+  const a = rows.filter((r) => (r.dir === "up" || r.dir === "down") && isOutcome(r));
+  if (a.length < 60) return { ok: false, n: a.length, rules: [], blockedFrac: 0, note: `data < 60`, metric: usePnl ? "pnlReal" : "won" };
+  const base = mean(a.map((r) => M(r)));
+  const FEATS = { hour: (r) => r.hour, rsi: (r) => r.rsiB, vol: (r) => r.vol, hist: (r) => r.hist, trend: (r) => r.trend, gap: (r) => r.gap, dir: (r) => r.dir, mv2: (r) => r.mv2B, minute: (r) => r.minute, mode: (r) => r.mode };
+  const val = (r, f) => (FEATS[f] ? String(FEATS[f](r)) : "");
+  const match = (r, k) => String(k).split("&").every((p) => { const i = p.indexOf("="); return val(r, p.slice(0, i)) === p.slice(i + 1); });
+  const cand = [];
+  const scan = (feats) => {
+    const keyf = (r) => feats.map((f) => `${f}=${FEATS[f](r)}`).join("&");
+    for (const [k, arr] of groupBy(a, keyf)) {
+      if (arr.length < o.minN) continue;
+      // Untuk $ (pnlReal): hitung mean $; Wilson hanya valid untuk 0/1 -> pakai mean & std untuk PnL kontinu
+      if (usePnl) {
+        const vals = arr.map((r) => M(r));
+        const m = mean(vals), sigma = stderr(vals);
+        if (m <= base - o.minDelta && sigma > 0 && m + 1.645 * sigma <= base) cand.push({ k, n: arr.length, wr: +m.toFixed(4), ub: +(m + 1.645 * sigma).toFixed(4) });
+      } else {
+        const wins = arr.filter((r) => r.won === 1).length, wr = wins / arr.length;
+        const ub = wilson(wins, arr.length).hi;
+        if (wr <= base - o.minDelta && ub < o.ubMax) cand.push({ k, n: arr.length, wr: +wr.toFixed(4), ub: +ub.toFixed(4) });
+      }
+    }
+  };
+  for (const f of Object.keys(FEATS)) scan([f]);
+  for (const f of ["rsi", "vol", "hour", "mv2", "trend", "gap"]) scan(["dir", f]);
+  // Sort: paling merugi dulu (lowest mean/WR).
+  cand.sort((x, y) => (usePnl ? x.wr - y.wr : x.ub - y.ub));
+  const frac = (rules) => (rules.length ? a.filter((r) => rules.some((c) => match(r, c.k))).length / a.length : 0);
+  const rules = [];
+  for (const c of cand) { const t = rules.concat([c]); if (frac(t) <= o.covCap) rules.push(c); }
+  const metricLabel = usePnl ? "pnlReal" : "won";
+  return { ok: true, n: a.length, base: +base.toFixed(4), rules, blockedFrac: +frac(rules).toFixed(3), covCap: o.covCap, metric: metricLabel,
+    note: `${rules.length} rule · blok ${(frac(rules) * 100).toFixed(0)}% (base ${metricLabel} ${(base * 100).toFixed(1)}${usePnl ? "%" : ""})` };
+}
+
 /* ---------- METRIK JENDELA BERGULIR (regime) ----------
    Pasar berganti regime harian. Statistik per key dihitung pada jendela TERBARU (default 3h/6h/12h/24h)
    berbasis $ (pnlReal). Dipakai untuk: (a) kill-switch/pause per key saat $ jendela negatif,
@@ -1119,4 +1170,4 @@ function shouldPromote(candidate, incumbent, opts = {}) {   // opts: {minTake,mi
   return { promote: false, why: `WR ${(c.takenWinrate * 100).toFixed(1)}% tidak menambah ≥2pp vs insiden ${(i.takenWinrate * 100).toFixed(1)}%` };
 }
 
-module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, minePnl, rollingStats, regimePause, stderr, shouldPromote, blockersOf, APPLY_KEYS, DECIDE_FIELD, ruleParts, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, PN_FEATS, PN_PAIRS, mineTA, mineSpread, mineScore, mineSizing, learnTA, mineMv2, mineMv60, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap } };
+module.exports = { wilson, stat, mean, rowsFrom, buildModel, evalModel, evalModelRolling, evalModelPnl, pnlContexts, minePnl, rollingStats, regimePause, stderr, shouldPromote, blockersOf, APPLY_KEYS, DECIDE_FIELD, ruleParts, hourVetoes, keyVetoes, keyTiers, flatStats, liveHourGate, decide, learnThresholds, evalTaken, applyThresholds: applyThresholds2, CANONICAL_MAX_MS, GATE_FEATS, TOUCH_FEATS, TA_FEATS, TA_PAIRS, PN_FEATS, PN_PAIRS, mineTA, mineSpread, mineScore, mineSizing, learnTA, mineMv2, mineMv60, mineWonBlockers, bDepth, bRetr, bRemain, BUCKETS: { bMinute, bRsi, bVol, bHour, bHist, bGap, bMv2 } };

@@ -343,30 +343,34 @@ function computeSignal(o) {
       const applyWhole = (() => { try { return (typeof getModel === "function" ? getModel("apply") : null); } catch (_) { return null; } })();
       const applyM = (applyWhole && applyWhole.byKey) ? applyWhole.byKey[_key] : applyWhole;   // PER key
       const applyBlockers = !applyM || applyM.apply !== false;
-      const blocking = (!applyBlockers) ? false : (() => {
-        const rules = [].concat((g && g.suppress) || [], (t && t.suppress) || []);
-        const _al = align || {};
-        const _mO2 = (sigma1s > 0) ? (o2BodyS / sigma1s) : null;
-        const featVal = {
-          interval: tf, symbol: sym, dir: currentDir, hour: hourB, gap: gapB, mode,
-          rsi: LEARNER_BUCKETS.bRsi(rsi), vol: LEARNER_BUCKETS.bVol(volRel2),
-          hist: LEARNER_BUCKETS.bHist(histTrend.strength), trend: trend || "na", minute: LEARNER_BUCKETS.bMinute(1),
-          // mikro-struktur (B): sama dgn bucketing di learner.DECIDE_FIELD (harus IDENTIK agar rule match)
-          mAlignB: (align && Object.keys(align).length) ? String(["5m", "15m", "1h"].filter((t) => _al[t] === currentDir).length) : "na",
-          mAgreeB: (bodyAgree != null) ? (bodyAgree ? "agree" : "disagree") : "na",
-          mRanZone: (ranPos != null) ? (ranPos < 0.2 ? "low" : ranPos > 0.8 ? "high" : "mid") : "na",
-          mBody: (_mO2 == null) ? "na" : (_mO2 > 0.5 ? "strong+" : _mO2 < -0.5 ? "strong-" : "weak"),
-        };
-        // Dukung rule tunggal MAUPUN interaksi "f1=v1&f2=v2" (B13).
-        return rules.some((k) => {
-          if (typeof k !== "string") return false;
-          const parts = k.split("&").map((p) => { const i = p.indexOf("="); return i < 0 ? null : { f: p.slice(0, i), v: p.slice(i + 1) }; }).filter(Boolean);
-          if (!parts.length) return false;
-          return parts.every((p) => featVal[p.f] != null && String(featVal[p.f]) === p.v);
-        });
-      })();
+      // Rule penahan: gate/touch (butuh applyMap.apply) + WONBLOCK (blocker outcome per-key, SELALU berlaku).
+      const _won = (() => { try { const m = (typeof getModel === "function") ? getModel("wonblock") : null; return (m && m.byKey && m.byKey[_key] && m.byKey[_key].rules) || []; } catch (_) { return []; } })();
+      const _al = align || {};
+      const _mO2 = (sigma1s > 0) ? (o2BodyS / sigma1s) : null;
+      const featVal = {
+        interval: tf, symbol: sym, dir: currentDir, hour: hourB, gap: gapB, mode,
+        rsi: LEARNER_BUCKETS.bRsi(rsi), vol: LEARNER_BUCKETS.bVol(volRel2),
+        hist: LEARNER_BUCKETS.bHist(histTrend.strength), trend: trend || "na", minute: LEARNER_BUCKETS.bMinute(1),
+        mv2: LEARNER_BUCKETS.bMv2(typeof mv2 === "number" ? mv2 : null),
+        // mikro-struktur (B): sama dgn bucketing di learner.DECIDE_FIELD (harus IDENTIK agar rule match)
+        mAlignB: (align && Object.keys(align).length) ? String(["5m", "15m", "1h"].filter((t) => _al[t] === currentDir).length) : "na",
+        mAgreeB: (bodyAgree != null) ? (bodyAgree ? "agree" : "disagree") : "na",
+        mRanZone: (ranPos != null) ? (ranPos < 0.2 ? "low" : ranPos > 0.8 ? "high" : "mid") : "na",
+        mBody: (_mO2 == null) ? "na" : (_mO2 > 0.5 ? "strong+" : _mO2 < -0.5 ? "strong-" : "weak"),
+      };
+      // Dukung rule tunggal MAUPUN interaksi "f1=v1&f2=v2" (B13).
+      const matchK = (k) => {
+        if (typeof k !== "string") return false;
+        const parts = k.split("&").map((p) => { const i = p.indexOf("="); return i < 0 ? null : { f: p.slice(0, i), v: p.slice(i + 1) }; }).filter(Boolean);
+        if (!parts.length) return false;
+        return parts.every((p) => featVal[p.f] != null && String(featVal[p.f]) === p.v);
+      };
+      const gateBlocked = applyBlockers && [].concat((g && g.suppress) || [], (t && t.suppress) || []).some(matchK);
+      const wonBlocked = _won.some((r) => matchK(r && r.k ? r.k : r));
+      const blocking = gateBlocked || wonBlocked;
+      const blockingSrc = gateBlocked ? "gate" : (wonBlocked ? "won" : "");
       learn = Object.assign(learn, {
-        touch: touchRate, dirWR: miWR, intervalWR: ivWR, blocking,
+        touch: touchRate, dirWR: miWR, intervalWR: ivWR, blocking, wonBlock: wonBlocked, blockSrc: blockingSrc || undefined,
         label: weak.length && !strong.length ? "LEMAH" : strong.length && !weak.length ? "KUAT" : weak.length ? "CAMPURAN" : "NETRAL",
       });
     }
@@ -416,6 +420,12 @@ function computeSignal(o) {
   }
   // ===== LEARN-BLOCK (authoritative) — dimatikan saat ACF explore>=1 (anti-snowball) =====
   if (explore < 1 && learn && learn.blocking && accepted) { accepted = false; reject = reject || "learn-block"; }
+  // ===== WONBLOCK SAFETY-NET (blocker OUTCOME per-key) — SELALU berlaku (juga saat ACF explore) =====
+  // BERBEDA dari learn-block di atas: wonblock bersumber pada fakta menang/kalah NYATA (res.won),
+  // BUKAN $ akun, dan cakupannya dibatasi covCap saat mining (<=35%) -> TIDAK bisa snowball.
+  // Karena itu ia TIDAK dimatikan oleh ACF explore (yang tujuannya mencegah $-blocker menumpuk).
+  // Hasilnya: konteks buruk tetap dibuang selama fase transisi, sampai profil $ akun terbentuk.
+  if (accepted && learn && learn.wonBlock) { accepted = false; reject = "won-block"; }
   // ===== MODEL LANJUTAN (B) per key — diteruskan ke engine/BOT (tanpa ambang global) =====
   let extras = {};
   try {

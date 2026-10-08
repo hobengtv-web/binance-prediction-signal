@@ -180,9 +180,12 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
 }
 
 const GATE_FEATS = { interval: (r) => r.interval, symbol: (r) => r.symbol, mode: (r) => r.mode, minute: (r) => r.minute, rsi: (r) => r.rsi, vol: (r) => r.vol, hour: (r) => r.hour, hist: (r) => r.hist, trend: (r) => r.trend,
-  // mikro-struktur (bucket) — aktif otomatis saat cukup record punya data ini
-  mAgree: (r) => r.mAgree == null ? "na" : (r.mAgree ? "agree" : "disagree"),
-  mAlign: (r) => r.mAlign == null ? "na" : String(r.mAlign),
+  // mikro-struktur (bucket) — aktif otomatis saat cukup record punya data ini.
+  // PENTING: NAMA field + bucket HARUS IDENTIK dgn capture.js featVal (mAgreeB/mAlignB/mRanZone/mBody).
+  // Dulu dipakai `mAgree`/`mAlign` (nama lama) -> rule hasil mining TIDAK PERNAH match saat diterapkan
+  // live (APPLY_KEYS & featVal memakai ...B) = "dead rule". Disamakan ke ...B.
+  mAgreeB: (r) => r.mAgreeB != null ? r.mAgreeB : "na",
+  mAlignB: (r) => r.mAlignB != null ? r.mAlignB : "na",
   mRanZone: (r) => r.mRanPos == null ? "na" : (r.mRanPos < 0.2 ? "low" : r.mRanPos > 0.8 ? "high" : "mid"),
   mBody: (r) => r.mO2 == null ? "na" : (r.mO2 > 0.5 ? "strong+" : r.mO2 < -0.5 ? "strong-" : "weak"),
 };
@@ -906,41 +909,57 @@ function mineWonBlockers(rows, opts = {}) {
   // Pilih metrik outcome: pnlReal ($ akun nyata) jika ada & cukup, else won (proxy).
   const hasPnl = rows.filter((r) => r.pnlReal != null).length >= o.minN;
   const usePnl = o.metric === "pnlReal" && hasPnl;
-  const M = usePnl ? (r) => r.pnlReal : (r) => r.won;     // nilai outcome per baris
-  const isOutcome = (r) => usePnl ? (typeof r.pnlReal === "number") : (r.won === 0 || r.won === 1);
-  const a = rows.filter((r) => (r.dir === "up" || r.dir === "down") && isOutcome(r));
-  if (a.length < 60) return { ok: false, n: a.length, rules: [], blockedFrac: 0, note: `data < 60`, metric: usePnl ? "pnlReal" : "won" };
-  const base = mean(a.map((r) => M(r)));
-  const FEATS = { hour: (r) => r.hour, rsi: (r) => r.rsiB, vol: (r) => r.vol, hist: (r) => r.hist, trend: (r) => r.trend, gap: (r) => r.gap, dir: (r) => r.dir, mv2: (r) => r.mv2B, minute: (r) => r.minute, mode: (r) => r.mode };
-  const val = (r, f) => (FEATS[f] ? String(FEATS[f](r)) : "");
-  const match = (r, k) => String(k).split("&").every((p) => { const i = p.indexOf("="); return val(r, p.slice(0, i)) === p.slice(i + 1); });
-  const cand = [];
-  const scan = (feats) => {
-    const keyf = (r) => feats.map((f) => `${f}=${FEATS[f](r)}`).join("&");
-    for (const [k, arr] of groupBy(a, keyf)) {
-      if (arr.length < o.minN) continue;
-      // Untuk $ (pnlReal): hitung mean $; Wilson hanya valid untuk 0/1 -> pakai mean & std untuk PnL kontinu
-      if (usePnl) {
-        const vals = arr.map((r) => M(r));
-        const m = mean(vals), sigma = stderr(vals);
-        if (m <= base - o.minDelta && sigma > 0 && m + 1.645 * sigma <= base) cand.push({ k, n: arr.length, wr: +m.toFixed(4), ub: +(m + 1.645 * sigma).toFixed(4) });
-      } else {
-        const wins = arr.filter((r) => r.won === 1).length, wr = wins / arr.length;
-        const ub = wilson(wins, arr.length).hi;
-        if (wr <= base - o.minDelta && ub < o.ubMax) cand.push({ k, n: arr.length, wr: +wr.toFixed(4), ub: +ub.toFixed(4) });
+  const directed = (r) => (r.dir === "up" || r.dir === "down");
+  const a0 = rows.filter((r) => directed(r) && (usePnl ? typeof r.pnlReal === "number" : (r.won === 0 || r.won === 1)));
+  if (a0.length < 60) return { ok: false, n: a0.length, rules: [], blockedFrac: 0, note: `data < 60`, metric: usePnl ? "pnlReal" : "won" };
+
+  // Mining dgn SATU metrik outcome (pnlReal = $ kontinu; won = 0/1).
+  const build = (usePnlMetric) => {
+    const M = usePnlMetric ? (r) => r.pnlReal : (r) => r.won;
+    const arr = rows.filter((r) => directed(r) && (usePnlMetric ? typeof r.pnlReal === "number" : (r.won === 0 || r.won === 1)));
+    const base = mean(arr.map((r) => M(r)));
+    const FEATS = { hour: (r) => r.hour, rsi: (r) => r.rsiB, vol: (r) => r.vol, hist: (r) => r.hist, trend: (r) => r.trend, gap: (r) => r.gap, dir: (r) => r.dir, mv2: (r) => r.mv2B, minute: (r) => r.minute, mode: (r) => r.mode };
+    const val = (r, f) => (FEATS[f] ? String(FEATS[f](r)) : "");
+    const match = (r, k) => String(k).split("&").every((p) => { const i = p.indexOf("="); return val(r, p.slice(0, i)) === p.slice(i + 1); });
+    const cand = [];
+    const scan = (feats) => {
+      const keyf = (r) => feats.map((f) => `${f}=${FEATS[f](r)}`).join("&");
+      for (const [k, grp] of groupBy(arr, keyf)) {
+        if (grp.length < o.minN) continue;
+        // Untuk $ (pnlReal): Wilson tak valid untuk PnL kontinu -> pakai mean & std (upper bound 1.645σ).
+        if (usePnlMetric) {
+          const vals = grp.map((r) => M(r));
+          const m = mean(vals), sigma = stderr(vals);
+          if (m <= base - o.minDelta && sigma > 0 && m + 1.645 * sigma <= base) cand.push({ k, n: grp.length, wr: +m.toFixed(4), ub: +(m + 1.645 * sigma).toFixed(4) });
+        } else {
+          const wins = grp.filter((r) => r.won === 1).length, wr = wins / grp.length;
+          const ub = wilson(wins, grp.length).hi;
+          if (wr <= base - o.minDelta && ub < o.ubMax) cand.push({ k, n: grp.length, wr: +wr.toFixed(4), ub: +ub.toFixed(4) });
+        }
       }
-    }
+    };
+    for (const f of Object.keys(FEATS)) scan([f]);
+    for (const f of ["rsi", "vol", "hour", "mv2", "trend", "gap"]) scan(["dir", f]);
+    cand.sort((x, y) => (usePnlMetric ? x.wr - y.wr : x.ub - y.ub));   // paling merugi dulu
+    const frac = (rules) => (rules.length ? arr.filter((r) => rules.some((c) => match(r, c.k))).length / arr.length : 0);
+    const rules = [];
+    for (const c of cand) { const t = rules.concat([c]); if (frac(t) <= o.covCap) rules.push(c); }
+    return { n: arr.length, base: +base.toFixed(4), rules, blockedFrac: +frac(rules).toFixed(3), metricLabel: usePnlMetric ? "pnlReal" : "won" };
   };
-  for (const f of Object.keys(FEATS)) scan([f]);
-  for (const f of ["rsi", "vol", "hour", "mv2", "trend", "gap"]) scan(["dir", f]);
-  // Sort: paling merugi dulu (lowest mean/WR).
-  cand.sort((x, y) => (usePnl ? x.wr - y.wr : x.ub - y.ub));
-  const frac = (rules) => (rules.length ? a.filter((r) => rules.some((c) => match(r, c.k))).length / a.length : 0);
-  const rules = [];
-  for (const c of cand) { const t = rules.concat([c]); if (frac(t) <= o.covCap) rules.push(c); }
-  const metricLabel = usePnl ? "pnlReal" : "won";
-  return { ok: true, n: a.length, base: +base.toFixed(4), rules, blockedFrac: +frac(rules).toFixed(3), covCap: o.covCap, metric: metricLabel,
-    note: `${rules.length} rule · blok ${(frac(rules) * 100).toFixed(0)}% (base ${metricLabel} ${(base * 100).toFixed(1)}${usePnl ? "%" : ""})` };
+
+  let res = build(usePnl);
+  // FALLBACK: bila metrik $ (pnlReal) TIDAK menghasilkan rule (kriteria statistik $ terlalu ketat pada
+  // n kecil -> 0 rule), pakai outcome `won` sbg safety-net. Tanpa ini blocker praktis KOSONG justru
+  // saat $ akun tersedia (momen paling butuh penjagaan). Fallback hanya bila `won` punya rule.
+  let fallbackFrom = null;
+  if (usePnl && res.rules.length === 0) {
+    const fb = build(false);
+    if (fb.rules.length > 0) { fallbackFrom = "pnlReal"; res = fb; }
+  }
+  const pctSuffix = res.metricLabel === "pnlReal" ? "%" : "";
+  return { ok: true, n: res.n, base: res.base, rules: res.rules, blockedFrac: res.blockedFrac, covCap: o.covCap, metric: res.metricLabel,
+    fallbackFrom: fallbackFrom || undefined,
+    note: `${res.rules.length} rule · blok ${(res.blockedFrac * 100).toFixed(0)}% (base ${res.metricLabel} ${(res.base * 100).toFixed(1)}${pctSuffix})${fallbackFrom ? " · fallback dari " + fallbackFrom : ""}` };
 }
 
 /* ---------- METRIK JENDELA BERGULIR (regime) ----------
@@ -1111,13 +1130,16 @@ function learnThresholds(rows, opts = {}) {
   const baseTest = evalTaken(test, []);
   const baseLbTest = stat(test, "won").lb;
   const candLbTest = testM.taken ? stat(test.filter((r) => applyThresholds2(r, sel)), "won").lb : 0;
+  const note = sel.map((x) => `${x.f} ${x.op} ${x.t}`).join(" & ") || "tidak ada threshold yang menambah nilai";
   return {
     ok: sel.length > 0, thresholds: sel, train: trainM, test: testM, baselineTest: baseTest,
     trainLb: cur.lb, testLb: +candLbTest.toFixed(4), baselineLbTest: +baseLbTest.toFixed(4),
     // menang out-of-sample: LB uji lebih tinggi DAN cakupan masih memadai DAN winrate naik
     // WR-first (konsisten dgn shouldPromote): menang bila WR uji naik >=2pp, cakupan memadai, LB tak merosot.
     beatsBaseline: testM.taken >= (o.minTakenTest || 10) && (testM.coverage || 0) >= o.minCov && (testM.takenWinrate - baseTest.takenWinrate) >= 0.02 && candLbTest >= baseLbTest - 0.01,
-    note: sel.map((x) => `${x.f} ${x.op} ${x.t}`).join(" & ") || "tidak ada threshold yang menambah nilai",
+    // reason eksplisit saat ok=false (dulu undefined -> sulit didiagnosa pada log refit).
+    reason: sel.length > 0 ? undefined : "tidak ada threshold yg menambah nilai (overfit / gain < minGain / cakupan kurang)",
+    note,
   };
 }
 

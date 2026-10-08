@@ -280,11 +280,19 @@ function computeSignal(o) {
   }
   // ===== PER-KEY $ EV GATE (rolling): blokir SELURUH key bila EV $ nyata-nya negatif =====
   if (P.keyEvGated) veto = veto || "key-ev";
+  // ===== KONTEKS MULTI-TF & OFI (nilai HARUS SAMA dgn rowsFrom learner) =====
+  // mAlign = jumlah TF (5m/15m/1h) yg tren-nya searah dir; mOfiAgree = 1/0 OFI mendukung dir.
+  // Dipakai reclaim/invert/confirm. Dihitung SEKALI agar rule learner berbasis fitur ini TIDAK "mati"
+  // (dulu _v/_vi tak memuatnya -> rule mAlign/mOfiAgree = dead rule saat diterapkan live).
+  const _alignNow = align || {};
+  const _mAlignNow = ["5m", "15m", "1h"].filter((t) => _alignNow[t] === currentDir).length;
+  const _ofiNow = (typeof FLOW !== "undefined" && FLOW.sessionOFI) ? FLOW.sessionOFI(sym, t0, nowSec) : null;
+  const _mOfiNow = (_ofiNow != null) ? (((currentDir === "up" && _ofiNow > 0.05) || (currentDir === "down" && _ofiNow < -0.05)) ? 1 : 0) : null;
   // ===== INVERT: konteks yg arah mentahnya TERBUKTI biasanya SALAH -> BALIK arah (up<->down) =====
   // Diterapkan SEBELUM gate, hanya bila konteks tervalidasi ketat (Wilson-LB flipped >=0.55, 2 paruh, n>=40).
   let inverted = null;
   if (!flatReason && (currentDir === "up" || currentDir === "down") && !liqLow && Array.isArray(P.invert) && P.invert.length) {
-    const _vi = { rsi, volRel2, gapPct: gateNow, surprise, histStrength: histTrend.strength, hourWIB: wibH };
+    const _vi = { rsi, volRel2, gapPct: gateNow, surprise, histStrength: histTrend.strength, hourWIB: wibH, mAlign: _mAlignNow, mOfiAgree: _mOfiNow };
     const partOK = (p) => p.f === "dir" ? (currentDir === p.v) : p.f === "grade" ? (grade === p.v)
       : p.f === "hourWIB" ? (wibH >= p.lo && wibH < p.hi) : (_vi[p.f] != null && _vi[p.f] >= p.lo && _vi[p.f] < p.hi);
     for (const c of P.invert) { if ((c.and || []).every(partOK)) { inverted = c; break; } }
@@ -297,11 +305,7 @@ function computeSignal(o) {
   // GUARD ANTI-KONFLIK: jangan terapkan confirm bila arah sudah di-INVERT (konteks confirm dilatih
   // pada arah MENTAH; mengaplikasikannya ke arah terbalik akan salah arti).
   if (!flatReason && !inverted && (currentDir === "up" || currentDir === "down") && Array.isArray(P.confirm) && P.confirm.length) {
-    const _of = (typeof FLOW !== "undefined" && FLOW.sessionOFI) ? FLOW.sessionOFI(sym, t0, nowSec) : null;
-    const _al = align || {};
-    const _mAlign = ["5m", "15m", "1h"].filter((t) => _al[t] === currentDir).length;
-    const _mOfi = (_of != null) ? (((currentDir === "up" && _of > 0.05) || (currentDir === "down" && _of < -0.05)) ? 1 : 0) : null;
-    const _vc = { mAlign: _mAlign, mOfiAgree: _mOfi };
+    const _vc = { mAlign: _mAlignNow, mOfiAgree: _mOfiNow };
     for (const c of P.confirm) { if ((c.and || []).every((p) => _vc[p.f] != null && _vc[p.f] >= p.lo && _vc[p.f] < p.hi)) { confirmed = c; break; } }
     if (confirmed) {
       const _prev = grade;
@@ -383,7 +387,7 @@ function computeSignal(o) {
   // GUARD ANTI-KONFLIK: reclaim (termasuk part `dir`) juga dilatih pada arah MENTAH -> jangan
   // terapkan saat arah sudah di-INVERT.
   if (!accepted && !inverted && currentDir && !liqLow && Array.isArray(P.reclaim) && P.reclaim.length) {
-    const _v = { rsi, volRel2, gapPct: gateNow, surprise, histStrength: histTrend.strength, hourWIB: wibH };
+    const _v = { rsi, volRel2, gapPct: gateNow, surprise, histStrength: histTrend.strength, hourWIB: wibH, mAlign: _mAlignNow, mOfiAgree: _mOfiNow };
     for (const c of P.reclaim) {
       if (c.f === "dir") { if (currentDir === c.v) reclaim = c; }
       else if (c.f === "grade") { if (grade === c.v) reclaim = c; }

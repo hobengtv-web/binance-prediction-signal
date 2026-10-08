@@ -127,6 +127,10 @@ function createEngine(deps) {
     let sec = 0;
     if (off >= 58 && off <= 76) sec = 60; else if (off >= 86 && off <= 106) sec = 90; else return;
     const key = sym + "_" + tf;
+    // KEY-NONTRADE (hard): jangan emit sinyal LATE utk key yg realized $-nya kronis negatif. Tanpa ini,
+    // gate di capture.js hanya menutup jalur 2s — sedangkan late justru kontributor entry terbesar
+    // (mis. BNB_5m: 77 dari 116 entry adalah late). Dibaca dari model veto (prof.keys[key].tradeable).
+    try { const _vm = getModel("veto"); const _pk = _vm && _vm.prof && _vm.prof.keys && _vm.prof.keys[key]; if (_pk && _pk.tradeable === false) return; } catch (_) {}
     const tfc = (market[sym] && market[sym].tf && market[sym].tf[tf]) || [];
     const c0 = tfc.find((c) => c.time === t0);
     const lock = c0 ? c0.open : (cur.plan && cur.plan.lock != null ? cur.plan.lock : null);

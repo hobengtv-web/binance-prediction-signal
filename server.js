@@ -577,11 +577,25 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
         }
       }
       write("learn_veto.json", Object.assign({ generated: new Date().toISOString(), trigger: "refit", version: ver }, hv, { prof: kv }));
+      // ===== AUDIT LEARNER PER KEY — satukan status belajar tiap key agar "learner berfungsi / tidak"
+      // terlihat pada hasil refit (/api/model/refit) & log. Membuktikan tiap key punya mekanisme aktif.
+      try {
+        const _kvk = (kv && kv.keys) || {};
+        for (const k of Object.keys(keyRes)) {
+          const e = _kvk[k] || {};
+          keyRes[k].tradeable = e.tradeable;
+          keyRes[k].tradeMeanPnl = e.tradeStat ? e.tradeStat.meanPnl : null;
+          keyRes[k].vetoRules = { rsi: (e.rsiBad || []).length, vol: (e.volBad || []).length, reclaim: (e.reclaim || []).length, invert: (e.invert || []).length, confirm: (e.confirm || []).length };
+          keyRes[k].keyEvGated = !!e.keyEvGated;
+          keyRes[k].wonBlockRules = (wonMap[k] && wonMap[k].rules) ? wonMap[k].rules.length : 0;
+          keyRes[k].mv2min = (mv2Map[k] && typeof mv2Map[k].minMv2 === "number") ? mv2Map[k].minMv2 : null;
+        }
+      } catch (_) {}
     } catch (_) {}
     // ===== ANALISIS KONTEKS FLAT per coin×TF (dari record flat informasional) =====
     try { const fstat = LEARNER.flatStats(records, { minN: Number(process.env.FLAT_MIN_N || 10) }); write("learn_flat.json", Object.assign({ generated: new Date().toISOString(), version: ver }, fstat)); res.flat = Object.keys(fstat.keys).map((k) => ({ k, n: fstat.keys[k].n, wr: fstat.keys[k].majorityWR, lb: fstat.keys[k].wilsonLB, edge: fstat.keys[k].edge })); } catch (_) {}
     const res = { trigger, at: new Date().toISOString(), rows: rows.length, ok: true, perKey: true, keys: keyRes, promote: anyPromote, gatesPromoted: anyGates,
-      why: Object.keys(keyRes).map((k) => `${k}:${keyRes[k].ok === false ? "data-kurang" : (keyRes[k].promote ? "PROMOTE" : "keep")}`).join(" · ") };
+      why: Object.keys(keyRes).map((k) => `${k}:${keyRes[k].ok === false ? "data-kurang" : (keyRes[k].tradeable === false ? "NONTRADE" : (keyRes[k].promote ? "PROMOTE" : "keep"))}`).join(" · ") };
     try { fs.appendFileSync(MODEL_LOG, JSON.stringify(res) + "\n"); } catch (_) {}
     console.log(`[REFIT] per-key · rows ${rows.length} · ${res.why}`);
     return res;

@@ -533,6 +533,7 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       metaMap[key] = { version: ver, promotedAt: new Date().toISOString(), n: kr.length, rows: cand.rows, metrics: candEval, why: dec.why, promoted: !!dec.promote };
       if (dec.promote) anyPromote = true;
       keyRes[key] = { n: kr.length, promote: dec.promote, why: dec.why, coverage: liveEval ? liveEval.coverage : null, gatesPromoted,
+        gatesReason: gatesPromoted ? undefined : (th && th.reason), gatesNote: th && th.note,
         blockers: candBlockersEff, candPnl: candPnl ? candPnl.meanPnl : null, basePnl: baselinePnl ? baselinePnl.meanPnl : null, baseN: baselinePnl ? baselinePnl.n : null };
     }
     write("learn_gate.json", { generated: new Date().toISOString(), source: "ledger", version: ver, byKey: gateMap });

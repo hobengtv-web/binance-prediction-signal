@@ -515,12 +515,15 @@ function computeSignal(o) {
   // produced = sesi ini MEMPRODUKSI sinyal berarah (non-flat) -> dipakai ANTI-SNOWBALL (mv2Scale).
   // accepted = keputusan LEARNER -> dipakai LEVEL entry (di antara sesi bersinyal). Terpisah, tidak menimpa.
   _acf.record(_key, t0, !(flatReason && !flatEntry), !!accepted);
-  // ===== GOLDEN SIGN (dipakai BOT utk memperbesar stake; env GOLDEN_BET_PCT) =====
-  // rsi-5m 65-80 & |surprise|>=10 pada sinyal 2s: WR terukur ~73% (n=151, STABIL out-of-sample:
-  // paruh-1 73.9% -> paruh-2 72.0%), frekuensi ~2% sinyal accepted. Ini BUKAN 100% (100% = overfit);
-  // sizing aman = fraksi dari Kelly (breakeven stake 30% = WR 57.6%). Watchdog WR ada di BOT.
-  const goldenWhy = (!flatReason && (currentDir === "up" || currentDir === "down")
-    && rsi != null && rsi >= 65 && rsi < 80 && Math.abs(surprise) >= 10) ? "rsi65-80|surprise>=10" : null;
+  // ===== GOLDEN (dipakai BOT utk memperbesar stake). 2 pemicu, prefix menentukan % di BOT: =====
+  //  sign: rsi-5m 65-80 & |surprise|>=10 -> WR ~73% (n=151, stabil OOS). Target = WINRATE.
+  //  mom : mv2>=0.03 & (volRel2>=2 | |surprise|>=10) -> "GOLDEN MOMENTUM": LONJAKAN favorable ~2x
+  //        (meanEnd +0.13 vs base +0.02, P(gerak>=0,5%) ~11-13%; walk-forward +0.116->+0.152). Target = PROFIT.
+  //  BUKAN 100% (100% = overfit/noise). Prioritas: sign > mom. Watchdog ROI ada di BOT.
+  const _goldenDirOK = (!flatReason && (currentDir === "up" || currentDir === "down"));
+  const _goldenSign = (_goldenDirOK && rsi != null && rsi >= 65 && rsi < 80 && Math.abs(surprise) >= 10) ? "sign:rsi65-80&surprise>=10" : null;
+  const _goldenMom = (_goldenDirOK && mv2 >= 0.03 && (volRel2 >= 2 || Math.abs(surprise) >= 10)) ? "mom:mv2>=0.03&vol2" : null;
+  const goldenWhy = _goldenSign || _goldenMom;
   return {
     ok: true,
     skipped: (flatReason && !flatEntry) ? flatReason : undefined,

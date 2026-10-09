@@ -344,7 +344,7 @@ try {
   for (const r of ledger.values()) { if (!r.gate) continue; const k = r.asset + "_" + r.interval; (_byK[k] = _byK[k] || []).push(r); }
   for (const k of Object.keys(_byK)) {
     const arr = _byK[k].sort((a, b) => (a.t0 || 0) - (b.t0 || 0)).slice(-40);
-    for (const r of arr) ACF.record(k, r.t0, !!r.gate.accepted);
+    for (const r of arr) ACF.record(k, r.t0, !(r.sig && (r.sig.skipped === "flat-noise" || r.sig.skipped === "flat-price")), !!(r.gate && r.gate.accepted));
   }
 } catch (_) {}
 const MODEL_DIR = path.join(LEDGER_DIR, "..", "models");

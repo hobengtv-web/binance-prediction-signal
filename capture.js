@@ -42,37 +42,40 @@ const ACF_ON = process.env.ACF !== "0";
 const ACF_WINDOW = Math.max(8, parseInt(process.env.ACF_WINDOW || "24", 10));
 const ACF_MIN = Math.max(6, parseInt(process.env.ACF_MIN || "8", 10));
 const _acf = (() => {
-  const hist = {};   // key -> [{t0, a}]
+  // hist[key] = [{t0, s, a}] : s=1 bila sesi MEMPRODUKSI sinyal berarah (non-flat); a=1 bila DITERIMA.
+  // ===== PEMISAHAN TANGGUNG JAWAB (sesuai prinsip) =====
+  //  • ANTI-SNOWBALL (pasokan SIGNAL, bukan $): mv2Scale pakai `s` -> longgarkan gate mv2 bila sinyal menipis.
+  //  • LEVEL (pasokan ENTRY): level pakai a/s -> longgarkan gate LEARNER HANYA bila entry (di antara sesi
+  //    bersinyal) benar-benar kritis. Rate dihitung di antara sesi BERSINYAL, sehingga `flat` dari gate mv2
+  //    TIDAK mendilusi -> gate $-learner tidak dimatikan terus-menerus (dulu ini bug: explore menyala ~52%).
+  const hist = {};
+  function _win(key) { return (hist[key] || []).slice(-ACF_WINDOW); }
   function level(key, noProfile) {
     if (!ACF_ON) return 0;
-    if (noProfile) return 3;
-    const h = hist[key] || [];
-    const recent = h.slice(-ACF_WINDOW);
-    if (recent.length < ACF_MIN) return 0;
-    const acc = recent.reduce((s, x) => s + x.a, 0);
-    if (acc === 0) return 3;
-    const rate = acc / recent.length;
+    if (noProfile) return 3;                       // key tanpa profil -> eksplorasi penuh
+    const r = _win(key);
+    if (r.length < ACF_MIN) return 0;
+    const sig = r.reduce((s, x) => s + x.s, 0);
+    if (sig === 0) return 3;                       // TIDAK ada sinyal sama sekali -> darurat
+    const acc = r.reduce((s, x) => s + x.a, 0);
+    const rate = acc / sig;                        // penerimaan DI ANTARA sesi bersinyal
     return rate < 0.02 ? 3 : rate < 0.05 ? 2 : rate < 0.12 ? 1 : 0;
   }
-  function record(key, t0, accepted) {
+  function record(key, t0, produced, accepted) {
     const h = hist[key] || (hist[key] = []);
     const last = h[h.length - 1];
-    if (last && last.t0 === t0) { last.a = accepted ? 1 : 0; return; }   // dedupe (engine & capture)
-    h.push({ t0, a: accepted ? 1 : 0 });
+    if (last && last.t0 === t0) { last.s = produced ? 1 : 0; last.a = accepted ? 1 : 0; return; }  // dedupe (engine & capture)
+    h.push({ t0, s: produced ? 1 : 0, a: accepted ? 1 : 0 });
     if (h.length > 400) h.splice(0, h.length - 400);
   }
-  // ===== ANTI-AKUMULASI (FLOOR THROUGHPUT) =====
-  // Masalah: makin banyak gate + learner, aturan bisa MENUMPUK & menutup SEMUA entry (sumber habis).
-  // Gate mv2 (flat-noise) adalah penyusut terbesar & TIDAK dikontrol level() (karena level hanya
-  // melonggarkan gate hilir). Fungsi ini: bila ENTRY (accepted) per key dalam window MENIPIS, longgarkan
-  // ambang mv2 bertahap -> jamin masih ada entry, tanpa menunggu sampai nol.
-  function accCount(key) { const r = (hist[key] || []).slice(-ACF_WINDOW); return r.reduce((s, x) => s + x.a, 0); }
+  function accCount(key) { return _win(key).reduce((s, x) => s + x.a, 0); }
+  // ANTI-AKUMULASI pada gate mv2 (penyusut sinyal terbesar): bila PASOKAN SINYAL menipis -> longgarkan.
   function mv2Scale(key) {
     if (!ACF_ON) return 1;
-    const r = (hist[key] || []).slice(-ACF_WINDOW);
-    if (r.length < ACF_MIN) return 1;      // belum cukup data -> jangan longgarkan (biar kalibrasi jalan)
-    const acc = r.reduce((s, x) => s + x.a, 0);
-    return acc <= 0 ? 0.3 : acc <= 1 ? 0.5 : acc <= 3 ? 0.75 : 1;   // 0 entry -> 30% ambang; 1 -> 50%; <=3 -> 75%
+    const r = _win(key);
+    if (r.length < ACF_MIN) return 1;
+    const sig = r.reduce((s, x) => s + x.s, 0);
+    return sig <= 1 ? 0.3 : sig <= 3 ? 0.5 : sig <= 6 ? 0.75 : 1;   // sinyal 0-1 -> 30% ambang; <=3 -> 50%; <=6 -> 75%
   }
   return { level, record, mv2Scale, accCount, debug: () => hist };
 })();
@@ -506,7 +509,9 @@ function computeSignal(o) {
     power = _finalizePower(parts);
   } catch (_) {}
   // ACF: rekam keputusan akhir sesi ini (untuk lantai cakupan adaptif / anti-snowball)
-  _acf.record(_key, t0, (flatReason && !flatEntry) ? false : !!accepted);
+  // produced = sesi ini MEMPRODUKSI sinyal berarah (non-flat) -> dipakai ANTI-SNOWBALL (mv2Scale).
+  // accepted = keputusan LEARNER -> dipakai LEVEL entry (di antara sesi bersinyal). Terpisah, tidak menimpa.
+  _acf.record(_key, t0, !(flatReason && !flatEntry), !!accepted);
   return {
     ok: true,
     skipped: (flatReason && !flatEntry) ? flatReason : undefined,

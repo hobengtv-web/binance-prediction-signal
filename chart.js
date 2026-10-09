@@ -156,7 +156,7 @@
     const t1 = (r.end - 1 < n) ? cs[r.end - 1].time : cs[n - 1].time + (r.end - 1 - (n - 1)) * barSec;
     const span = Math.max(1, t1 - t0);
     const xOf = (t) => plotL + ((t - t0) / span) * plotW;
-    const barW = Math.max(2, (plotW / r.vis) * 0.66);
+    const barW = Math.max(4, (plotW / r.vis) * 0.66);
 
     // price bounds
     let pMin = Infinity, pMax = -Infinity;
@@ -225,7 +225,7 @@
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(x, yOf(c.high)); ctx.lineTo(x, yOf(c.low)); ctx.stroke();
         const yo = yOf(c.open), yc = yOf(c.close);
-        const top = Math.min(yo, yc), bh = Math.max(1, Math.abs(yc - yo));
+        const top = Math.min(yo, yc), bh = Math.max(2, Math.abs(yc - yo));
         ctx.fillRect(x - barW / 2, top, barW, bh);
       }
     } else {

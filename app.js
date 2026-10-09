@@ -61,8 +61,8 @@ const REST_HOSTS = [
   "https://api1.binance.com",
 ];
 const WS_HOSTS = [
-  "wss://stream.binance.com:9443",
   "wss://data-stream.binance.vision",
+  "wss://stream.binance.com:9443",
   "wss://stream1.binance.com:9443",
 ];
 

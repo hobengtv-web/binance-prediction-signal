@@ -1205,21 +1205,31 @@ http.createServer(async (req, res) => {
     if (u.searchParams.get("dump") === "1") {
       res.end(JSON.stringify({ stats: st, records: [...ledger.values()] }));
     } else if (u.searchParams.get("n")) {
-      // ENDPOINT RINGAN: N record terakhir, DITRIM ke field yg dipakai panel akurasi saja.
+      // ENDPOINT RINGAN: record per sesi, DITRIM ke field yg dipakai panel akurasi saja.
       // (record penuh ~1,7KB berisi micro/ind/learn → 500 record = 0,8MB; trim → ~0,12MB.)
-      const n = Math.max(1, Math.min(3000, Number(u.searchParams.get("n")) || 600));
-      // PENTING: ambil N record ber-ARAH (sig.dir up/down) terakhir — BUKAN N record terakhir apa saja.
-      // Di pasar sepi, ratusan record terakhir = flat/noise (dir null) → panel akurasi jadi kehilangan
-      // sesi ber-sinyal (data lama seperti hilang). Filter dir dulu, baru slice N terakhir.
-      // Kirim N sesi yang PUNYA SINYAL ARAH & BUKAN ditolak (accepted !== false) — persis yg ditampilkan
-      // panel akurasi. Rejected/flat/lebih-lama tak dipakai panel, jadi jangan dihitung ke kuota N.
-      const arr = [...ledger.values()].filter((r) => r.sig
-        && (r.sig.dir === "up" || r.sig.dir === "down" || r.sig.verdict === "up" || r.sig.verdict === "down")
+      const nowSec = Math.floor(Date.now() / 1000);
+      // WINDOW 34 jam (sinkron panel akurasi / DESP_WINDOW_MS di app.js). Filter window DULU,
+      // lalu ambil top-N PER KEY (asset_interval) berdasarkan t0 — bukan slice(-N) sekadar.
+      // Slice insertion-order saja (sebelumnya) membuat tf jarang (15m/1h) tertindih record segar
+      // 5m, sehingga kolom panel akurasi 15m/1h tampak kosong walaupun sinyal tersimpan.
+      const DISP = nowSec - 34 * 3600;
+      const n = Math.max(1, Math.min(500, Number(u.searchParams.get("n")) || 600));  // cap per key
+      // Kirim record ber-ARAH (sig dir up/down) & BUKAN ditolak (accepted !== false) — persis yg
+      // ditampilkan panel akurasi. Rejected/flat tak dipakai panel, jadi tidak dihitung ke kuota N.
+      const arr = [...ledger.values()].filter((r) => r.t0 >= DISP
+        && r.sig && (r.sig.dir === "up" || r.sig.dir === "down" || r.sig.verdict === "up" || r.sig.verdict === "down")
         && r.sig.accepted !== false);
+      // top-N per asset_interval by t0 (terbaru di atas). Ini memastikan tiap tf (5m/15m/1h) dapat
+      // sesi terbaru yang berada di window 34h, tidak bergantung urutan insert global.
+      const perKey = {};
+      for (const r of arr) { (perKey[r.asset + "_" + r.interval] = perKey[r.asset + "_" + r.interval] || []).push(r); }
+      let out = [];
+      for (const k of Object.keys(perKey)) { perKey[k].sort((a, b) => b.t0 - a.t0); out.push(...perKey[k].slice(0, n)); }
+      out.sort((a, b) => b.t0 - a.t0);
       const trim = (r) => ({ k: r.k, t0: r.t0, asset: r.asset, interval: r.interval,
         sig: r.sig ? { verdict: r.sig.verdict, dir: r.sig.dir, accepted: r.sig.accepted, grade: r.sig.grade, flatEntry: r.sig.flatEntry || null } : null,
         res: r.res ? { won: r.res.won, actual: r.res.actual, lock: r.res.lock, close: r.res.close, trade: r.res.trade } : null });
-      res.end(JSON.stringify({ stats: st, records: arr.slice(-n).map(trim) }));
+      res.end(JSON.stringify({ stats: st, records: out.map(trim) }));
     } else {
       res.end(JSON.stringify(st));
     }

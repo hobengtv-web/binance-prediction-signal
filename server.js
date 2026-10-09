@@ -892,7 +892,7 @@ async function proxyBinanceV3(pathname, search) {
   _pxInflight.set(key, p);
   try { return await p; } finally { _pxInflight.delete(key); }
 }
-const BN_WS_HOSTS = ["wss://stream.binance.com:9443", "wss://data-stream.binance.vision"];
+const BN_WS_HOSTS = ["wss://data-stream.binance.vision", "wss://stream.binance.com:9443"];
 let _mstreamClients = new Set(), _mstreamWs = null, _mstreamIdx = 0, _mstreamGotData = false, _mstreamPoll = null, _mstreamPollN = 0;
 function _mstreamUrl() {
   const streams = [];

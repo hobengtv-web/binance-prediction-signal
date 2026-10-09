@@ -61,7 +61,20 @@ const _acf = (() => {
     h.push({ t0, a: accepted ? 1 : 0 });
     if (h.length > 400) h.splice(0, h.length - 400);
   }
-  return { level, record, debug: () => hist };
+  // ===== ANTI-AKUMULASI (FLOOR THROUGHPUT) =====
+  // Masalah: makin banyak gate + learner, aturan bisa MENUMPUK & menutup SEMUA entry (sumber habis).
+  // Gate mv2 (flat-noise) adalah penyusut terbesar & TIDAK dikontrol level() (karena level hanya
+  // melonggarkan gate hilir). Fungsi ini: bila ENTRY (accepted) per key dalam window MENIPIS, longgarkan
+  // ambang mv2 bertahap -> jamin masih ada entry, tanpa menunggu sampai nol.
+  function accCount(key) { const r = (hist[key] || []).slice(-ACF_WINDOW); return r.reduce((s, x) => s + x.a, 0); }
+  function mv2Scale(key) {
+    if (!ACF_ON) return 1;
+    const r = (hist[key] || []).slice(-ACF_WINDOW);
+    if (r.length < ACF_MIN) return 1;      // belum cukup data -> jangan longgarkan (biar kalibrasi jalan)
+    const acc = r.reduce((s, x) => s + x.a, 0);
+    return acc <= 0 ? 0.3 : acc <= 1 ? 0.5 : acc <= 3 ? 0.75 : 1;   // 0 entry -> 30% ambang; 1 -> 50%; <=3 -> 75%
+  }
+  return { level, record, mv2Scale, accCount, debug: () => hist };
 })();
 
 /* ===== VETO "NO-EDGE" (default ON; matikan dengan env TA_VETO=0) =====
@@ -143,7 +156,10 @@ function computeSignal(o) {
   // ADAPTIF PER KEY (learner: learn_mv2.json). Fallback env MIN_MV2_PCT bila model belum ada.
   const _mv2M = (() => { try { const m = (typeof getModel === "function") ? getModel("mv2") : null; return (m && m.byKey && m.byKey[_key]) ? m.byKey[_key] : null; } catch (_) { return null; } })();
   const MIN_MV2_PCT = (_mv2M && typeof _mv2M.minMv2 === "number") ? _mv2M.minMv2 : Number(process.env.MIN_MV2_PCT != null ? process.env.MIN_MV2_PCT : 0.015);
-  const flatReason = (currentDir === "flat") ? "flat-price" : ((MIN_MV2_PCT > 0 && mv2 < MIN_MV2_PCT) ? "flat-noise" : null);
+  // ANTI-AKUMULASI: longgarkan ambang mv2 bila entry per key MENIPIS (floor throughput) — gate mv2
+  // penyusut entry terbesar & tak dikontrol level(). Jamin tetap ada entry (tidak menunggu 0).
+  const MIN_MV2_EFF = MIN_MV2_PCT * _acf.mv2Scale(_key);
+  const flatReason = (currentDir === "flat") ? "flat-price" : ((MIN_MV2_EFF > 0 && mv2 < MIN_MV2_EFF) ? "flat-noise" : null);
   // ===== ARAH "SILENT" (permintaan user): SETIAP sesi tetap punya arah utk direkam & DIPELAJARI — 
   // walau tidak layak entry (flat). Tujuannya learner bisa belajar MANANG/KALAH di tiap sesi.
   // Ini TIDAK mengubah accepted (flat tetap accepted=false) & TIDAK ditampilkan sebagai rekomendasi.
@@ -503,7 +519,7 @@ function computeSignal(o) {
       invert: (inverted && !flatReason) ? { and: inverted.and, n: inverted.n, flipWR: inverted.flipWR, lbFlip: inverted.lbFlip } : null,
       confirm: (confirmed && !flatReason) ? { and: confirmed.and, n: confirmed.n, wr: confirmed.wr, lb: confirmed.lb, from: confirmed.from || null, to: confirmed.to || grade } : null,
       skipped: (flatReason && !flatEntry) ? flatReason : null,
-      volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5), mv2MinPct: +MIN_MV2_PCT.toFixed(4),
+      volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5), mv2MinPct: +MIN_MV2_EFF.toFixed(4),
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
       ind,   // RECORDER: EMA9/EMA21 (crossover) + MACD + pola candle 5m — untuk uji jendela panjang
       ind1m, // RECORDER: RSI(14)+Stochastic(14,3) 1m (candle 1m selesai) — uji reversal 1m

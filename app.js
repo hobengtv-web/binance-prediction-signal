@@ -60,9 +60,11 @@ const REST_HOSTS = [
   "https://api.binance.com",
   "https://api1.binance.com",
 ];
+// Host WS Binance: gunakan data-stream.binance.vision (sertifikat valid). stream.binance.com:9443
+// certnya EXPIRED (CN invalid) -> beri error koneksi & bikin klien retry ke host error. Dipertahankan
+// sebagai fallback terakhir hanya bila data-stream down, tapi tidak jadi host pertama.
 const WS_HOSTS = [
   "wss://data-stream.binance.vision",
-  "wss://stream.binance.com:9443",
   "wss://stream1.binance.com:9443",
 ];
 
@@ -458,34 +460,18 @@ function mergeOlder(sym, ones) {
 }
 
 async function fetchOlder(sym, beforeSec, limit) {
-  // Prefer REAL 1s klines (Binance spot supports interval=1s). Only fall back to
-  // expanding 1m candles into synthetic 1s when the source returns coarse data.
+  // Binance REST tidak dukung interval=1s -> fetch direct `interval=1s` selalu gagal (CORS + 400).
+  // Pake PROXY SERVER (same-origin, tanpa CORS) berbasis 1m candles, lalu kembangkan jadi 1s via
+  // expandTo1s. Berlaku untuk semua aset termasuk BNB. (Live 1s tetap via WS.)
   const histLimit = Math.min(limit, 1000);
-  const toOnes = (candles) => {
-    if (!candles || candles.length < 2) return candles || [];
-    const gap = candles[1].time - candles[0].time;
-    return gap > 1 ? expandTo1s(candles) : candles;
-  };
-  // 1) LANGSUNG dari Binance (IP user) — utamakan agar server tak menanggung beban pasar.
   try {
-    const rows = await fetchJSON(`/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=1s&limit=${histLimit}&endTime=${beforeSec * 1000 - 1000}`);
-    if (Array.isArray(rows) && rows.length) {
-      const candles = rows.map((r) => ({
-        time: Math.floor(r[0] / 1000), open: +r[1], high: +r[2], low: +r[3], close: +r[4],
-        vol: +r[5], trades: +r[8], openTime: r[0], closeTime: r[6],
-      }));
-      return toOnes(candles);
-    }
-  } catch (e) { console.warn("[HISTORY] direct Binance fetch failed:", e && e.message); }
-  // 2) fallback: proxy server (same-origin)
-  try {
-    const r = await fetch(`/api/klines?symbol=${sym}&tf=1s&before=${beforeSec}&limit=${histLimit}`);
+    const r = await fetch(`/api/klines?symbol=${sym}&tf=1m&before=${beforeSec}&limit=${histLimit}`);
     if (r.ok) {
       const j = await r.json();
-      if (j && Array.isArray(j.candles) && j.candles.length) return toOnes(j.candles);
+      if (j && Array.isArray(j.candles) && j.candles.length) return expandTo1s(j.candles);
     }
-  } catch (e) { console.warn("[HISTORY] proxy fetch failed:", e && e.message); }
-  throw new Error("history 1s gagal (binance & proxy)");
+  } catch (e) { console.warn("[HISTORY] proxy 1m fetch failed:", e && e.message); }
+  throw new Error("history gagal (proxy 1m)");
 }
 
 // Expand 1m candles into 60 one-second candles (same OHLC per second within the minute)

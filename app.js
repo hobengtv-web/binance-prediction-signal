@@ -608,6 +608,37 @@ function feedCandle(symKey, tf, candle) {
   updateGap();
 }
 
+// BACKFILL 1s (REST): tiap 4s tarik ~20 candle 1s terakhir via proxy Binance lalu MERGE by time
+// ke cache 1s. feedCandle append-only (tak bisa menambal second yang TERLEWAT saat WS/relay gap);
+// merge by time-lah yang menutup celah -> candle 5s tidak lagi flat/tipis ("patah-patah").
+let _backfillBusy = false;
+async function backfillRecent1s() {
+  if (_backfillBusy) return;
+  _backfillBusy = true;
+  try {
+    for (const sym of Object.keys(SYMBOLS)) {
+      try {
+        const rows = await fetchJSON(`/api/v3/klines?symbol=${SYMBOLS[sym].toUpperCase()}&interval=1s&limit=20`);
+        if (!Array.isArray(rows)) continue;
+        const store = state.cache[sym] && state.cache[sym]["1s"];
+        if (!store) continue;
+        const map = new Map();
+        for (const c of store.candles) map.set(c.time, c);
+        for (const k of rows) {
+          if (!k || !Array.isArray(k)) continue;
+          const t = Math.floor(k[0] / 1000);
+          map.set(t, { time: t, open: +k[1], high: +k[2], low: +k[3], close: +k[4], vol: +k[5], trades: +k[8], openTime: k[0], closeTime: k[6] });
+        }
+        store.candles = [...map.values()].sort((a, b) => a.time - b.time);
+        if (store.candles.length > HISTORY_CAP_1S) store.candles = store.candles.slice(-HISTORY_CAP_1S);
+        rebuild5s(sym);
+      } catch (_) {}
+    }
+    scheduleRender();
+  } finally { _backfillBusy = false; }
+}
+setInterval(backfillRecent1s, 4000);
+
 function handleTicker(d) {
   const symKey = symKeyOf(d.s); if (!symKey) return;   // FIX: BTC/ETH/BNB
   state.prevPrice[symKey] = state.ticker[symKey] ? state.ticker[symKey].last : null;

@@ -515,6 +515,12 @@ function computeSignal(o) {
   // produced = sesi ini MEMPRODUKSI sinyal berarah (non-flat) -> dipakai ANTI-SNOWBALL (mv2Scale).
   // accepted = keputusan LEARNER -> dipakai LEVEL entry (di antara sesi bersinyal). Terpisah, tidak menimpa.
   _acf.record(_key, t0, !(flatReason && !flatEntry), !!accepted);
+  // ===== GOLDEN SIGN (dipakai BOT utk memperbesar stake; env GOLDEN_BET_PCT) =====
+  // rsi-5m 65-80 & |surprise|>=10 pada sinyal 2s: WR terukur ~73% (n=151, STABIL out-of-sample:
+  // paruh-1 73.9% -> paruh-2 72.0%), frekuensi ~2% sinyal accepted. Ini BUKAN 100% (100% = overfit);
+  // sizing aman = fraksi dari Kelly (breakeven stake 30% = WR 57.6%). Watchdog WR ada di BOT.
+  const goldenWhy = (!flatReason && (currentDir === "up" || currentDir === "down")
+    && rsi != null && rsi >= 65 && rsi < 80 && Math.abs(surprise) >= 10) ? "rsi65-80|surprise>=10" : null;
   return {
     ok: true,
     skipped: (flatReason && !flatEntry) ? flatReason : undefined,
@@ -529,6 +535,7 @@ function computeSignal(o) {
       skipped: (flatReason && !flatEntry) ? flatReason : null,
       volRel2: +volRel2.toFixed(4), surprise: +surprise.toFixed(4), mv2: +mv2.toFixed(5), mv2MinPct: +MIN_MV2_EFF.toFixed(4),
       rsi: rsi != null ? +rsi.toFixed(2) : null, histStrength: histTrend.strength,
+      golden: goldenWhy || undefined,
       ind,   // RECORDER: EMA9/EMA21 (crossover) + MACD + pola candle 5m — untuk uji jendela panjang
       ind1m, // RECORDER: RSI(14)+Stochastic(14,3) 1m (candle 1m selesai) — uji reversal 1m
       rewardPct: +rewardPct.toFixed(4), liqRatio: +liqRatio.toFixed(3), liqLow: !!liqLow,

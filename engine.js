@@ -99,6 +99,7 @@ function createEngine(deps) {
         if (onEvent && latMs <= EMIT_MAX_MS) {
           try { onEvent({ type: "start", sym, tf, t0: t0, dir: r.signal.dir, accepted: !!r.signal.accepted,
             grade: r.signal.grade || null, surprise: r.signal.surprise != null ? +r.signal.surprise.toFixed(2) : null,
+            golden: r.signal.golden || null,
             lock: r.signal.lock != null ? r.signal.lock : null, flatEntry: !!r.signal.flatEntry, at: Date.now(),
             spreadMaxPct: (typeof r.signal.spreadMaxPct === "number") ? r.signal.spreadMaxPct : null,
             stakeMult: (typeof r.signal.stakeMult === "number") ? r.signal.stakeMult : null,

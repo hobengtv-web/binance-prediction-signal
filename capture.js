@@ -685,4 +685,4 @@ function createCapture(deps) {
   return { start, tick, captureOne, status: () => stats };
 }
 
-module.exports = { createCapture, computeSignal, DUR_S, VOL_TYPICAL };
+module.exports = { createCapture, computeSignal, DUR_S, VOL_TYPICAL, ACF: _acf };

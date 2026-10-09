@@ -334,7 +334,19 @@ function mergeRecord(r) {
 }
 
 const LEARNER = require("./learner");
-const { createCapture } = require("./capture");
+const { createCapture, ACF } = require("./capture");
+// ===== SEED ACF dari LEDGER =====
+// ACF (anti-akumulasi / floor throughput) semula in-memory -> kosong tiap restart -> tak aktif sampai
+// 8 sesi (warmup). Seed dari ledger agar langsung berfungsi: untuk tiap key, setor >=24 sesi terakhir
+// (accepted) ke ACF. Dengan begitu mv2Scale/level() siap sejak detik pertama setelah deploy.
+try {
+  const _byK = {};
+  for (const r of ledger.values()) { if (!r.gate) continue; const k = r.asset + "_" + r.interval; (_byK[k] = _byK[k] || []).push(r); }
+  for (const k of Object.keys(_byK)) {
+    const arr = _byK[k].sort((a, b) => (a.t0 || 0) - (b.t0 || 0)).slice(-40);
+    for (const r of arr) ACF.record(k, r.t0, !!r.gate.accepted);
+  }
+} catch (_) {}
 const MODEL_DIR = path.join(LEDGER_DIR, "..", "models");
 const MODEL_CUR = path.join(MODEL_DIR, "current");
 const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");

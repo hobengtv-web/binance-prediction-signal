@@ -805,7 +805,7 @@ function minePnl(rows, opts = {}) {
 /* B12: EV SADAR-SPREAD per key — batas spread ASK-BID maksimum saat entry di mana rata-rata $ masih >= 0.
    Dipakai BOT untuk skip entry bila spread > batas ini (per key, bukan ambang global). */
 function mineSpread(rows, opts = {}) {
-  const o = Object.assign({ minN: 6, thrPct: 0 }, opts);
+  const o = Object.assign({ minN: 6, thrPct: 0, minKeep: 0.3 }, opts);
   const a = rows.filter((r) => r.pnlReal != null && typeof r.spreadPct === "number");
   if (a.length < o.minN) return { ok: false, n: a.length, spreadMaxPct: null, note: "data spread kurang" };
   // PENTING: bot.entrySpreadPct dalam PERSEN (mis. 8 = 8%), bukan fraksi. Grid juga dalam %.
@@ -814,6 +814,7 @@ function mineSpread(rows, opts = {}) {
   for (const X of grid) {
     const sub = a.filter((r) => r.spreadPct <= X);
     if (sub.length < o.minN) continue;
+    if (sub.length < o.minKeep * a.length) continue;   // ANTI-SNOWBALL: lantai cakupan (jangan blokir >70%)
     const m = mean(sub.map((r) => r.pnlReal));
     if (m >= o.thrPct) best = { X, n: sub.length, meanPnl: +m.toFixed(3), cov: +(sub.length / a.length).toFixed(3) };
   }
@@ -823,7 +824,7 @@ function mineSpread(rows, opts = {}) {
 
 /* B17: SELECTIVE ENTRY by SKOR sinyal (power.pct) — ambang minimum skor agar $ >= 0. */
 function mineScore(rows, opts = {}) {
-  const o = Object.assign({ minN: 6, thrPct: 0 }, opts);
+  const o = Object.assign({ minN: 6, thrPct: 0, minKeep: 0.3 }, opts);
   const a = rows.filter((r) => r.pnlReal != null && typeof r.powerPct === "number");
   if (a.length < o.minN) return { ok: false, n: a.length, minPct: null, note: "data skor kurang" };
   const grid = [0, 20, 30, 40, 50, 60, 70, 80];
@@ -831,6 +832,7 @@ function mineScore(rows, opts = {}) {
   for (const X of grid) {
     const sub = a.filter((r) => r.powerPct >= X);
     if (sub.length < o.minN) continue;
+    if (sub.length < o.minKeep * a.length) continue;   // ANTI-SNOWBALL: lantai cakupan
     const m = mean(sub.map((r) => r.pnlReal));
     if (m >= o.thrPct) best = { X, n: sub.length, meanPnl: +m.toFixed(3) };
   }
@@ -880,7 +882,7 @@ function learnTA(rows, opts = {}) {
    Pilih t (mv2 minimal) yg MEMAKSIMALKAN winrate ARAH dgn syarat sampel n >= minN, agar sinyal
    tetap ada (tak snowball) tapi arah tetap tajam. Basis outcome nyata (res.won). */
 function mineMv2(rows, opts = {}) {
-  const o = Object.assign({ grid: [0, 0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.008, 0.01, 0.012, 0.015, 0.02, 0.025, 0.03], minN: 150, maxT: 0.03, minGain: 0.02 }, opts);
+  const o = Object.assign({ grid: [0, 0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.008, 0.01, 0.012, 0.015, 0.02, 0.025, 0.03], minN: 150, maxT: 0.03, minGain: 0.02, minKeep: 0.3 }, opts);
   const a = rows.filter((r) => (r.dir === "up" || r.dir === "down") && typeof r.mv2 === "number" && (r.won === 0 || r.won === 1));
   if (a.length < o.minN) return { ok: false, n: a.length, minMv2: null, note: `data mv2 < ${o.minN}` };
   const base = mean(a.map((r) => r.won));
@@ -889,6 +891,7 @@ function mineMv2(rows, opts = {}) {
     if (t > o.maxT) continue;
     const sub = a.filter((r) => r.mv2 >= t);
     if (sub.length < o.minN) continue;
+    if (sub.length < o.minKeep * a.length) continue;   // ANTI-SNOWBALL: lantai cakupan — jangan pilih ambang yg menyisakan < minKeep sesi
     const wr = mean(sub.map((r) => r.won));
     if (!best || wr > best.wr + 1e-9) best = { t, wr, n: sub.length };
   }
@@ -902,13 +905,13 @@ function mineMv2(rows, opts = {}) {
 /* AMBANG LATE-60s ADAPTIF PER KEY — untuk fallback sinyal di detik ke-60 (arah momentum candle-60s).
    Pilih t (mv60 minimal) yg memaksimalkan WR arah (late60.dir == hasil) dgn n >= minN. */
 function mineMv60(rows, opts = {}) {
-  const o = Object.assign({ grid: [0, 0.005, 0.01, 0.015, 0.02, 0.03, 0.05], minN: 60, maxT: 0.06, minGain: 0.03 }, opts);
+  const o = Object.assign({ grid: [0, 0.005, 0.01, 0.015, 0.02, 0.03, 0.05], minN: 60, maxT: 0.06, minGain: 0.03, minKeep: 0.3 }, opts);
   const a = rows.filter((r) => r.late60 && typeof r.late60.mv === "number" && (r.won === 0 || r.won === 1));
   if (a.length < o.minN) return { ok: false, n: a.length, minMv60: null, note: `data late60 < ${o.minN}` };
   const wrM = (sub) => sub.length ? mean(sub.map((r) => (r.late60.dir === r.won ? 1 : 0))) : 0;
   const base = wrM(a);
   let best = null;
-  for (const t of o.grid) { if (t > o.maxT) continue; const sub = a.filter((r) => r.late60.mv >= t); if (sub.length < o.minN) continue; const wr = wrM(sub); if (!best || wr > best.wr + 1e-9) best = { t, wr, n: sub.length }; }
+  for (const t of o.grid) { if (t > o.maxT) continue; const sub = a.filter((r) => r.late60.mv >= t); if (sub.length < o.minN) continue; if (sub.length < o.minKeep * a.length) continue; /* ANTI-SNOWBALL: lantai cakupan */ const wr = wrM(sub); if (!best || wr > best.wr + 1e-9) best = { t, wr, n: sub.length }; }
   if (!best) best = { t: 0, wr: base, n: a.length };
   const chosen = (best.wr >= base + o.minGain) ? best : best;   // late: tetap pakai best (jaga ketajaman)
   return { ok: true, n: a.length, base: +base.toFixed(4), minMv60: chosen.t, wr: +chosen.wr.toFixed(4), nAt: chosen.n,

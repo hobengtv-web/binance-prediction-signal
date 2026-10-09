@@ -460,10 +460,13 @@ async function refit(trigger = "manual", onlyKey = null) {   // onlyKey: refit H
       // selama bot belum melaporkan $ akun. Tanpa pemindahan ini, BOT kehilangan SEMUA ambang
       // adaptif (mv2/spread/sizing/TA) tepat pada fase transisi $, sehingga "Entry TA" tidak ada.
       wonMap[key] = LEARNER.mineWonBlockers(kr, { minN: Number(process.env.WON_MIN_N || 20), minDelta: Number(process.env.WON_MIN_DELTA || 0.08), covCap: Number(process.env.WON_COV_CAP || 0.35), ubMax: Number(process.env.WON_UB_MAX || 0.60), metric: process.env.WON_METRIC || "pnlReal" });  // BLOCKER berdasarkan outcome (n besar)
-      mv2Map[key] = LEARNER.mineMv2(kr);                  // ADAPTIF: ambang gerak-minimum mv2 per key
-      mv60Map[key] = LEARNER.mineMv60(kr);                // ADAPTIF: ambang late-60s per key
-      spreadMap[key] = LEARNER.mineSpread(kr);            // B12 batas spread (per key)
-      scoreMap[key] = LEARNER.mineScore(kr);              // B17 ambang skor selektif
+      // minKeep = lantai cakupan (ANTI-SNOWBALL): tiap ambang WAJIB menyisakan >= minKeep sesi (default 30%)
+      // -> tak ada satu gate pun yg boleh memblokir hampir semua (mis. mv2 blok 90% -> sumber entry habis).
+      const _minKeep = Number(process.env.LEARN_MIN_KEEP != null ? process.env.LEARN_MIN_KEEP : 0.3);
+      mv2Map[key] = LEARNER.mineMv2(kr, { minKeep: _minKeep });       // ADAPTIF: ambang gerak-minimum mv2 per key
+      mv60Map[key] = LEARNER.mineMv60(kr, { minKeep: _minKeep });     // ADAPTIF: ambang late-60s per key
+      spreadMap[key] = LEARNER.mineSpread(kr, { minKeep: _minKeep }); // B12 batas spread (per key)
+      scoreMap[key] = LEARNER.mineScore(kr, { minKeep: _minKeep });   // B17 ambang skor selektif
       sizingMap[key] = LEARNER.mineSizing(rolling, key);  // B19 stake mult dari edge $
       taMap[key] = LEARNER.learnTA(kr);                   // B14 tuning exit TA (replay path akun)
       if (!cand.ok) {

@@ -919,9 +919,16 @@ function _mstreamPollEmit() {
       for (const symBin of ["BTCUSDT", "ETHUSDT", "BNBUSDT"]) {
         const low = symBin.toLowerCase();
         let rows = [];
-        try { const k = await proxyBinanceV3("/api/v3/klines", `?symbol=${symBin}&interval=1s&limit=2`); rows = JSON.parse(k.body); } catch (_) {}
-        const r = Array.isArray(rows) ? rows[rows.length - 1] : null;
-        if (r) _mstreamEmit({ stream: `${low}@kline_1s`, data: { e: "kline", E: Date.now(), s: symBin, k: { t: r[0] / 1000, T: r[6] / 1000, s: symBin, i: "1s", o: r[1], c: r[4], h: r[2], l: r[3], v: r[5], x: true } } });
+        // Ambil BEBERAPA candle 1s terakhir (bukan hanya 1) lalu emit SEMUA — klien dedupe by time.
+        // Sebelumnya hanya candle TERAKHIR tiap poll 2,5s -> klien cuma dapat ~1 titik/2,5s ->
+        // agregasi 5s jadi flat/tipis ("candle patah-patah"). Emit semua menutup celah antar-poll.
+        try { const k = await proxyBinanceV3("/api/v3/klines", `?symbol=${symBin}&interval=1s&limit=6`); rows = JSON.parse(k.body); } catch (_) {}
+        if (Array.isArray(rows)) {
+          for (const r of rows) {
+            if (!r) continue;
+            _mstreamEmit({ stream: `${low}@kline_1s`, data: { e: "kline", E: Date.now(), s: symBin, k: { t: r[0] / 1000, T: r[6] / 1000, s: symBin, i: "1s", o: r[1], c: r[4], h: r[2], l: r[3], v: r[5], x: true } } });
+          }
+        }
         if (alsoTf) {
           for (const tf of ["5m", "15m", "1h"]) {
             try {

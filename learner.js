@@ -629,10 +629,13 @@ function keyVetoes(rows, opts = {}) {
   // per-key EV sesi FLAT-NOISE (utk FLAT_ENTRY gate) — dihitung dari baris flat-noise ber-$.
   const flatEvByKey = {};
   for (const r of rows) { if (r.skipped !== "flat-noise" || r.pnlReal == null) continue; const k = r.symbol + "_" + r.interval; (flatEvByKey[k] = flatEvByKey[k] || []).push(r.pnlReal); }
-  // TRADEABILITY (basis $ akun KRONIS) dihitung dari SEMUA baris ber-$ — TERMASUK sesi late yg `flat`
-  // (entry late punya sig.skipped=flat-noise -> jangan terbuang oleh filter `!flat` di bawah).
+  // TRADEABILITY (basis $ akun) — JENDELA WAKTU (default 72 jam) agar TIDAK LENGKET: key yg membaik
+  // di dalam jendela otomatis LEPAS blokir (dulu cumulative -> sekali blokir, selamanya blokir karena
+  // key terblokir tak menghasilkan $ baru). Termasuk sesi late yg `flat`. Relatif t0 TERBARU (deterministik).
+  const _tMax = rows.reduce((m, r) => Math.max(m, r.t0 || 0), 0);
+  const _tCut = _tMax - (opts.keyTradeWinH != null ? opts.keyTradeWinH : 72) * 3600;
   const tradeByKey = {};
-  for (const r of rows) { if (r.pnlReal == null) continue; const k = r.symbol + "_" + r.interval; (tradeByKey[k] = tradeByKey[k] || []).push(r.pnlReal); }
+  for (const r of rows) { if (r.pnlReal == null || (r.t0 || 0) < _tCut) continue; const k = r.symbol + "_" + r.interval; (tradeByKey[k] = tradeByKey[k] || []).push(r.pnlReal); }
   rows = rows.filter((r) => !r.flat);   // veto/reclaim/invert/confirm = keputusan trade -> hanya sesi tradeable
   const groups = {};
   for (const r of rows) { if (r.won == null || !r.symbol || !r.interval) continue; const k = r.symbol + "_" + r.interval; (groups[k] = groups[k] || []).push(r); }

@@ -1214,11 +1214,11 @@ http.createServer(async (req, res) => {
       // 5m, sehingga kolom panel akurasi 15m/1h tampak kosong walaupun sinyal tersimpan.
       const DISP = nowSec - 34 * 3600;
       const n = Math.max(1, Math.min(500, Number(u.searchParams.get("n")) || 600));  // cap per key
-      // Kirim record ber-ARAH (sig dir up/down) & BUKAN ditolak (accepted !== false) — persis yg
-      // ditampilkan panel akurasi. Rejected/flat tak dipakai panel, jadi tidak dihitung ke kuota N.
+      // Kirim SEMUA record ber-ARAH (sig dir up/down) di window 34h — TERMASUK yang ditolak gate
+      // (accepted=false). Dulu rejected dibuang sehingga kolom tf yang mayoritas ditolak (mis. ETH_5m
+      // siang hari) tampak kosong / "history hilang". Panel akurasi tetap menandai rejected terpisah.
       const arr = [...ledger.values()].filter((r) => r.t0 >= DISP
-        && r.sig && (r.sig.dir === "up" || r.sig.dir === "down" || r.sig.verdict === "up" || r.sig.verdict === "down")
-        && r.sig.accepted !== false);
+        && r.sig && (r.sig.dir === "up" || r.sig.dir === "down" || r.sig.verdict === "up" || r.sig.verdict === "down"));
       // top-N per asset_interval by t0 (terbaru di atas). Ini memastikan tiap tf (5m/15m/1h) dapat
       // sesi terbaru yang berada di window 34h, tidak bergantung urutan insert global.
       const perKey = {};
@@ -1227,7 +1227,11 @@ http.createServer(async (req, res) => {
       for (const k of Object.keys(perKey)) { perKey[k].sort((a, b) => b.t0 - a.t0); out.push(...perKey[k].slice(0, n)); }
       out.sort((a, b) => a.t0 - b.t0);  // ASCENDING — panel akurasi app.js pakai slice(-PER_COIN).reverse() (terbaru di kiri)
       const trim = (r) => ({ k: r.k, t0: r.t0, asset: r.asset, interval: r.interval,
-        sig: r.sig ? { verdict: r.sig.verdict, dir: r.sig.dir, accepted: r.sig.accepted, grade: r.sig.grade, flatEntry: r.sig.flatEntry || null } : null,
+        sig: r.sig ? { verdict: r.sig.verdict, dir: r.sig.dir, accepted: r.sig.accepted, reject: r.sig.reject || null, grade: r.sig.grade, stage: r.sig.stage || null, flatEntry: r.sig.flatEntry || null } : null,
+        // Arah sinyal LATE (60s/90s) — dipakai BOT bila LATE_SIGNAL aktif & bisa BERBEDA dari sinyal 2s.
+        // Disertakan agar panel bisa menampilkan "sinyal dieksekusi" vs "sinyal 2s" (menjelaskan UP vs bot Down).
+        late: { d60: (r.late60 && r.late60.dir != null) ? (r.late60.dir ? "up" : "down") : null,
+                d90: (r.late90 && r.late90.dir != null) ? (r.late90.dir ? "up" : "down") : null },
         res: r.res ? { won: r.res.won, actual: r.res.actual, lock: r.res.lock, close: r.res.close, trade: r.res.trade } : null });
       res.end(JSON.stringify({ stats: st, records: out.map(trim) }));
     } else {

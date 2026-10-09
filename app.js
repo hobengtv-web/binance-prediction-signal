@@ -3446,16 +3446,18 @@ function renderConfidenceReport() {
     rounds = srv.records.map((r) => {
       const sig = r.sig || {};
       const res = r.res || null;
-      // ARAH YANG DITAMPILKAN (bukan arah mentah). Record ledger dari capture tidak menyertakan
-      // `verdict`, hanya `dir` + `accepted`. Sebelumnya panel memakai `dir` apa adanya sehingga
-      // sesi yang DITOLAK gate (accepted=false) tetap muncul sebagai kolom U/D dan ikut dihitung
-      // di win-rate, padahal kartu tidak menampilkan sinyal apa pun.
+      // ARAH YANG DITAMPILKAN. Record ledger dari capture tidak selalu menyertakan `verdict`,
+      // hanya `dir` + `accepted` (+ `reject`). Kita tampilkan SEMUA sinyal berarah — termasuk yang
+      // DITOLAK gate (accepted=false) — agar history per-tf tidak "hilang" saat pasar banyak veto
+      // (mis. ETH_5m siang). Sesi rejected ditandai terpisah (kelas dot-reject + tooltip alasan)
+      // dan TIDAK dihitung ke W/L (W/L tetap murni sinyal yang dipakai/diterima).
       const isUD = (v) => v === "up" || v === "down";
       const dir = isUD(sig.verdict) ? sig.verdict
-        : (isUD(sig.dir) && sig.accepted === true) ? sig.dir
-        : (isUD(sig.dir) && sig.accepted === undefined) ? sig.dir   // record lama tanpa flag gate
+        : isUD(sig.dir) ? sig.dir   // termasuk accepted=false/undefined — ditandai terpisah di bawah
         : null;
       if (!dir) return null;
+      const rejected = (sig.accepted === false);   // ditolak gate: tampil tapi bukan sinyal "dipakai"
+      const late = r.late || null;                 // {d60,d90} arah sinyal late (dipakai BOT bila LATE_SIGNAL on)
       const tr = (res && res.trade) || null;
       // Tiga keadaan (semuanya tampil ABU, hanya tooltip-nya yang beda):
       //   "pending"        -> sesi belum dinilai (belum ada res)
@@ -3476,7 +3478,7 @@ function renderConfidenceReport() {
       const c = (tr && tr.entered) ? ((tr.closed || settledWinC) ? 1 : 0) : undefined;
       const cSettle = !!(tr && tr.entered && !tr.closed && settledWinC);   // menang via settle, bukan early close
       return {
-        asset: r.asset, interval: r.interval, dir,
+        asset: r.asset, interval: r.interval, dir, rejected, reject: sig.reject || null, late,
         won: (res && res.won != null) ? res.won : undefined,
         lock: res ? res.lock : sig.lock, close: res ? res.close : null,
         actual: res ? res.actual : null, e, c, cSettle, tradeState, t0Sec: r.t0,
@@ -3514,7 +3516,10 @@ function renderConfidenceReport() {
   // Warna memakai konvensi yang sudah ada: hijau = benar/sukses, merah = salah/gagal,
   // abu = belum ada hasil / tidak ada entry / tidak ada posisi.
   const stack = (r) => {
-    const sCls = r.won === undefined ? "dot-pending" : (r.won ? "dot-win" : "dot-lose");
+    // Sesi DITOLAK gate (rejected): arah tetap tampil (U/D) tetapi dengan gaya tersendiri
+    // (kelas dot-reject) supaya jelas "sinyal ada tapi tidak dipakai". W/L tidak menghitungnya.
+    const sCls = r.rejected ? "dot-reject"
+      : (r.won === undefined ? "dot-pending" : (r.won ? "dot-win" : "dot-lose"));
     const sTxt = r.dir === "up" ? "U" : "D";
     // Teks eksplisit supaya tidak ambigu: baris E mengukur TARGET (LOCK), bukan sekadar
     // "posisi berhasil dibuka".
@@ -3534,7 +3539,12 @@ function renderConfidenceReport() {
     // (mis. dua-duanya "U" abu) tetap bisa dibedakan dengan jelas.
     // Label waktu = RENTANG sesi (t0 s/d t0+dur) agar tidak tertukar antar-sesi berdekatan.
     const jam = (r.t0Sec != null) ? (() => { const s = r.t0Sec * 1000 + 7 * 3600e3; const dm = ({ "5m": 300, "15m": 900, "1h": 3600 }[r.interval] || 300) * 1000; return new Date(s).toISOString().slice(11, 16) + "\u2013" + new Date(s + dm).toISOString().slice(11, 16); })() : "";
-    const t = `${jam ? jam + " · " : ""}${r.asset}/${r.interval} · signal ${String(r.dir || "?").toUpperCase()} ${r.won === undefined ? "(pending)" : (r.won ? "BENAR" : "SALAH")}`
+    const lateTxt = (r.late && (r.late.d60 || r.late.d90))
+      ? ` · late ${r.late.d90 || r.late.d60}${r.late.d60 && r.late.d90 && r.late.d60 !== r.late.d90 ? "/" + r.late.d90 : ""}`
+      : "";
+    const t = `${jam ? jam + " · " : ""}${r.asset}/${r.interval} · signal ${String(r.dir || "?").toUpperCase()} `
+      + (r.rejected ? `DITOLAK (${r.reject || "gate"}) — tidak dipakai` : (r.won === undefined ? "(pending)" : (r.won ? "BENAR" : "SALAH")))
+      + lateTxt
       + ` · entry ${eTxt} · early close ${cTxt}`
       + ` · lock ${r.lock != null ? r.lock : "?"} close ${r.close != null ? r.close : "?"}`;
     return `<div class="sa-stack" title="${t}"><span class="dot ${sCls}">${sTxt}</span>`
@@ -3550,9 +3560,10 @@ function renderConfidenceReport() {
     const dispData = all.filter((r) => inWin(r, nowMs - DISP_WINDOW_MS));
     // W/L & S/F: DIHITUNG dari hari ini sejak 00:00 WIB.
     const statData = all.filter((r) => inWin(r, DAY_START_MS));
-    const evald = statData.filter((r) => r.won !== undefined);
+    const evald = statData.filter((r) => r.won !== undefined && !r.rejected);
     const wins = evald.reduce((a, r) => a + r.won, 0);
     const wr = evald.length ? Math.round(wins / evald.length * 100) : null;
+    const rejShown = dispData.filter((r) => r.rejected).length;   // sesi muncul-tapi-ditolak (bukan sinyal dipakai)
     // Ringkasan TRADE ASSISTANT: S = entry sukses & early close sukses; F = ada posisi (entry
     // terjadi) tetapi tidak keduanya sukses. Sesi tanpa posisi tidak dinilai (tidak ada yang
     // bisa sukses/gagal) sehingga tidak masuk hitungan S/F.
@@ -3573,7 +3584,8 @@ function renderConfidenceReport() {
     html += `<div class="sa-coin">
       <div class="sa-coin-head"><b>${sym}</b> · ${tf}${onlyTag}
         <span class="sa-head-right">
-          <span class="sa-stat ${statCls}" title="signal: benar/salah">${evald.length ? `${wins}W/${evald.length - wins}L${wr != null ? ` (${wr}%)` : ""}` : "—"}</span>
+          <span class="sa-stat ${statCls}" title="signal diterima: benar/salah (sesi ditolak gate tidak dihitung)">${evald.length ? `${wins}W/${evald.length - wins}L${wr != null ? ` (${wr}%)` : ""}` : "—"}</span>
+          ${rejShown ? `<span class="sa-stat sa-stat-rej" title="sesi muncul di history tapi DITOLAK gate (tidak dipakai) dalam 34 jam ditampilkan">R:${rejShown}</span>` : ""}
           <span class="sa-stat-sf" title="Trade Assistant: S = entry &amp; early close sukses · F = ada entry tapi tidak keduanya sukses (${withPos.length} sesi berposisi)">${sfTxt}</span>
         </span>
       </div>
@@ -3583,7 +3595,7 @@ function renderConfidenceReport() {
         : `<div class="cd-empty">${sym === "BNB" && tf !== "5m" ? "BNB hanya 5m" : "belum ada sesi"}</div>`}
     </div>`;
   }
-  html += `</div><div class="sa-legend">window: history <b>34 jam terakhir</b> · <b>W/L &amp; S/F dihitung sejak 00:00 WIB hari ini</b> · tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal (dengan % sukses) · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending) · baris 2 <b>E</b> = entry &amp; apakah target LOCK tercapai · baris 3 <b>C</b> = early close ter-signal (hijau = ya · merah = tidak · abu = tidak ada entry/posisi)</div>`;
+  html += `</div><div class="sa-legend">window: history <b>34 jam terakhir</b> · <b>W/L &amp; S/F dihitung sejak 00:00 WIB hari ini</b> · tiap kolom = 1 sesi (terbaru di kiri) · ringkasan <b>S</b>=sukses entry+close · <b>F</b>=gagal (dengan % sukses) · <b>R</b>=sesi ditolak gate (history tetap tampil) · baris 1 <b>S</b> signal U/D (hijau benar · merah salah · abu pending · <b>garis putus = ditolak gate</b>) · baris 2 <b>E</b> = entry &amp; apakah target LOCK tercapai · baris 3 <b>C</b> = early close ter-signal (hijau = ya · merah = tidak · abu = tidak ada entry/posisi)</div>`;
 
   if (head) head.textContent = "DESKTOP SIGNAL ACCURACY · per sesi (signal · entry · early close) · 34 jam ";
   if (countEl) countEl.textContent = `${totalShown} sesi ${tf} (34 jam · W/L & S/F sejak 00:00 WIB) · sumber ${srcLabel}`

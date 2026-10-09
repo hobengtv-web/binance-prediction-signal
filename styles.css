@@ -440,6 +440,9 @@ body {
 .conf-debug .dot-win { background: var(--up); color: #fff; }
 .conf-debug .dot-lose { background: var(--down); color: #fff; }
 .conf-debug .dot-pending { background: rgba(255,255,255,0.15); color: var(--muted, #888); }
+/* Sesi muncul di history tetapi DITOLAK gate (tidak dipakai): kotak transparan bergaris putus. */
+.conf-debug .dot-reject { background: transparent; color: var(--muted, #888); border: 1px dashed var(--muted, #888); box-sizing: border-box; }
+.conf-debug .sa-stat-rej { color: var(--muted, #888); font-weight: 700; }
 
 /* ----- Panel akurasi versi baru: 2 kolom koin (BTC kiri, ETH kanan), tiap sesi 1 kolom
    berisi 3 baris: S (signal U/D) · E (entry) · C (early close). Warna memakai konvensi yang

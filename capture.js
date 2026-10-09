@@ -521,8 +521,15 @@ function computeSignal(o) {
   //        (meanEnd +0.13 vs base +0.02, P(gerak>=0,5%) ~11-13%; walk-forward +0.116->+0.152). Target = PROFIT.
   //  BUKAN 100% (100% = overfit/noise). Prioritas: sign > mom. Watchdog ROI ada di BOT.
   const _goldenDirOK = (!flatReason && (currentDir === "up" || currentDir === "down"));
-  const _goldenSign = (_goldenDirOK && rsi != null && rsi >= 65 && rsi < 80 && Math.abs(surprise) >= 10) ? "sign:rsi65-80&surprise>=10" : null;
-  const _goldenMom = (_goldenDirOK && mv2 >= 0.03 && (volRel2 >= 2 || Math.abs(surprise) >= 10)) ? "mom:mv2>=0.03&vol2" : null;
+  // Ambang dapat diatur via env (utk tuning & uji terkendali tanpa ubah kode).
+  const _gSignLo = Number(process.env.GOLDEN_SIGN_RSI_LO != null ? process.env.GOLDEN_SIGN_RSI_LO : 65);
+  const _gSignHi = Number(process.env.GOLDEN_SIGN_RSI_HI != null ? process.env.GOLDEN_SIGN_RSI_HI : 80);
+  const _gSignSurp = Number(process.env.GOLDEN_SIGN_SURP != null ? process.env.GOLDEN_SIGN_SURP : 10);
+  const _gMomMv2 = Number(process.env.GOLDEN_MOM_MV2 != null ? process.env.GOLDEN_MOM_MV2 : 0.03);
+  const _gMomVol = Number(process.env.GOLDEN_MOM_VOL != null ? process.env.GOLDEN_MOM_VOL : 2);
+  const _gMomSurp = Number(process.env.GOLDEN_MOM_SURP != null ? process.env.GOLDEN_MOM_SURP : 10);
+  const _goldenSign = (_goldenDirOK && rsi != null && rsi >= _gSignLo && rsi < _gSignHi && Math.abs(surprise) >= _gSignSurp) ? "sign:rsi65-80&surprise>=10" : null;
+  const _goldenMom = (_goldenDirOK && mv2 >= _gMomMv2 && (volRel2 >= _gMomVol || Math.abs(surprise) >= _gMomSurp)) ? "mom:mv2>=0.03&vol2" : null;
   const goldenWhy = _goldenSign || _goldenMom;
   return {
     ok: true,

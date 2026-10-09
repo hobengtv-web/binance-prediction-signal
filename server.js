@@ -1225,7 +1225,7 @@ http.createServer(async (req, res) => {
       for (const r of arr) { (perKey[r.asset + "_" + r.interval] = perKey[r.asset + "_" + r.interval] || []).push(r); }
       let out = [];
       for (const k of Object.keys(perKey)) { perKey[k].sort((a, b) => b.t0 - a.t0); out.push(...perKey[k].slice(0, n)); }
-      out.sort((a, b) => b.t0 - a.t0);
+      out.sort((a, b) => a.t0 - b.t0);  // ASCENDING — panel akurasi app.js pakai slice(-PER_COIN).reverse() (terbaru di kiri)
       const trim = (r) => ({ k: r.k, t0: r.t0, asset: r.asset, interval: r.interval,
         sig: r.sig ? { verdict: r.sig.verdict, dir: r.sig.dir, accepted: r.sig.accepted, grade: r.sig.grade, flatEntry: r.sig.flatEntry || null } : null,
         res: r.res ? { won: r.res.won, actual: r.res.actual, lock: r.res.lock, close: r.res.close, trade: r.res.trade } : null });

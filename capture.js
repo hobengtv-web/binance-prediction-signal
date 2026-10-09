@@ -56,10 +56,13 @@ const _acf = (() => {
     const r = _win(key);
     if (r.length < ACF_MIN) return 0;
     const sig = r.reduce((s, x) => s + x.s, 0);
-    if (sig === 0) return 3;                       // TIDAK ada sinyal sama sekali -> darurat
+    if (sig === 0) return 3;                       // TIDAK ada sinyal sama sekali -> darurat (anti-snowball)
+    if (sig < 5) return 0;                         // sampel sinyal sedikit -> rate tak dapat dipercaya; jangan
+                                                   // longgarkan gate learner (biar learner bekerja atas dasar data)
     const acc = r.reduce((s, x) => s + x.a, 0);
     const rate = acc / sig;                        // penerimaan DI ANTARA sesi bersinyal
-    return rate < 0.02 ? 3 : rate < 0.05 ? 2 : rate < 0.12 ? 1 : 0;
+    // Ambang rendah: hanya 'loosen' gate learner bila entry benar-benar kritis (mendekati 0).
+    return rate < 0.02 ? 3 : rate < 0.05 ? 2 : rate < 0.10 ? 1 : 0;
   }
   function record(key, t0, produced, accepted) {
     const h = hist[key] || (hist[key] = []);

@@ -566,6 +566,19 @@ function setConn(on) {
   const el = document.getElementById("conn");
   el.className = "conn " + (on ? "conn--on" : "conn--off");
 }
+// RELAY REDUNDAN: buka relay server TANPA mengganti `ws` (WS langsung tetap jalan). Tujuan:
+// menjamin feed 1s TETAP PADAT walau WS Binance langsung selang-seling/putus — penyebab candle
+// 5s "patah-patah" saat live (refresh normal karena REST padat). handleKline/handleTicker sama;
+// feedCandle dedupe by time, jadi duplikat aman. Tidak menyentuh `wsGotData`/`state.connected`.
+let relayEs = null, relayOpen = false;
+function connectRelayRedundant() {
+  if (relayOpen || typeof EventSource === "undefined") return;
+  relayOpen = true;
+  try { relayEs = new EventSource("/api/market-stream"); } catch (_) { relayOpen = false; return; }
+  relayEs.onopen = () => {};
+  relayEs.onmessage = (ev) => { let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; } const d = msg.data; if (!d) return; if (d.e === "kline") handleKline(d); else if (d.e === "24hrTicker") handleTicker(d); };
+  relayEs.onerror = () => { relayOpen = false; try { relayEs.close(); } catch (_) {} setTimeout(connectRelayRedundant, 4000); };
+}
 
 function symKeyOf(s) { const u = String(s || "").toUpperCase(); return u === "BTCUSDT" ? "BTC" : u === "BNBUSDT" ? "BNB" : u === "ETHUSDT" ? "ETH" : null; }
 function handleKline(d) {
@@ -1658,6 +1671,7 @@ function startPolling() {
   // Utamakan DATA PASAR LANGSUNG dari Binance (WS/REST di IP user). Server hanya untuk LOGIKA + fallback.
   setSrc("langsung (Binance)");
   loadHistory().then(connectWS).catch(connectWS);
+  connectRelayRedundant();   // jaminan feed 1s padat (relay server) di samping WS langsung
   // Fallback ringan: bila tak ada koneksi setelah 12s, pakai proxy snapshot SERVER.
   setTimeout(() => {
     if (state.connected) return;

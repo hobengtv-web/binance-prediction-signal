@@ -101,6 +101,12 @@ function rowsFrom(records, minT0 = 1700000000, opts = {}) {
       mAlign: (s.micro && s.micro.align) ? (["5m", "15m", "1h"].filter((t) => s.micro.align[t] === dir).length) : null,
       mOfiAgree: (typeof s.ofi === "number") ? (((dir === "up" && s.ofi > 0.05) || (dir === "down" && s.ofi < -0.05)) ? 1 : 0) : null,
       macdDir: (s.ind && s.ind.macdDir) ? s.ind.macdDir : null,
+      // PAT10: formasi 10 candle 5m terakhir (bentuk visual) — utk mining pattern OOS
+      pat10Pos: (s.ind && s.ind.pat10 && typeof s.ind.pat10.pos === "number") ? s.ind.pat10.pos : null,
+      pat10Streak: (s.ind && s.ind.pat10 && typeof s.ind.pat10.streak === "number") ? s.ind.pat10.streak : null,
+      pat10Engulf: (s.ind && s.ind.pat10 && typeof s.ind.pat10.engulf === "number") ? s.ind.pat10.engulf : null,
+      pat10Struct: (s.ind && s.ind.pat10) ? s.ind.pat10.structure : null,
+      pat10Net: (s.ind && s.ind.pat10 && typeof s.ind.pat10.net === "number") ? s.ind.pat10.net : null,
       // fitur numerik mentah — dibutuhkan untuk BELAJAR THRESHOLD (bukan hanya bucket)
       volRel2: typeof s.volRel2 === "number" ? s.volRel2 : (typeof s.volRel === "number" ? s.volRel : null),
       surprise: typeof s.surprise === "number" ? s.surprise : null,
@@ -188,9 +194,15 @@ const GATE_FEATS = { interval: (r) => r.interval, symbol: (r) => r.symbol, mode:
   mAlignB: (r) => r.mAlignB != null ? r.mAlignB : "na",
   mRanZone: (r) => r.mRanPos == null ? "na" : (r.mRanPos < 0.2 ? "low" : r.mRanPos > 0.8 ? "high" : "mid"),
   mBody: (r) => r.mO2 == null ? "na" : (r.mO2 > 0.5 ? "strong+" : r.mO2 < -0.5 ? "strong-" : "weak"),
+  // PAT10: formasi 10 candle 5m terakhir (bucket IDENTIK dgn capture.featVal pat10*)
+  pat10Pos: (r) => r.pat10Pos == null ? "na" : (r.pat10Pos < 0.33 ? "low" : r.pat10Pos > 0.66 ? "high" : "mid"),
+  pat10Streak: (r) => r.pat10Streak == null ? "na" : (r.pat10Streak >= 3 ? "up3" : r.pat10Streak <= -3 ? "dn3" : "sm"),
+  pat10Engulf: (r) => r.pat10Engulf == null ? "na" : (r.pat10Engulf === 1 ? "bull" : r.pat10Engulf === -1 ? "bear" : "none"),
+  pat10Struct: (r) => r.pat10Struct || "na",
+  pat10Net: (r) => r.pat10Net == null ? "na" : (r.pat10Net >= 3 ? "bull" : r.pat10Net <= -3 ? "bear" : "bal"),
 };
 const TOUCH_FEATS = { interval: (r) => r.interval, symbol: (r) => r.symbol, gap: (r) => r.gap, hour: (r) => r.hour, dir: (r) => r.dir };
-const GATE_PAIRS = [["interval", "minute"], ["interval", "vol"], ["rsi", "trend"], ["symbol", "hour"], ["interval", "rsi"], ["hist", "trend"], ["minute", "vol"]];
+const GATE_PAIRS = [["interval", "minute"], ["interval", "vol"], ["rsi", "trend"], ["symbol", "hour"], ["interval", "rsi"], ["hist", "trend"], ["minute", "vol"], ["pat10Pos", "pat10Struct"], ["pat10Net", "pat10Struct"], ["interval", "pat10Struct"]];
 const TOUCH_PAIRS = [["interval", "gap"], ["symbol", "gap"], ["hour", "gap"], ["dir", "gap"], ["interval", "hour"]];
 
 /* ---------- fitur & OBJEKTIF TRADE ASSISTANT ---------- */

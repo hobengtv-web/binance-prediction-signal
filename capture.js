@@ -245,6 +245,39 @@ function computeSignal(o) {
         macdDir: macdHist != null ? (macdHist > 0 ? "up" : "down") : null,
         pattern, lastBody: +body.toFixed(2), lastRange: +rng.toFixed(2),
       };
+      // ===== PAT10: formasi N candle 5m TERAKHIR yg SUDAH SELESAI (bentuk visual: body/wick/streak/struktur).
+      // Direkam agar learner bisa menguji apakah pola susunan candle menambah akurasi (OOS). Tanpa lookahead.
+      try {
+        const c10 = cl.slice(-10);
+        if (c10.length >= 8) {
+          let bull = 0, bear = 0, hh = 0, ll = 0, bodySum = 0, upW = 0, loW = 0;
+          const dirs = [];
+          for (let i = 0; i < c10.length; i++) {
+            const c = c10[i], b = c.close - c.open, r = c.high - c.low;
+            if (b > 0) bull++; else if (b < 0) bear++;
+            bodySum += r > 0 ? Math.abs(b) / r : 0;
+            upW += r > 0 ? (c.high - Math.max(c.open, c.close)) / r : 0;
+            loW += r > 0 ? (Math.min(c.open, c.close) - c.low) / r : 0;
+            dirs.push(b > 0 ? 1 : b < 0 ? -1 : 0);
+            if (i > 0) { if (c.high > c10[i - 1].high) hh++; if (c.low < c10[i - 1].low) ll++; }
+          }
+          let streak = 0; const lastD = dirs[dirs.length - 1];
+          for (let i = dirs.length - 1; i >= 0 && lastD !== 0; i--) { if (dirs[i] === lastD) streak++; else break; }
+          const hi10 = Math.max(...c10.map((c) => c.high)), lo10 = Math.min(...c10.map((c) => c.low));
+          const lastC = c10[c10.length - 1].close;
+          const pos = hi10 > lo10 ? (lastC - lo10) / (hi10 - lo10) : 0.5;
+          const p = c10[c10.length - 1], q = c10[c10.length - 2];
+          const engulf = (p.close > p.open && q.close < q.open && p.close >= q.open && p.open <= q.close) ? 1
+            : (p.close < p.open && q.close > q.open && p.open >= q.close && p.close <= q.open) ? -1 : 0;
+          ind.pat10 = {
+            n: c10.length, bull, bear, net: bull - bear, streak: streak * lastD, hh, ll,
+            structure: (hh > ll ? "uptrend" : ll > hh ? "downtrend" : "range"),
+            bodyAvg: +(bodySum / c10.length).toFixed(3), upWAvg: +(upW / c10.length).toFixed(3), loWAvg: +(loW / c10.length).toFixed(3),
+            pos: +pos.toFixed(3), engulf, lastPattern: pattern,
+            seq: dirs.map((d) => (d > 0 ? "B" : d < 0 ? "S" : "-")).join(""),
+          };
+        }
+      } catch (_) {}
     }
   } catch (_) {}
   // CATATAN: gate `verdict !== flat` milik app memakai volRel yang bergantung waktu
@@ -383,6 +416,12 @@ function computeSignal(o) {
         mAgreeB: (bodyAgree != null) ? (bodyAgree ? "agree" : "disagree") : "na",
         mRanZone: (ranPos != null) ? (ranPos < 0.2 ? "low" : ranPos > 0.8 ? "high" : "mid") : "na",
         mBody: (_mO2 == null) ? "na" : (_mO2 > 0.5 ? "strong+" : _mO2 < -0.5 ? "strong-" : "weak"),
+        // PAT10: formasi 10 candle 5m (harus IDENTIK dgn learner.GATE_FEATS pat10* agar rule match)
+        pat10Pos: (ind && ind.pat10 && typeof ind.pat10.pos === "number") ? (ind.pat10.pos < 0.33 ? "low" : ind.pat10.pos > 0.66 ? "high" : "mid") : "na",
+        pat10Streak: (ind && ind.pat10 && typeof ind.pat10.streak === "number") ? (ind.pat10.streak >= 3 ? "up3" : ind.pat10.streak <= -3 ? "dn3" : "sm") : "na",
+        pat10Engulf: (ind && ind.pat10 && typeof ind.pat10.engulf === "number") ? (ind.pat10.engulf === 1 ? "bull" : ind.pat10.engulf === -1 ? "bear" : "none") : "na",
+        pat10Struct: (ind && ind.pat10 && ind.pat10.structure) ? ind.pat10.structure : "na",
+        pat10Net: (ind && ind.pat10 && typeof ind.pat10.net === "number") ? (ind.pat10.net >= 3 ? "bull" : ind.pat10.net <= -3 ? "bear" : "bal") : "na",
       };
       // Dukung rule tunggal MAUPUN interaksi "f1=v1&f2=v2" (B13).
       const matchK = (k) => {

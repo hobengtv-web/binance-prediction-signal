@@ -82,7 +82,10 @@ function createEngine(deps) {
           if (arr.length >= 20) align[t] = SignalCore.analyzeHistoricalTrend(arr, 50).predictDir;
         }
       } catch (_) {}
-      const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m: market[sym].five5m, one1m: market[sym].one1m, profile, getModel, SignalCore, nowSec: nowS, align });
+      // onesLong utk PAT10 (30s, 10 sesi): dari buffer 1s-close engine (onesHist). Close-only -> OHLC≈close.
+      const _oh = (market[sym] && market[sym].onesHist) || [];
+      const onesLong = _oh.length >= 120 ? _oh.map((o) => ({ time: o.t, open: o.c, high: o.c, low: o.c, close: o.c })) : null;
+      const r = computeSignal({ sym, tf, t0, tfc, idx, ones, onesLong, five5m: market[sym].five5m, one1m: market[sym].one1m, profile, getModel, SignalCore, nowSec: nowS, align });
       const sigForPlan = r.skipped ? null : r.signal;
       const plan = computePlan(sym, tf, t0, nowS, sigForPlan, market[sym]);
       const conf = computeConf(sym, tf, t0, nowS, sigForPlan, market[sym]);
@@ -309,7 +312,7 @@ function createEngine(deps) {
     for (const c of ones || []) {
       if (!c || !isFinite(c.time) || c.time <= last) continue;
       m.onesHist.push({ t: c.time, c: c.close });
-      if (m.onesHist.length > 3700) m.onesHist.shift();          // > 1 jam (sesi terpanjang)
+      if (m.onesHist.length > 9200) m.onesHist.shift();          // > 150 menit (10 sesi 15m) utk PAT10
       const t5 = Math.floor(c.time / 5) * 5;
       let cur = m.five5s[m.five5s.length - 1];
       if (!cur || cur.time !== t5) m.five5s.push({ time: t5, open: c.open, high: c.high, low: c.low, close: c.close, vol: c.vol || 0 });

@@ -105,7 +105,7 @@ const TA_VETO = {
    Output: { ok:true, signal:{...} } atau { skipped:"<alasan>" }
    ============================================================================ */
 function computeSignal(o) {
-  const { sym, tf, t0, tfc, idx, ones, five5m, one1m, getModel, SignalCore, nowSec } = o;
+  const { sym, tf, t0, tfc, idx, ones, onesLong, five5m, one1m, getModel, SignalCore, nowSec } = o;
   const _key = sym + "_" + tf;
   // PER coin × TF — STRICT: profil HANYA milik key ini (TIDAK ada fallback global/BOOTSTRAP).
   // Bila key belum punya profil hasil belajar -> sesi DITOLAK (belum ada bukti untuk key ini),
@@ -245,37 +245,44 @@ function computeSignal(o) {
         macdDir: macdHist != null ? (macdHist > 0 ? "up" : "down") : null,
         pattern, lastBody: +body.toFixed(2), lastRange: +rng.toFixed(2),
       };
-      // ===== PAT10: formasi N candle 5m TERAKHIR yg SUDAH SELESAI (bentuk visual: body/wick/streak/struktur).
-      // Direkam agar learner bisa menguji apakah pola susunan candle menambah akurasi (OOS). Tanpa lookahead.
+      // ===== PAT10 (30s, 10 SESI): bentuk candle HALUS 30s PER-SESI lalu diagregasi 10 sesi terakhir.
+      // Pilihan user: 30s candle, 10 sesi, per-sesi lalu agregat. onesLong = 1s (diagregasi ke 30s),
+      // TANPA lookahead (hanya 1s SEBELUM t0). Direkam agar learner menguji OOS (pakai bila terbukti).
       try {
-        const c10 = cl.slice(-10);
-        if (c10.length >= 8) {
-          let bull = 0, bear = 0, hh = 0, ll = 0, bodySum = 0, upW = 0, loW = 0;
-          const dirs = [];
-          for (let i = 0; i < c10.length; i++) {
-            const c = c10[i], b = c.close - c.open, r = c.high - c.low;
-            if (b > 0) bull++; else if (b < 0) bear++;
-            bodySum += r > 0 ? Math.abs(b) / r : 0;
-            upW += r > 0 ? (c.high - Math.max(c.open, c.close)) / r : 0;
-            loW += r > 0 ? (Math.min(c.open, c.close) - c.low) / r : 0;
-            dirs.push(b > 0 ? 1 : b < 0 ? -1 : 0);
-            if (i > 0) { if (c.high > c10[i - 1].high) hh++; if (c.low < c10[i - 1].low) ll++; }
+        const ol = (onesLong || []).filter((c) => c && c.time < t0);
+        if (ol.length >= 120) {
+          const m30 = new Map();
+          for (const c of ol) { const t = Math.floor(c.time / 30) * 30; const e = m30.get(t); if (!e) m30.set(t, { time: t, open: c.open, high: c.high, low: c.low, close: c.close }); else { if (c.high > e.high) e.high = c.high; if (c.low < e.low) e.low = c.low; e.close = c.close; } }
+          const agg30 = [...m30.values()].sort((a, b) => a.time - b.time);
+          const bySess = new Map();
+          for (const c of agg30) { const st = Math.floor(c.time / tfSec) * tfSec; if (!bySess.has(st)) bySess.set(st, []); bySess.get(st).push(c); }
+          const skeys = [...bySess.keys()].sort((a, b) => a - b).slice(-10);
+          const feats = [];
+          for (const st of skeys) {
+            const cs = bySess.get(st); if (!cs || cs.length < 2) continue;
+            const first = cs[0], last = cs[cs.length - 1];
+            const hi = Math.max(...cs.map((c) => c.high)), lo = Math.min(...cs.map((c) => c.low));
+            let bull = 0, bear = 0, bSum = 0, uW = 0, lW = 0; const dirs = [];
+            for (const c of cs) { const b = c.close - c.open, r = c.high - c.low; if (b > 0) bull++; else if (b < 0) bear++; bSum += r > 0 ? Math.abs(b) / r : 0; uW += r > 0 ? (c.high - Math.max(c.open, c.close)) / r : 0; lW += r > 0 ? (Math.min(c.open, c.close) - c.low) / r : 0; dirs.push(b > 0 ? 1 : b < 0 ? -1 : 0); }
+            let stre = 0; const ld = dirs[dirs.length - 1];
+            for (let i = dirs.length - 1; i >= 0 && ld !== 0; i--) { if (dirs[i] === ld) stre++; else break; }
+            const ret = first.open ? (last.close - first.open) / first.open : 0;
+            const pos = hi > lo ? (last.close - lo) / (hi - lo) : 0.5;
+            const p = cs[cs.length - 1], q = cs[cs.length - 2]; let eng = 0;
+            if (q) { if (p.close > p.open && q.close < q.open && p.close >= q.open && p.open <= q.close) eng = 1; else if (p.close < p.open && q.close > q.open && p.open >= q.close && p.close <= q.open) eng = -1; }
+            feats.push({ ret, bull, bear, streak: stre * ld, bodyAvg: bSum / cs.length, pos, eng, n30: cs.length });
           }
-          let streak = 0; const lastD = dirs[dirs.length - 1];
-          for (let i = dirs.length - 1; i >= 0 && lastD !== 0; i--) { if (dirs[i] === lastD) streak++; else break; }
-          const hi10 = Math.max(...c10.map((c) => c.high)), lo10 = Math.min(...c10.map((c) => c.low));
-          const lastC = c10[c10.length - 1].close;
-          const pos = hi10 > lo10 ? (lastC - lo10) / (hi10 - lo10) : 0.5;
-          const p = c10[c10.length - 1], q = c10[c10.length - 2];
-          const engulf = (p.close > p.open && q.close < q.open && p.close >= q.open && p.open <= q.close) ? 1
-            : (p.close < p.open && q.close > q.open && p.open >= q.close && p.close <= q.open) ? -1 : 0;
-          ind.pat10 = {
-            n: c10.length, bull, bear, net: bull - bear, streak: streak * lastD, hh, ll,
-            structure: (hh > ll ? "uptrend" : ll > hh ? "downtrend" : "range"),
-            bodyAvg: +(bodySum / c10.length).toFixed(3), upWAvg: +(upW / c10.length).toFixed(3), loWAvg: +(loW / c10.length).toFixed(3),
-            pos: +pos.toFixed(3), engulf, lastPattern: pattern,
-            seq: dirs.map((d) => (d > 0 ? "B" : d < 0 ? "S" : "-")).join(""),
-          };
+          if (feats.length >= 3) {
+            const up = feats.filter((f) => f.ret > 0).length, dn = feats.filter((f) => f.ret < 0).length;
+            const meanRet = feats.reduce((a, f) => a + f.ret, 0) / feats.length;
+            const L = feats[feats.length - 1];
+            ind.pat10 = {
+              n: feats.length, n30: L.n30, up, dn, net: up - dn, meanRet: +(meanRet * 100).toFixed(3),
+              structure: (up - dn >= 3 ? "uptrend" : dn - up >= 3 ? "downtrend" : "range"),
+              streak: L.streak, pos: +L.pos.toFixed(3), engulf: L.eng, bodyAvg: +L.bodyAvg.toFixed(3),
+              seq: feats.map((f) => (f.ret > 0 ? "U" : f.ret < 0 ? "D" : "-")).join(""),
+            };
+          }
         }
       } catch (_) {}
     }
@@ -629,6 +636,17 @@ function createCapture(deps) {
     if (!lock) return { skipped: "no-lock" };
     const ones = await getKlines(sym, "1s", t0 + 2, 70);
     FLOW.addKlines(sym, ones);                              // OFI dari REST (dedupe -> aman dipanggil terus)
+    // onesLong: 1s sepanjang ~10 SESI SEBELUM t0 (utk PAT10 candle 30s). Paginated (Binance 1s limit 1000/req).
+    let onesLong = [];
+    try {
+      let endT = t0 - 1; const want = tfSec * 10 + 150;
+      for (let i = 0; i < 12 && onesLong.length < want; i++) {
+        const b = await getKlines(sym, "1s", endT, 1000);
+        if (!b || !b.length) break;
+        onesLong = b.concat(onesLong); endT = b[0].time - 1;
+        if (b.length < 1000) break;
+      }
+    } catch (_) {}
     const nowSec = Math.floor(Date.now() / 1000);
     let five5m = [];
     try { five5m = await getKlines(sym, "5m", nowSec - 1, 60); } catch (_) {}
@@ -645,7 +663,7 @@ function createCapture(deps) {
         if (arr.length >= 20) align[t] = SignalCore.analyzeHistoricalTrend(arr, 50).predictDir;
       }
     } catch (_) {}
-    const r = computeSignal({ sym, tf, t0, tfc, idx, ones, five5m, one1m, profile, getModel, SignalCore, nowSec, align });
+    const r = computeSignal({ sym, tf, t0, tfc, idx, ones, onesLong, five5m, one1m, profile, getModel, SignalCore, nowSec, align });
     if (r.skipped) {
       // Sesi FLAT/NOISE: rekam INFORMASIONAL dgn objek sinyal PENUH (field SAMA seperti sesi bersinyal:
       // rsi/micro/liqRatio/rewardPct/gate/power/ofi). Dulu hanya `flat-price` yg disimpan & objek ringkas

@@ -1562,7 +1562,15 @@ function applySnapshot(snap, isHistory) {
     }
   }
    updateGap();
-   if (state.asset && state.interval) renderActive();
+   if (state.asset && state.interval) {
+     const c = activeCandles();
+     const sameLen = chart && chart.candles && c.length === chart.candles.length;
+     // Realtime: update forming candle (incremental) — jangan full setData tiap snapshot/10s.
+     // Full setData hanya bila candle baru bertambah (backfill/rebuild) atau tf-switch.
+     if (sameLen) { if (c.length) chart.updateLast(c[c.length - 1]); }
+     else renderActive({ preserveRange: !chart.follow });
+     updateProjection();
+   }
    updateOrderbook(state.asset);
    hideStatus();
 }

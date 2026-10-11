@@ -20,8 +20,8 @@ const CANDLE_SEC = 5; // each chart candle = 5 seconds (default)
 const CHART_INTERVALS = ["5s", "30s", "1m"];
 const HISTORY = 160;
 const HISTORY_LOAD = 600;       // 1s candles per lazy fetch (~10 minutes)
-const HISTORY_CAP_1S = 1200;   // ~10 menit 1s candles (scrollable window for lazy load)
-const HISTORY_CAP_5S = 250;     // cap on stored 5s candles (~20 min, scrollable)
+const HISTORY_CAP_1S = 18000;   // ~5h 1s candles (lazy window + rebuild-5s source)
+const HISTORY_CAP_5S = 3600;    // cap on stored 5s candles (~5h, scrollable)
 
 // GOAL — "penguat" sinyal yang diinginkan (counter-trend / momentum reversal).
 // Kita HANYA mau sinyal yang BERLAWANAN arah dengan gerakan harga (fade peak):
@@ -173,7 +173,8 @@ function fmtPrice(n) {
 }
 
 function initChart() {
-  chart = new CanvasChart(document.getElementById("chart"));
+  chart = new (window.TVChart || window.CanvasChart)(document.getElementById("chart"));
+  if (typeof window !== "undefined") window.__dbgChart = chart;
   setReach();
   chart.onCrosshair = (info) => {
     if (info && info.candle) updateLegend(info.candle);
@@ -413,28 +414,38 @@ function sessionLock(sym, durMs, now) {
   return last ? last.close : null;
 }
 
-/* ----------------------- History (REST) ----------------------- */
+/* ----------------------- History (REST/WS-replay) ----------------------- */
+const BULK_1M_LIMIT = 400;   // 400×1m→expand=24k 1s, trim ke HISTORY_CAP_1S (5h). 5h cukup & ringan via ngrok/Binance.
+async function loadOneMBulk(sym) {
+  try {
+    const r = await fetch(`/api/klines?symbol=${sym}&tf=1m&limit=${BULK_1M_LIMIT}`);
+    if (!r || !r.ok) return;
+        const j = await r.json();
+        const m1 = (j && Array.isArray(j.candles) ? j.candles : []).map((c) => ({
+      time: Math.floor(+c.time), open: +c.open, high: +c.high, low: +c.low, close: +c.close,
+      vol: +(c.vol || 0), openTime: +c.openTime, closeTime: +c.closeTime,
+    }));
+    const ones = expandTo1s(m1).slice(-HISTORY_CAP_1S);
+    const store = state.cache[sym] && state.cache[sym]["1s"];
+    if (store) { store.candles = ones; store.meta = ones[ones.length - 1] || null; }
+  } catch (_) {}
+}
 async function loadHistory() {
-  const fetches = [];
+  // 5m/15m/1h trend context (best-effort, fire-and-forget; uppercase sym agar Binance tidak 400)
   for (const sym of Object.keys(SYMBOLS)) {
     for (const tf of INTERVALS) {
-      fetches.push(
-        fetchJSON(`/api/v3/klines?symbol=${SYMBOLS[sym]}&interval=${tf}&limit=${HISTORY}`)
-          .then((rows) => {
-            const candles = rows.map((r) => ({
-              time: Math.floor(r[0] / 1000),
-              open: +r[1], high: +r[2], low: +r[3], close: +r[4],
-              vol: +r[5], trades: +r[8],
-              openTime: r[0], closeTime: r[6],
-            }));
-            state.cache[sym][tf].candles = candles;
-            state.cache[sym][tf].meta = candles[candles.length - 1] || null;
-          })
-          .catch(() => {})
-      );
+      fetchJSON(`/api/v3/klines?symbol=${OB_SYMBOLS[sym]}&interval=${tf}&limit=${HISTORY}`)
+        .then((rows) => {
+          const candles = rows.map((r) => ({ time: Math.floor(r[0] / 1000), open: +r[1], high: +r[2], low: +r[3], close: +r[4], vol: +r[5], trades: +r[8], openTime: r[0], closeTime: r[6] }));
+          state.cache[sym][tf].candles = candles;
+          state.cache[sym][tf].meta = candles[candles.length - 1] || null;
+        })
+        .catch(() => {});
     }
   }
-  await Promise.all(fetches);
+  // bulk 1m -> 1s (sumber 5s/30s/1m) — jalan CEPAT via proxy server, tidak ditunggu fetch 5m di atas.
+  await Promise.all(Object.keys(SYMBOLS).map((sym) => loadOneMBulk(sym)));
+  for (const sym of Object.keys(SYMBOLS)) { try { if (state.cache[sym] && state.cache[sym]["1s"]) rebuild5s(sym); } catch (_) {} }
   renderActive();
   updateGap();
 }
@@ -443,9 +454,7 @@ async function loadHistory() {
 // Load older 1m candles (expanded to 1s) when user scrolls chart to the left.
 // Uses /api/klines proxy to avoid geo-blocking; fallback to direct Binance.
 const HISTORY_COOLDOWN = 800; // ms antar trigger lazy-load
-let historyLoading = { BTC: false, ETH: false };
-let historyExhausted = { BTC: false, ETH: false };
-let lastLoadAt = { BTC: 0, ETH: 0 };
+let historyLoading = {}; let historyExhausted = {}; let lastLoadAt = {};
 
 function mergeOlder(sym, ones) {
   if (!ones || !ones.length) return 0;
@@ -455,7 +464,7 @@ function mergeOlder(sym, ones) {
   const fresh1 = ones.filter((c) => !have1.has(c.time));
   added += fresh1.length;
     s1.candles = fresh1.concat(s1.candles);
-    if (s1.candles.length > HISTORY_CAP_1S * 12) s1.candles = s1.candles.slice(-HISTORY_CAP_1S * 12);  // keep ~240 min 1s for rebuild5s
+    if (s1.candles.length > HISTORY_CAP_1S) s1.candles = s1.candles.slice(-HISTORY_CAP_1S);  // keep ~5h 1s for rebuild5s
     return added;
 }
 
@@ -499,7 +508,7 @@ async function loadOlderCandles(sym, limit) {
     const added = mergeOlder(sym, ones);
     if (added === 0) historyExhausted[sym] = true;
     rebuild5s(sym);  // <-- rebuild 5s candles from updated 1s cache
-    if (sym === state.asset) renderActive();
+    if (sym === state.asset) renderActive({ preserveRange: true });
     hideStatus();
   } catch (e) {
     console.warn("[HISTORY] loadOlderCandles error:", e);
@@ -649,9 +658,10 @@ function handleTicker(d) {
 }
 
 /* ----------------------- Render active view ----------------------- */
-function renderActive() {
+function renderActive(opts) {
+  opts = opts || {};
   const candles = activeCandles();
-  chart.setData(candles);
+  chart.setData(candles, { preserveRange: !!opts.preserveRange });
   applyType();
   updateProjection();
   updateLegendFromState();
@@ -1042,7 +1052,10 @@ function applyType() {
     if (_renderTimer) return;
     _renderTimer = setTimeout(() => {
       _renderTimer = null;
-      chart.setData(activeCandles());
+      // Realtime: update candle FORMING terakhir via incremental series.update (bukan full setData).
+      // setData tiap 250ms menghasilkan repaint penuh 3600 candle + reset viewport -> candle "patah"/glitch.
+      const c = activeCandles();
+      if (c.length) chart.updateLast(c[c.length - 1]);
       updateProjection();
       renderDual();          // layar lebar: kolom dual ikut real-time (throttle internal 250ms)
     }, 250);
@@ -1507,13 +1520,23 @@ async function probeProxy() {
   } catch (_) { clearTimeout(to); return null; }
 }
 
+function mergeCandles(existing, incoming, cap) {
+  const byTime = {};
+  for (const c of existing) { if (c && c.time != null) byTime[c.time] = c; }
+  for (const c of incoming) { if (c && c.time != null && !(c.time in byTime)) byTime[c.time] = c; }
+  const out = Object.keys(byTime).map((t) => byTime[t]).sort((a, b) => a.time - b.time);
+  return cap ? out.slice(-cap) : out;
+}
 function applySnapshot(snap, isHistory) {
   for (const k of Object.keys(snap.candles)) {
     for (const tf of Object.keys(snap.candles[k])) {
       const bars = snap.candles[k][tf];
       const store = state.cache[k][tf];
       if (isHistory) {
-        store.candles = bars.slice(-1000);
+        // Untuk 1s: MERGE ke cache bulk (jangan replace) — snapshot hanya 1000 candle terbaru
+        // dan akan menimpa riwayat panjang (5h) dari bulk loadHistory bila di-replace. tf lain replace biasa.
+        const cap = tf === "1s" ? HISTORY_CAP_1S : 1000;
+        store.candles = mergeCandles(store.candles || [], bars, cap);
       } else {
         bars.forEach((b) => {
           const arr = store.candles;
@@ -1652,7 +1675,11 @@ async function refreshTrends() {
   } catch (_) {}
 }
 
-async function startData() {
+function startData() {
+  // bulk-fill 1s cache (5h via proxy 1m → expandTo1s) — jalan sekali di awal, PARALEL dengan SSE/WS.
+  // Tanpa ini, chart 5s/30s/1m cuma punya candle sejak WS/SSE terhubung (1–4 sesi). SSE relay sukses
+  // sehingga startPolling() (tempat lama bulk dipanggil) tidak pernah jalan → 1s cache tak pernah diisi bulk.
+  loadHistory().catch(() => {});
   if (typeof EventSource !== "undefined") { trySSE(); return; }
   startPolling();
 }
@@ -1700,8 +1727,9 @@ function trySSE() {
 }
 function startPolling() {
   // Utamakan DATA PASAR LANGSUNG dari Binance (WS/REST di IP user). Server hanya untuk LOGIKA + fallback.
+  // bulk 1m→1s sudah dijalankan di startData(); di sini hanya nyambung WS (fallback SSE gagal).
   setSrc("langsung (Binance)");
-  loadHistory().then(connectWS).catch(connectWS);
+  connectWS();
   connectRelayRedundant();   // jaminan feed 1s padat (relay server) di samping WS langsung
   // Fallback ringan: bila tak ada koneksi setelah 12s, pakai proxy snapshot SERVER.
   setTimeout(() => {
@@ -2732,7 +2760,7 @@ function buildDual() {
     </div>`).join("");
   dualCharts = {};
   for (const a of ["BTC", "ETH", "BNB"]) {
-    dualCharts[a] = new CanvasChart(document.getElementById(`dc-${a}-chart`));
+    dualCharts[a] = new (window.TVChart || window.CanvasChart)(document.getElementById(`dc-${a}-chart`));
     dualCharts[a].setType(state.type);
     dualCharts[a].fit();
     // Toggle "LIHAT SEMUA": pakai <button> (bukan <details>) supaya bisa sebaris dengan
@@ -4303,6 +4331,6 @@ function start() {
   // (Tombol tes suara terpisah DIHAPUS: kini tes 3 suara ada di chip status suara topbar,
   //  sehingga hanya ada SATU ikon suara dan baris kontrol tidak meluber di layar sempit.)
 
-  window.addEventListener("resize", () => chart && chart.fit());
+  window.addEventListener("resize", () => { if (chart) { try { chart.resize(); } catch (_) {} chart.fit(); } });
 }
 start();

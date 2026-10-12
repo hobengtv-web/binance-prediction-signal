@@ -714,6 +714,10 @@ function createCapture(deps) {
     return { ok: !!ok, rec };
   }
   function mark(key, suffix) { const k = key + (suffix || ""); if (done.has(k)) return false; done.add(k); if (done.size > 6000) { const it = done.values(); for (let i = 0; i < 3000; i++) done.delete(it.next().value); } return true; }
+  // Batalkan kunci sesi saat capture GAGAL sementara (mis. jaringan putus "fetch failed")
+  // supaya tick berikutnya mencoba lagi SELAMA window masih terbuka. Tanpa ini, mark() di depan
+  // membuat sesi terkunci → record hilang permanen hanya karena blip jaringan.
+  function unmark(key, suffix) { done.delete(key + (suffix || "")); }
   async function tick() {
     if (!stats.enabled || busy) return;
     busy = true;
@@ -739,19 +743,19 @@ function createCapture(deps) {
                 if (r.rec.gate && r.rec.gate.accepted) stats.accepted = (stats.accepted || 0) + 1; else stats.rejected = (stats.rejected || 0) + 1;
                 log(`[CAPTURE] ${sym} ${tf} ${r.rec.k} dir=${r.rec.sig.dir} grade=${r.rec.sig.grade || "-"} volRel2=${r.rec.sig.volRel2} surprise=${String(r.rec.sig.surprise).slice(0, 6)} gap=${(r.rec.sig.learn && r.rec.sig.learn.gap) || "-"} ${r.rec.gate.accepted ? "DITERIMA" : "DITOLAK:" + (r.rec.gate.reject || "-")}`);
               }
-            } catch (e) { stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] gagal ${sym} ${tf}: ${e && e.message}`); }
+            } catch (e) { unmark(key, ""); stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] gagal ${sym} ${tf} (retry): ${e && e.message}`); }
             continue;
           }
           // (2) rekam late 60s
           if (REC_LATE && off >= 56000 && off <= 75000) {
             if (!mark(key, "_L60")) continue;
-            try { await captureLate(sym, tf, t0 / 1000, 60); } catch (e) { stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] late60 gagal ${sym} ${tf}: ${e && e.message}`); }
+            try { await captureLate(sym, tf, t0 / 1000, 60); } catch (e) { unmark(key, "_L60"); stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] late60 gagal ${sym} ${tf} (retry): ${e && e.message}`); }
             continue;
           }
           // (3) rekam late 90s
           if (REC_LATE && off >= 86000 && off <= 105000) {
             if (!mark(key, "_L90")) continue;
-            try { await captureLate(sym, tf, t0 / 1000, 90); } catch (e) { stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] late90 gagal ${sym} ${tf}: ${e && e.message}`); }
+            try { await captureLate(sym, tf, t0 / 1000, 90); } catch (e) { unmark(key, "_L90"); stats.errors++; stats.lastErr = e && e.message; log(`[CAPTURE] late90 gagal ${sym} ${tf} (retry): ${e && e.message}`); }
             continue;
           }
         }

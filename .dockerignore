@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+*.bak
+.DS_Store
+
+# data lokal & artefak besar (di-mount lewat volume, bukan di image)
+ledger
+models
+backtest/data
+backtest/data30
+backtest/out30
+backtest/out

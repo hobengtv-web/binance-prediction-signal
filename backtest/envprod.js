@@ -1,0 +1,16 @@
+/* Env produksi (signal.env) — WAJIB di-set agar backtest = logic produksi. */
+process.env.GATE_REQUIRE_GRADE = "1";
+process.env.GATE_LOOSEN_KEEP_LIQ = "1";
+process.env.GATE_LOOSEN_MOM = "0";
+process.env.FLAT_ENTRY = "1";
+process.env.FLAT_ENTRY_RSI = "40";
+process.env.RSI1M_GATE = "1";
+process.env.LATE_SIGNAL = "1";
+process.env.LATE_MV60 = "0.02";
+process.env.MIN_MV2_PCT = "0.005";
+process.env.TA_SIMPLE = "1";
+process.env.TA_TRAIL_ARM_PCT = "50";
+process.env.TA_TRAIL_CB_PCT = "0.12";
+process.env.TA_ENTRY_MIN_REMAIN_SEC = "90";
+process.env.TA_ENTRY_MIN_NOW_PCT = "0";
+process.env.LEARN_WINDOW_SEC = "172800";

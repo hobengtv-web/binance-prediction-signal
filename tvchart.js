@@ -28,14 +28,14 @@
       grid: { vertLines: { color: "rgba(255,255,255,.05)" }, horzLines: { color: "rgba(255,255,255,.05)" } },
       rightPriceScale: { borderColor: "rgba(255,255,255,.10)", scaleMargins: { top: 0.08, bottom: 0.08 } },
       timeScale: { borderColor: "rgba(255,255,255,.10)", timeVisible: true, secondsVisible: true, rightOffset: 3, barSpacing: 7, minBarSpacing: 0.5 },
-      crosshair: { mode: LCc.CrosshairMode.Normal, vertLine: { color: "rgba(255,255,255,.12)", width: 1, labelVisible: false }, horzLine: { color: "rgba(255,255,255,.12)", width: 1, labelVisible: false } },
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: false, vertTouchDrag: true },
+      crosshair: { mode: LCc.CrosshairMode.Normal, vertLine: { color: "rgba(255,255,255,.14)", width: 1, labelVisible: false }, horzLine: { color: "rgba(255,255,255,.14)", width: 1, labelVisible: true, labelBackgroundColor: "#2962ff" } },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       handleScale: { mouseWheel: true, pinch: true, pressedMouseMove: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
       animationDuration: 0,
     });
     this.series = this.chart.addCandlestickSeries({
       upColor: UP, downColor: DOWN, borderVisible: false, wickUpColor: UP, wickDownColor: DOWN,
-      priceLineVisible: false, lastValueVisible: false,
+      priceLineVisible: false, lastValueVisible: true,
     });
     this.projSeries = this.chart.addLineSeries({ color: UP, lineWidth: 2, lineStyle: LCc.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     this.trendSeries = this.chart.addLineSeries({ color: ACCENT, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
@@ -65,12 +65,10 @@
       }
     });
     this.chart.subscribeCrosshairMove((param) => {
-      if (!this.onCrosshair) return;
       try {
-        if (!param || !param.point || !param.time) { this.onCrosshair(null); return; }
-        const p = param.seriesData && param.seriesData.get(this.series);
-        if (!p) { this.onCrosshair(null); return; }
-        this.onCrosshair({ t: param.time, price: p.close, x: param.point.x, y: param.point.y });
+        const p = param && param.point && param.time && param.seriesData && param.seriesData.get(this.series);
+        // Hanya info harga (label harga di sumbu kanan sudah dari library). Legend kiri ikut candle hover.
+        if (this.onCrosshair) this.onCrosshair(p ? { t: param.time, price: p.close, candle: p, x: param.point.x, y: param.point.y } : null);
       } catch (_) {}
     });
     this._raf();
@@ -87,10 +85,10 @@
     try { if (line) this.series.removePriceLine(line); } catch (_) {}
     if (line) this[prop] = line;
   };
-  TVChart.prototype._line = function (price, color, title, dashed, axisLabel) {
+  TVChart.prototype._line = function (price, color, title, dashed, axisLabel, width) {
     if (price == null || !isFinite(price)) return null;
     return this.series.createPriceLine({
-      price, color, lineWidth: 1,
+      price, color, lineWidth: width || 1,
       lineStyle: dashed ? window.LightweightCharts.LineStyle.Dashed : window.LightweightCharts.LineStyle.Solid,
       axisLabelVisible: axisLabel !== false, title: title || "",
     });
@@ -165,9 +163,13 @@
     this.guides = (list || []).filter((g) => g && isFinite(g.p));
     for (const l of this._guideLines) { try { this.series.removePriceLine(l); } catch (_) {} }
     this._guideLines = [];
-    const COL = { "g-entry": "#3b82f6", "g-add": "#a855f7", "g-target": "#10b981", "g-pos": "#f0b90b", "g-sr": "#64748b" };
     for (const g of this.guides) {
-      const l = this._line(g.p, COL[g.cls] || "#64748b", g.label || "", true, false);
+      // AKTIF (memicu entry/close Trade Assistant) → KUNING SOLID tebal, label tampil.
+      // Non-aktif: S/R abu, level lain putih redup, putus-putus (samakan dgn CanvasChart lama).
+      const active = !!g.active;
+      const col = active ? "#f0b90b" : "rgba(255,255,255,.42)";
+      // Garis saja (tanpa title/axis-label) — label digambar di KIRI oleh overlay _sync.
+      const l = this._line(g.p, col, "", !active, false, active ? 2 : 1);
       if (l) this._guideLines.push(l);
     }
   };
@@ -181,6 +183,23 @@
     const ts = this.chart.timeScale();
     const xOf = (t) => { const x = ts.timeToCoordinate(t); return x == null ? null : x; };
     const yOf = (p) => { const y = this.series.priceToCoordinate(p); return y == null ? null : y; };
+
+    // Label garis bantu (ENTRY/TARGET/R/S) di KIRI — tidak menutupi candle terbaru di kanan.
+    if (this.guides && this.guides.length) {
+      ctx.save();
+      ctx.font = "10px -apple-system,Segoe UI,Roboto,sans-serif";
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      for (const g of this.guides) {
+        if (!g.label) continue;
+        const y = yOf(g.p); if (y == null || y < 8 || y > h - 6) continue;
+        const active = !!g.active;
+        const col = active ? "#f0b90b" : "rgba(226,232,240,.72)";
+        const tw = ctx.measureText(g.label).width;
+        ctx.fillStyle = "rgba(15,23,42,.80)"; ctx.fillRect(4, y - 6, tw + 8, 12);
+        ctx.fillStyle = col; ctx.fillText(g.label, 8, y);
+      }
+      ctx.restore();
+    }
 
     // LOCK price level: garis dashed penuh + label kiri (bukan di kanan axis → tak menutupi candle realtime)
     if (this.decision != null) {

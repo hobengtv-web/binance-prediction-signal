@@ -214,6 +214,9 @@ function computeTradePlan(bias, ctx) {
   const elapsedSecNow = (remainSecNow != null) ? (durSecNow - remainSecNow) : null;
   const tooEarly = ENTRY_MIN_ELAPSED_SEC > 0 && elapsedSecNow != null && elapsedSecNow < ENTRY_MIN_ELAPSED_SEC
     && !(extremeReversal && turn.count >= 4);   // pengecualian: reversal SANGAT ekstrem boleh lebih awal
+  // BATAS MAKS: TA TIDAK entry bila sesi sudah berjalan > ENTRY_MAX_ELAPSED_FRAC×durasi (default 0.5 = 50%).
+  const _maxFrac = (TA.ENTRY_MAX_ELAPSED_FRAC != null) ? TA.ENTRY_MAX_ELAPSED_FRAC : 0.5;
+  const tooLate50 = _maxFrac > 0 && elapsedSecNow != null && elapsedSecNow > _maxFrac * durSecNow;
 
   // ===== KELAYAKAN JARAK KE TARGET (LOCK) vs SISA WAKTU =====
   // Sebelumnya "reversal ekstrem" boleh menembus gate waktu TANPA memeriksa jarak: TA bisa
@@ -309,6 +312,10 @@ function computeTradePlan(bias, ctx) {
     } else if (realReversal) {
       state = "STAND_DOWN"; cls = "exit";
       action = `JANGAN ENTRY — tren historis berbalik & arus kuat melawan (kemungkinan reversal nyata)`;
+    } else if (tooLate50) {
+      // BATAS 50% DURASI: waktu sudah mepet untuk mengejar lock -> TA TIDAK entry.
+      state = "WAIT"; cls = "wait";
+      action = `TUNGGU — sesi ${Math.round(elapsedSecNow)}s > ${Math.round(_maxFrac * 100)}% durasi (${Math.round(_maxFrac * durSecNow)}s): entry TA ditutup (waktu mepet)`;
     } else if (blockLateEntry) {
       // Sisa waktu sesi tidak cukup untuk mencapai LOCK -> jangan entry sekarang.
       state = "WAIT"; cls = "wait";

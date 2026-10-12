@@ -4,8 +4,13 @@ node_modules/
 
 # Backtest artifacts: raw klines and the full signal dump are large and regenerable.
 backtest/data/
+backtest/data30/
 backtest/out/signals.json
 backtest/out/exp_gate_report.jsonl
+backtest/out30/
+
+# Import lokal (data besar, bukan artefak repo)
+_railway_import/
 
 # Phase 2 ledger (data lokal, bukan artefak repo)
 ledger/

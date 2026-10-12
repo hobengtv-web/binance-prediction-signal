@@ -351,6 +351,63 @@ const MODEL_DIR = path.join(LEDGER_DIR, "..", "models");
 const MODEL_CUR = path.join(MODEL_DIR, "current");
 const MODEL_LOG = path.join(MODEL_DIR, "promote.jsonl");
 const DEFAULT_OUT = path.join(__dirname, "backtest", "out");
+
+/* ===== RETENSI DATA — batas ukuran total (default 1 GB). Bila lewat, buang data TERLAMA dulu. =====
+   Cakupan: LEDGER_DIR (signals.jsonl + state) & MODEL_DIR (versi model + promote.jsonl).
+   Ubah batas via env DATA_MAX_MB (mis. DATA_MAX_MB=1024). */
+const DATA_MAX_MB = Math.max(64, Number(process.env.DATA_MAX_MB) || 1024);
+const DATA_BUDGET = Math.round(DATA_MAX_MB * 1024 * 1024);
+function _dirBytes(dir) {
+  let total = 0, ents = [];
+  try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return 0; }
+  for (const e of ents) {
+    const p = path.join(dir, e.name);
+    try { total += e.isDirectory() ? _dirBytes(p) : fs.statSync(p).size; } catch (_) {}
+  }
+  return total;
+}
+function _dataBytes() { return _dirBytes(LEDGER_DIR) + _dirBytes(MODEL_DIR); }
+function _rmSafe(p) { try { fs.rmSync(p, { recursive: true, force: true }); return true; } catch (_) { return false; } }
+function _trimJsonlHead(file, maxBytes) {   // simpan byte TERBARU saja, potong di batas baris
+  try {
+    const st = fs.statSync(file);
+    if (st.size <= maxBytes) return 0;
+    const start = Math.max(0, st.size - maxBytes);
+    const fd = fs.openSync(file, "r");
+    const buf = Buffer.alloc(st.size - start);
+    fs.readSync(fd, buf, 0, buf.length, start); fs.closeSync(fd);
+    let text = buf.toString("utf8");
+    const nl = text.indexOf("\n"); if (nl >= 0) text = text.slice(nl + 1);
+    fs.writeFileSync(file, text);
+    return st.size - Buffer.byteLength(text);
+  } catch (_) { return 0; }
+}
+function enforceDataBudget(reason) {
+  const mb = (b) => (b / 1048576).toFixed(1);
+  let total = _dataBytes();
+  if (total <= DATA_BUDGET) { if (reason === "startup") console.log(`[RETENTION] batas ${DATA_MAX_MB}MB · terpakai ${mb(total)}MB — OK`); return; }
+  console.log(`[RETENTION] total ${mb(total)}MB > ${DATA_MAX_MB}MB (${reason}) — eviksi data terlama`);
+  for (const d of [LEDGER_DIR, MODEL_DIR]) {          // 1) file backup lama
+    let ents = []; try { ents = fs.readdirSync(d); } catch (_) {}
+    for (const n of ents) if (/\.(bak|local-bak|old)$/.test(n)) _rmSafe(path.join(d, n));
+  }
+  let vers = [];                                      // 2) versi model TERLAMA (models/v-*)
+  try { vers = fs.readdirSync(MODEL_DIR).filter((n) => n.startsWith("v-")).sort(); } catch (_) {}
+  for (const v of vers) { if (_dataBytes() <= DATA_BUDGET) break; if (_rmSafe(path.join(MODEL_DIR, v))) console.log(`[RETENTION] hapus model versi lama ${v}`); }
+  if (_dataBytes() > DATA_BUDGET) {                   // 3) prune record ledger TERLAMA (memori + disk)
+    const overflow = _dataBytes() - DATA_BUDGET;
+    const recs = [...ledger.values()].sort((a, b) => (a.t0 || 0) - (b.t0 || 0));
+    let freed = 0, i = 0;
+    for (; i < recs.length && freed < overflow; i++) { try { freed += JSON.stringify(recs[i]).length + 1; } catch (_) {} ledger.delete(recs[i].k); }
+    if (i > 0) { compactLedger(); console.log(`[RETENTION] prune ${i} record ledger terlama (~${mb(freed)}MB)`); }
+  }
+  if (_dataBytes() > DATA_BUDGET) _trimJsonlHead(MODEL_LOG, Math.max(256 * 1024, Math.floor(DATA_BUDGET * 0.02)));   // 4) promote.jsonl
+  if (_dataBytes() > DATA_BUDGET) console.log(`[RETENTION] PERINGATAN: masih ${mb(_dataBytes())}MB > ${DATA_MAX_MB}MB setelah eviksi`);
+  else console.log(`[RETENTION] selesai — total ${mb(_dataBytes())}MB (batas ${DATA_MAX_MB}MB)`);
+}
+enforceDataBudget("startup");
+setInterval(() => { try { enforceDataBudget("tick"); } catch (e) { console.warn("[RETENTION] error:", e && e.message); } }, 5 * 60 * 1000);
+
 const EXP_GATE = require("./exp-gate.js");
 const EXT = require("./ext-features.js");   // sumber data eksternal (Batch 1) — observasional
 const MODEL_FILES = { gate: "learn_gate.json", touch: "learn_touch90.json", lessons: "lessons.json", gates: "gates.json", pnl: "learn_pnl.json", apply: "learn_apply.json", veto: "learn_veto.json", meta: "meta.json", flat: "learn_flat.json", exp: "exp.json", rolling: "learn_rolling.json", spread: "learn_spread.json", score: "learn_score.json", sizing: "learn_sizing.json", ta: "learn_ta.json", mv2: "learn_mv2.json", mv60: "learn_mv60.json", wonblock: "learn_wonblock.json" };
@@ -977,8 +1034,32 @@ function tradeHoursNow() {
   return { tz: "WIB", keys, updatedAt: v.generated || null, trigger: v.trigger || null, thr: v.thr, minN: v.minN, src: "learner" };
 }
 
+const DASH_TOKEN = process.env.DASH_TOKEN || "";
 http.createServer(async (req, res) => {
   const u = new URL(req.url, "http://x");
+
+  // AKSES PUBLIK (opsional) — bila DASH_TOKEN di-set, request via tunnel (ada header proxy CF)
+  // wajib membawa token: ?k=TOKEN (sekali → disimpan sebagai cookie) atau cookie dock=TOKEN.
+  // Akses lokal/LAN (tanpa header proxy) tidak perlu token. SSE/EventSource ikut cookie (same-origin).
+  if (DASH_TOKEN && (req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"])) {
+    const ck = (req.headers["cookie"] || "").split(";").map((s) => s.trim());
+    if (u.searchParams.get("k") === DASH_TOKEN) {
+      res.setHeader("Set-Cookie", "dock=" + DASH_TOKEN + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000");
+    } else if (!ck.includes("dock=" + DASH_TOKEN)) {
+      res.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" });
+      res.end("Akses butuh token. Buka: /?k=<TOKEN>");
+      return;
+    }
+  }
+
+  // READ-ONLY untuk akses PUBLIK: request lewat tunnel (header proxy Cloudflare) hanya boleh
+  // GET/HEAD/OPTIONS. Mutasi (POST/DELETE — mis. POST /api/ledger, trigger refit) HANYA dari lokal (bot).
+  if ((req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"]) &&
+      req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS") {
+    res.writeHead(403, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end('{"error":"read-only (public)"}');
+    return;
+  }
 
   if (u.pathname === "/api/snapshot") {
     try {

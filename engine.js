@@ -100,6 +100,7 @@ function createEngine(deps) {
         // sesi dulu memicu re-emit sinyal telat yang ditolak BOT; kini cukup jadi "resume" saja.
         const EMIT_MAX_MS = Number(process.env.EMIT_START_MAX_MS || 90000);
         if (onEvent && latMs <= EMIT_MAX_MS) {
+          const _off2 = keyOffHours(sym + "_" + tf, t0);
           try { onEvent({ type: "start", sym, tf, t0: t0, dir: r.signal.dir, accepted: !!r.signal.accepted,
             grade: r.signal.grade || null, surprise: r.signal.surprise != null ? +r.signal.surprise.toFixed(2) : null,
             golden: r.signal.golden || null,
@@ -107,7 +108,7 @@ function createEngine(deps) {
             spreadMaxPct: (typeof r.signal.spreadMaxPct === "number") ? r.signal.spreadMaxPct : null,
             stakeMult: (typeof r.signal.stakeMult === "number") ? r.signal.stakeMult : null,
             taTrailCbPct: (typeof r.signal.taTrailCbPct === "number") ? r.signal.taTrailCbPct : null,
-            exp: Array.isArray(r.signal.exp) ? r.signal.exp : [], latMs: latMs }); } catch (_) {}
+            exp: Array.isArray(r.signal.exp) ? r.signal.exp : [], latMs: latMs, offHour: _off2.off, offHours: _off2.hours }); } catch (_) {}
         } else if (onEvent) {
           log(`[ENGINE] ${sym} ${tf} terkunci-telat ${Math.round(latMs / 1000)}s > ${Math.round(EMIT_MAX_MS / 1000)}s — TIDAK re-emit start (anti sinyal basi)`);
         }
@@ -117,6 +118,15 @@ function createEngine(deps) {
       }
       return true;
     } finally { _locking[lk] = false; }
+  }
+  /* ===== JAM OFF per-key (adaptif dari model veto) =====
+     Dipakai SERAGAM oleh jalur 2s, jalur LATE, dan snapshot/event supaya jam buruk (mis. BTC_5m jam 22)
+     tidak bisa dilewati lewat jalur mana pun. hours diambil dari model veto yang sama dgn capture.js. */
+  function keyOffHours(key, t0Sec) {
+    let hours = [];
+    try { const vm = getModel("veto"); const hk = vm && vm.keys && vm.keys[key]; if (hk && Array.isArray(hk.hours)) hours = hk.hours; } catch (_) {}
+    const wibH = Math.floor(((t0Sec + 7 * 3600) % 86400) / 3600);
+    return { hours, wibH, off: hours.indexOf(wibH) >= 0 };
   }
   /* ===== LATE-SIGNAL (60s / 90s) =====
      Bila sinyal 2s TIDAK dihasilkan (flat), pada detik ke-60 & ke-90 evaluasi arah MOMENTUM candle-60s
@@ -131,10 +141,16 @@ function createEngine(deps) {
     let sec = 0;
     if (off >= 58 && off <= 76) sec = 60; else if (off >= 86 && off <= 106) sec = 90; else return;
     const key = sym + "_" + tf;
-    // KEY-NONTRADE (hard): jangan emit sinyal LATE utk key yg realized $-nya kronis negatif. Tanpa ini,
-    // gate di capture.js hanya menutup jalur 2s — sedangkan late justru kontributor entry terbesar
-    // (mis. BNB_5m: 77 dari 116 entry adalah late). Dibaca dari model veto (prof.keys[key].tradeable).
-    try { const _vm = getModel("veto"); const _pk = _vm && _vm.prof && _vm.prof.keys && _vm.prof.keys[key]; if (_pk && _pk.tradeable === false) return; } catch (_) {}
+    // KEY-NONTRADE (hard) + JAM OFF (per-key adaptif): jangan emit sinyal LATE utk key yg realized
+    // $-nya kronis negatif, DAN jangan lewati veto jam OFF yang sama dgn jalur 2s. Sebelumnya late
+    // hanya cek `tradeable` → jam buruk (mis. BTC_5m jam 22) tetap entry lewat late.
+    try {
+      const _vm = getModel("veto");
+      const _pk = _vm && _vm.prof && _vm.prof.keys && _vm.prof.keys[key];
+      if (_pk && _pk.tradeable === false) return;
+    } catch (_) {}
+    const _off = keyOffHours(key, t0);
+    if (_off.off) { log(`[ENGINE] ${sym} ${tf} late dilewati: jam OFF WIB ${_off.wibH}:xx (hours=${_off.hours.join(",")})`); return; }
     const tfc = (market[sym] && market[sym].tf && market[sym].tf[tf]) || [];
     const c0 = tfc.find((c) => c.time === t0);
     const lock = c0 ? c0.open : (cur.plan && cur.plan.lock != null ? cur.plan.lock : null);
@@ -162,7 +178,7 @@ function createEngine(deps) {
       cur.disp = computeDisp(sym, tf, t0, nowSec, cur.signal, market[sym], cur.plan);
     } catch (_) {}
     if (onEvent) { try { onEvent({ type: "start", sym, tf, t0, dir, accepted: true, lock, stage, flatEntry: false,
-      spreadMaxPct: cur.signal.spreadMaxPct, stakeMult: cur.signal.stakeMult, taTrailCbPct: cur.signal.taTrailCbPct, exp: [], latMs: off * 1000, at: Date.now() }); } catch (_) {} }
+      spreadMaxPct: cur.signal.spreadMaxPct, stakeMult: cur.signal.stakeMult, taTrailCbPct: cur.signal.taTrailCbPct, exp: [], latMs: off * 1000, at: Date.now(), offHour: _off.off, offHours: _off.hours }); } catch (_) {} }
     log(`[ENGINE] ${sym} ${tf} ${stage} SINYAL dir=${dir} mv${sec}=${mv.toFixed(3)}% (>=${thr}) → emit start`);
     saveSessions();
   }
@@ -619,9 +635,11 @@ function createEngine(deps) {
     const sess = session[sym] && session[sym][tf];
     const same = !!(sess && sess.t0 === t0 / 1000);
     const sig = same ? sess.signal : null;
+    const offh = keyOffHours(sym + "_" + tf, t0 / 1000);
     return {
       t0: t0 / 1000,
       skipped: same ? sess.skipped : "pending",
+      offHour: offh.off, offHours: offh.hours, wibHour: offh.wibH,
       signal: sig ? Object.assign({}, sig, { verdict: sig.accepted ? sig.dir : "flat", t0: same ? sess.t0 : null }) : null,
       plan: same ? (sess.plan || null) : null,
       // LOCK sesi: harga OPEN candle sesi — SELALU tersedia walau sinyalnya belum terkunci atau
@@ -652,12 +670,14 @@ function createEngine(deps) {
       const sess = session[sym] && session[sym][tf];
       const sameSession = !!(sess && sess.t0 === t0 / 1000);
       const sig = sameSession ? sess.signal : null;
+      const offh = keyOffHours(sym + "_" + tf, t0 / 1000);
       // Semua tf dilayani server (lihat TFS) -> klien tidak perlu menghitung sinyal sendiri.
       const all = {};
       for (const t of tfsOf(sym)) all[t] = tfEntry(sym, t, px);
       out.assets[sym] = {
         all,
         price: px,
+        offHour: offh.off, offHours: offh.hours, wibHour: offh.wibH,
         // LOCK per aset: dari sinyal, atau open candle sesi (selalu ada) bila sinyal belum/skip.
         lock: (sig && sig.lock != null) ? sig.lock : lockOpenOf(sym, tf, t0 / 1000),
         deltaUsd: (px != null && sig && sig.lock) ? +(px - sig.lock).toFixed(2) : null,

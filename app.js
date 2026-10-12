@@ -85,8 +85,9 @@ const state = {
   viaProxy: false,
 };
 
-let serverTimeOffset = 0;  // client now → server now correction (ms)
+let needsFullRender = false; // set true bila 1s → 5s di-rebuild (rebuild5s) agar tidak pakai updateLast
 let lastTimeSync = 0;      // Date.now() of last successful time sync
+let serverTimeOffset = 0;  // client now → server now correction (ms)
 let _lastTradeOffsetAt = 0; // throttle for trade-derived offset updates
 function serverNow() { return Date.now() + serverTimeOffset; }
 // Re-sync Binance time if it's been stale for >3s (catches missed syncs)
@@ -173,7 +174,9 @@ function fmtPrice(n) {
 }
 
 function initChart() {
-  chart = new (window.TVChart || window.CanvasChart)(document.getElementById("chart"));
+  const container = document.getElementById("chart");
+  container.innerHTML = "";
+  chart = new (window.TVChart || window.CanvasChart)(container);
   if (typeof window !== "undefined") window.__dbgChart = chart;
   setReach();
   chart.onCrosshair = (info) => {
@@ -202,18 +205,31 @@ function activeCandles() {
 /* ----- 1s -> chart interval aggregation (5s/30s/1m) ----- */
 const CHART_SEC = { "5s": 5, "30s": 30, "1m": 60 };
 function aggregateInterval(ones, sec) {
+  if (!ones || ones.length === 0) return [];
   const sorted = ones.slice().sort((a, b) => a.time - b.time);
   const out = [];
   for (const b of sorted) {
-    const t = Math.floor(b.time / sec) * sec;
-    const last = out[out.length - 1];
+    // Pastikan time adalah angka
+    const bTime = Math.floor(+b.time);
+    const t = Math.floor(bTime / sec) * sec;
+    
+    let last = out[out.length - 1];
     if (last && last.time === t) {
       last.high = Math.max(last.high, b.high);
       last.low = Math.min(last.low, b.low);
       last.close = b.close;
       last.vol = (last.vol || 0) + (b.vol || 0);
     } else {
-      out.push({ time: t, open: b.open, high: b.high, low: b.low, close: b.close, vol: b.vol || 0, openTime: t * 1000, closeTime: (t + sec) * 1000 });
+      out.push({ 
+        time: t, 
+        open: b.open, 
+        high: b.high, 
+        low: b.low, 
+        close: b.close, 
+        vol: b.vol || 0, 
+        openTime: t * 1000, 
+        closeTime: (t + sec) * 1000 
+      });
     }
   }
   return out;
@@ -415,19 +431,43 @@ function sessionLock(sym, durMs, now) {
 }
 
 /* ----------------------- History (REST/WS-replay) ----------------------- */
-const BULK_1M_LIMIT = 400;   // 400×1m→expand=24k 1s, trim ke HISTORY_CAP_1S (5h). 5h cukup & ringan via ngrok/Binance.
-async function loadOneMBulk(sym) {
+// Bulk-fill cache 1s dengan klines 1 DETIK ASLI dari Binance (via proxy server).
+// Binance menyediakan 1s klines (<=1000/permintaan, ~7 hari terakhir). Ambil beberapa halaman
+// lalu MERGE by time (dedupe) supaya 5s/30s tidak lagi "duplikat" seperti hasil expand 1m.
+const ONE_S_PAGE = 1000;   // max klines 1s per request
+const ONE_S_PAGES = 6;     // 6 × 1000 = ~100 menit 1s asli di awal (cukup utk semua chart interval)
+function mapRestKline(c) {
+  return {
+    time: Math.floor(+c.time), open: +c.open, high: +c.high, low: +c.low, close: +c.close,
+    vol: +(c.vol || 0), trades: +(c.trades || 0), openTime: +c.openTime, closeTime: +c.closeTime,
+  };
+}
+async function fetchReal1s(sym, beforeSec, limit) {
+  const url = `/api/klines?symbol=${sym}&tf=1s&limit=${limit}` + (beforeSec ? `&before=${beforeSec}` : "");
+  const r = await fetch(url);
+  if (!r || !r.ok) return [];
+  const j = await r.json().catch(() => null);
+  const rows = (j && Array.isArray(j.candles)) ? j.candles : [];
+  return rows.map(mapRestKline).filter((c) => c.time && isFinite(c.time));
+}
+async function loadOneSBulk(sym) {
   try {
-    const r = await fetch(`/api/klines?symbol=${sym}&tf=1m&limit=${BULK_1M_LIMIT}`);
-    if (!r || !r.ok) return;
-        const j = await r.json();
-        const m1 = (j && Array.isArray(j.candles) ? j.candles : []).map((c) => ({
-      time: Math.floor(+c.time), open: +c.open, high: +c.high, low: +c.low, close: +c.close,
-      vol: +(c.vol || 0), openTime: +c.openTime, closeTime: +c.closeTime,
-    }));
-    const ones = expandTo1s(m1).slice(-HISTORY_CAP_1S);
     const store = state.cache[sym] && state.cache[sym]["1s"];
-    if (store) { store.candles = ones; store.meta = ones[ones.length - 1] || null; }
+    if (!store) return;
+    const byTime = new Map();
+    for (const c of store.candles) byTime.set(c.time, c);   // simpan candle live WS lebih dulu
+    let before = 0;
+    for (let page = 0; page < ONE_S_PAGES; page++) {
+      const batch = await fetchReal1s(sym, before, ONE_S_PAGE);
+      if (!batch.length) break;
+      for (const c of batch) if (!byTime.has(c.time)) byTime.set(c.time, c); // WS menang, jangan timpa live
+      before = batch[0].time - 1;                            // mundur ke detik yang lebih lama
+      if (batch.length < ONE_S_PAGE) break;
+    }
+    let merged = [...byTime.values()].sort((a, b) => a.time - b.time);
+    if (merged.length > HISTORY_CAP_1S) merged = merged.slice(-HISTORY_CAP_1S);
+    store.candles = merged;
+    store.meta = merged[merged.length - 1] || null;
   } catch (_) {}
 }
 async function loadHistory() {
@@ -443,8 +483,8 @@ async function loadHistory() {
         .catch(() => {});
     }
   }
-  // bulk 1m -> 1s (sumber 5s/30s/1m) — jalan CEPAT via proxy server, tidak ditunggu fetch 5m di atas.
-  await Promise.all(Object.keys(SYMBOLS).map((sym) => loadOneMBulk(sym)));
+  // bulk klines 1s ASLI (sumber 5s/30s/1m) — jalan CEPAT via proxy server, tidak ditunggu fetch 5m di atas.
+  await Promise.all(Object.keys(SYMBOLS).map((sym) => loadOneSBulk(sym)));
   for (const sym of Object.keys(SYMBOLS)) { try { if (state.cache[sym] && state.cache[sym]["1s"]) rebuild5s(sym); } catch (_) {} }
   renderActive();
   updateGap();
@@ -469,32 +509,16 @@ function mergeOlder(sym, ones) {
 }
 
 async function fetchOlder(sym, beforeSec, limit) {
-  // Binance REST tidak dukung interval=1s -> fetch direct `interval=1s` selalu gagal (CORS + 400).
-  // Pake PROXY SERVER (same-origin, tanpa CORS) berbasis 1m candles, lalu kembangkan jadi 1s via
-  // expandTo1s. Berlaku untuk semua aset termasuk BNB. (Live 1s tetap via WS.)
-  const histLimit = Math.min(limit, 1000);
-  try {
-    const r = await fetch(`/api/klines?symbol=${sym}&tf=1m&before=${beforeSec}&limit=${histLimit}`);
-    if (r.ok) {
-      const j = await r.json();
-      if (j && Array.isArray(j.candles) && j.candles.length) return expandTo1s(j.candles);
-    }
-  } catch (e) { console.warn("[HISTORY] proxy 1m fetch failed:", e && e.message); }
-  throw new Error("history gagal (proxy 1m)");
+  // Klines 1 DETIK ASLI (bukan expand 1m) supaya 5s/30s tetap akurat saat scroll ke kiri.
+  // beforeSec = candle 1s tertua yang sudah dimiliki; ambil yang lebih lama darinya (endTime = (beforeSec-1)s).
+  const histLimit = Math.min(limit, ONE_S_PAGE);
+  const batch = await fetchReal1s(sym, beforeSec - 1, histLimit);
+  if (batch.length) return batch;
+  throw new Error("history gagal (1s kosong)");
 }
 
-// Expand 1m candles into 60 one-second candles (same OHLC per second within the minute)
-function expandTo1s(candles) {
-  const ones = [];
-  for (const c of candles) {
-    const baseTime = c.time;       // start of minute (in seconds)
-    for (let s = 0; s < 60; s++) {
-      const t = baseTime + s;
-      ones.push({ time: t, open: c.open, high: c.high, low: c.low, close: c.close, vol: (c.vol || 0) / 60, openTime: t * 1000, closeTime: (t + 1) * 1000 });
-    }
-  }
-  return ones.sort((a, b) => a.time - b.time);
-}
+// (dihapus) expandTo1s sebelumnya memalsukan 60 candle 1s dari 1 candle 1m sehingga
+// 5s/30s tampak "duplikat". Sekarang seluruh history memakai klines 1s ASLI.
 
 async function loadOlderCandles(sym, limit) {
   if (historyLoading[sym] || historyExhausted[sym]) return Promise.resolve();
@@ -605,15 +629,22 @@ function handleKline(d) {
 
 // Candle feeder (data dari server: SSE market-stream + REST klines)
 function feedCandle(symKey, tf, candle) {
-  const store = state.cache[symKey][tf];
+  const store = state.cache[symKey] && state.cache[symKey][tf];
+  if (!store) return;
   const arr = store.candles;
   const last = arr[arr.length - 1];
   if (last && last.time === candle.time) arr[arr.length - 1] = candle;
   else if (!last || candle.time > last.time) { arr.push(candle); if (arr.length > HISTORY_CAP_1S) arr.shift(); }
   store.meta = candle;
-   if (tf === "1s") rebuild5s(symKey);
 
-  if (symKey === state.asset && tf === "1s") { scheduleRender(); updateMobilePrediction(); }
+  if (tf === "1s") {
+    rebuild5s(symKey);                 // 5s/30s/1m SELALU dibangun dari 1s ASLI
+    if (symKey === state.asset) needsFullRender = true;
+  }
+  // tf 5m/15m/1h hanya konteks sinyal — JANGAN dikirim ke chart 5s/30s/1m.
+
+  if (needsFullRender) scheduleRender();
+  updateMobilePrediction();
   updateGap();
 }
 
@@ -641,6 +672,7 @@ async function backfillRecent1s() {
         store.candles = [...map.values()].sort((a, b) => a.time - b.time);
         if (store.candles.length > HISTORY_CAP_1S) store.candles = store.candles.slice(-HISTORY_CAP_1S);
         rebuild5s(sym);
+        needsFullRender = true;
       } catch (_) {}
     }
     scheduleRender();
@@ -1052,10 +1084,13 @@ function applyType() {
     if (_renderTimer) return;
     _renderTimer = setTimeout(() => {
       _renderTimer = null;
-      // Realtime: update candle FORMING terakhir via incremental series.update (bukan full setData).
-      // setData tiap 250ms menghasilkan repaint penuh 3600 candle + reset viewport -> candle "patah"/glitch.
       const c = activeCandles();
-      if (c.length) chart.updateLast(c[c.length - 1]);
+      if (needsFullRender) {
+        renderActive({ preserveRange: false });
+        needsFullRender = false;
+      } else if (c.length) {
+        chart.updateLast(c[c.length - 1]);
+      }
       updateProjection();
       renderDual();          // layar lebar: kolom dual ikut real-time (throttle internal 250ms)
     }, 250);
@@ -1546,7 +1581,7 @@ function applySnapshot(snap, isHistory) {
         });
       }
       store.meta = store.candles[store.candles.length - 1] || null;
-      if (tf === "1s") rebuild5s(k);
+      if (tf === "1s") { rebuild5s(k); needsFullRender = true; }
     }
   }
   if (snap.ticker) {
@@ -1564,11 +1599,17 @@ function applySnapshot(snap, isHistory) {
    updateGap();
    if (state.asset && state.interval) {
      const c = activeCandles();
-     const sameLen = chart && chart.candles && c.length === chart.candles.length;
-     // Realtime: update forming candle (incremental) — jangan full setData tiap snapshot/10s.
-     // Full setData hanya bila candle baru bertambah (backfill/rebuild) atau tf-switch.
-     if (sameLen) { if (c.length) chart.updateLast(c[c.length - 1]); }
-     else renderActive({ preserveRange: !chart.follow });
+     if (needsFullRender) {
+       // Full render bila rebuild5s dipanggil (1s atau tf lain berubah)
+       renderActive({ preserveRange: false });
+       needsFullRender = false;
+     } else {
+       const sameLen = chart && chart.candles && c.length === chart.candles.length;
+       // Realtime: update forming candle (incremental) — jangan full setData tiap snapshot/10s.
+       // Full setData hanya bila candle baru bertambah (backfill/rebuild) atau tf-switch.
+       if (sameLen) { if (c.length) chart.updateLast(c[c.length - 1]); }
+       else renderActive({ preserveRange: !chart.follow });
+     }
      updateProjection();
    }
    updateOrderbook(state.asset);
@@ -1684,7 +1725,7 @@ async function refreshTrends() {
 }
 
 function startData() {
-  // bulk-fill 1s cache (5h via proxy 1m → expandTo1s) — jalan sekali di awal, PARALEL dengan SSE/WS.
+  // bulk-fill 1s cache (klines 1s ASLI via proxy server) — jalan sekali di awal, PARALEL dengan SSE/WS.
   // Tanpa ini, chart 5s/30s/1m cuma punya candle sejak WS/SSE terhubung (1–4 sesi). SSE relay sukses
   // sehingga startPolling() (tempat lama bulk dipanggil) tidak pernah jalan → 1s cache tak pernah diisi bulk.
   loadHistory().catch(() => {});

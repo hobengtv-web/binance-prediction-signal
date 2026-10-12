@@ -20,6 +20,7 @@ const CFG = {
   EARLYCLOSE_MIN_CAPTURED_PCT: num(process.env.TA_EARLYCLOSE_MIN_CAPTURED_PCT, 70), // early close min % potensi
   ENTRY_MIN_REMAIN_SEC: num(process.env.TA_ENTRY_MIN_REMAIN_SEC, 120), // entry butuh sisa sesi >= ini
   ENTRY_MIN_ELAPSED_SEC: num(process.env.TA_ENTRY_MIN_ELAPSED_SEC, 0),  // entry baru setelah sesi berjalan >= ini (detik); 0 = off. Per-TF override.
+  ENTRY_MAX_ELAPSED_FRAC: num(process.env.TA_ENTRY_MAX_ELAPSED_FRAC, 0.5), // BATAS KERAS: TA tidak entry bila sesi sudah berjalan > frac×durasi (0.5 = 50%). 0 = off.
   SIMPLE: num(process.env.TA_SIMPLE, 0),                             // 1 = pakai logika TEST (entry depth+retrace, exit trailing saja)
   TRAIL_ARM_ON_LOCK: num(process.env.TA_TRAIL_ARM_ON_LOCK, 0),       // 0 = JANGAN arm hanya karena menyentuh lock (hindari exit premature)
   HYBRID: num(process.env.TA_HYBRID, 0),                             // 1 = HYBRID: boleh exit < min-hold bila capture tinggi / retrace besar
